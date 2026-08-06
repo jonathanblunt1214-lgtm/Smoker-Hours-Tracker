@@ -1,4 +1,5 @@
 import { CookLog, SmokerProfile, FuelLog } from '../types';
+import { getEffectiveSmokerSpecs, calculateGlobalBurnEfficiencyRate } from './smokerCalculations';
 
 export interface SmokerManufacturerSpec {
   brandModel: string;
@@ -202,13 +203,14 @@ export function calculateBurnEfficiencySync(
   cookLogs: CookLog[]
 ): BurnEfficiencyResult {
   const mfrSpec = getManufacturerSpecs(profile.name, profile.model, profile.smokerType || '');
+  const effectiveSpecs = getEffectiveSmokerSpecs(profile);
 
   // Calculate actual user burn rate from logged cooks
   const validCooks = cookLogs.filter((c) => c.hoursLogged > 0 && c.fuelLbsConsumed > 0);
   const totalHours = validCooks.reduce((sum, c) => sum + c.hoursLogged, 0);
   const totalFuelLbs = validCooks.reduce((sum, c) => sum + c.fuelLbsConsumed, 0);
 
-  const actualBurnRateLbsHr = totalHours > 0 ? totalFuelLbs / totalHours : mfrSpec.factoryBaselineBurnRateLbsHr;
+  const actualBurnRateLbsHr = totalHours > 0 ? totalFuelLbs / totalHours : effectiveSpecs.baselineBurnRateLbsHr;
 
   // Average outdoor ambient temp across logged cooks
   const ambientTemps: number[] = [];
@@ -233,8 +235,8 @@ export function calculateBurnEfficiencySync(
     weatherFactor -= Math.min(0.10, tempRise * 0.003); // Warm ambient reduces fuel demand slightly
   }
 
-  const weatherAdjustedBaselineBurnRateLbsHr = Number((mfrSpec.factoryBaselineBurnRateLbsHr * weatherFactor).toFixed(2));
-  const factoryBaselineBurnRateLbsHr = mfrSpec.factoryBaselineBurnRateLbsHr;
+  const factoryBaselineBurnRateLbsHr = effectiveSpecs.baselineBurnRateLbsHr;
+  const weatherAdjustedBaselineBurnRateLbsHr = Number((factoryBaselineBurnRateLbsHr * weatherFactor).toFixed(2));
 
   // Efficiency % = (Weather Adjusted Baseline / Actual Burn Rate) * 100
   // Higher percentage = burning LESS fuel than expected (higher efficiency)

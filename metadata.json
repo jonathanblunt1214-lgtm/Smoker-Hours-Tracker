@@ -3,6 +3,7 @@
   "description": "Smart BBQ smoker runtime logger, pellet fuel tracker, cook journal, and AI pitmaster assistant.",
   "requestFramePermissions": [
     "camera",
+    "microphone",
     "geolocation"
   ],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

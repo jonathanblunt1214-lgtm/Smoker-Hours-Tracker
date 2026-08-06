@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { CookLog, SmokerProfile, FuelLog, ProbeAlertConfig } from '../types';
 import { calculateBurnEfficiencySync, calculateRefillPelletUsage, getManufacturerSpecs } from '../utils/smokerManufacturerData';
 import { convertTemp, formatTemp, TempUnit } from '../utils/tempUtils';
+import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { PROTEIN_SAFETY_AND_COOK_TEMPS, ProteinGuide } from '../data/proteinTemps';
+import { sendCharGPTPushNotification, speakAlexaVoice, loadPushConfig, loadAlexaConfig } from '../utils/notificationAndAlexa';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -114,6 +116,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   const [selectedProteinCategory, setSelectedProteinCategory] = useState<string>('Beef');
   const [proteinSearchQuery, setProteinSearchQuery] = useState<string>('');
   const [isSafetyGuideOpen, setIsSafetyGuideOpen] = useState<boolean>(true);
+
+  // Universal view mode navigation state
+  const [mobileTab, setMobileTab] = useState<'all' | 'thermal' | 'consumption' | 'benchmarks' | 'guide'>('thermal');
+
   const [visibleCurves, setVisibleCurves] = useState({
     pit: true,
     meat1: true,
@@ -123,7 +129,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
     target: true,
     ambient: true,
   });
-  const [isBreakdownOpen, setIsBreakdownOpen] = useState<boolean>(true);
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState<boolean>(false);
   const [isBenchmarksOpen, setIsBenchmarksOpen] = useState<boolean>(true);
   const [benchmarkProteinFilter, setBenchmarkProteinFilter] = useState<string>('ALL');
 
@@ -226,14 +232,24 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
           const newTemp = Math.max(32, Math.min(350, p.currentTemp + delta));
           if (p.alarmEnabled) {
             if (newTemp >= p.targetTemp && p.currentTemp < p.targetTemp) {
-              setActiveAlertNotice(`🚨 ${p.name} (${p.meatName}) REACHED TARGET TEMP: ${newTemp}°F!`);
+              const msg = `🎯 ${p.name} (${p.meatName}) REACHED TARGET TEMP: ${newTemp}°F! Pull off smoker to rest.`;
+              setActiveAlertNotice(`🚨 ${msg}`);
               triggerAudioBeep();
+              sendCharGPTPushNotification(`Target Temp Reached: ${p.meatName || p.name}`, msg, `probe-${p.id}`);
+              const alexaCfg = loadAlexaConfig();
+              if (alexaCfg.enabled && alexaCfg.proactiveAnnouncementsEnabled) {
+                speakAlexaVoice(`Alexa Alert: ${AI_NAME} reports your ${p.meatName || p.name} has reached its target temperature of ${newTemp} degrees.`);
+              }
             } else if (newTemp >= p.highAlarmTemp && p.currentTemp < p.highAlarmTemp) {
-              setActiveAlertNotice(`⚠️ HIGH TEMP ALARM: ${p.name} (${p.meatName}) spiked to ${newTemp}°F!`);
+              const msg = `⚠️ HIGH TEMP ALARM: ${p.name} (${p.meatName}) spiked to ${newTemp}°F!`;
+              setActiveAlertNotice(msg);
               triggerAudioBeep();
+              sendCharGPTPushNotification(`High Temp Spike`, msg, `high-${p.id}`);
             } else if (newTemp <= p.lowAlarmTemp && p.currentTemp > p.lowAlarmTemp) {
-              setActiveAlertNotice(`❄️ LOW TEMP ALARM: ${p.name} (${p.meatName}) dropped to ${newTemp}°F!`);
+              const msg = `❄️ LOW TEMP ALARM: ${p.name} (${p.meatName}) dropped to ${newTemp}°F!`;
+              setActiveAlertNotice(msg);
               triggerAudioBeep();
+              sendCharGPTPushNotification(`Low Temp Drop`, msg, `low-${p.id}`);
             }
           }
           return { ...p, currentTemp: newTemp };
@@ -437,10 +453,124 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   };
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6 sm:space-y-8 pb-12">
       
+      {/* DASHBOARD HEADER & UNIVERSAL VIEW MODE TABS */}
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center space-x-2">
+              <TrendingUp className="w-5 h-5 text-orange-400" />
+              <h1 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                Pitmaster Analytics & Trends
+              </h1>
+            </div>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Comprehensive thermal curves, fuel burn rate efficiency, quality benchmarks, and meat safety guides.
+            </p>
+          </div>
+
+          {/* Linked Smoker Badge */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="bg-orange-500/15 text-orange-300 border border-orange-500/30 px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 font-mono">
+              <Flame className="w-3.5 h-3.5 text-orange-400" />
+              <span>{profile.name || 'Pit Boss Copperhead'}</span>
+              <span className="text-zinc-400">({profile.model || profile.smokerType})</span>
+            </span>
+          </div>
+        </div>
+
+        {/* View Mode Navigation: Smartphone Dropdown vs Desktop Tabs */}
+        
+        {/* Smartphone Dropdown Select (No Side-Scrolling) */}
+        <div className="sm:hidden pt-2 border-t border-[#2a2a2a]">
+          <label htmlFor="analytics-mobile-view-select" className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1.5 font-mono">
+            Select Analytics Section
+          </label>
+          <div className="relative">
+            <select
+              id="analytics-mobile-view-select"
+              value={mobileTab}
+              onChange={(e) => setMobileTab(e.target.value as any)}
+              className="w-full bg-[#121212] border border-orange-500/40 text-white font-bold text-xs rounded-xl px-3.5 py-2.5 pr-10 appearance-none cursor-pointer focus:outline-none focus:border-orange-500 shadow-lg"
+            >
+              <option value="thermal">🔥 Thermal Curves & Pit Temps</option>
+              <option value="consumption">📊 Fuel Burn & Smoker Runtime</option>
+              <option value="benchmarks">🏆 Quality Ratings & Pitmaster Benchmarks</option>
+              <option value="guide">🥩 Meat Safety & Target Temps Guide</option>
+              <option value="all">🌐 All Analytics Sections</option>
+            </select>
+            <ChevronDown className="w-4 h-4 text-orange-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Desktop View Mode Navigation Tabs */}
+        <div className="hidden sm:flex items-center gap-1.5 pt-2 border-t border-[#2a2a2a]">
+          <button
+            type="button"
+            onClick={() => setMobileTab('thermal')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer border ${
+              mobileTab === 'thermal'
+                ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-500/20'
+                : 'bg-[#121212] text-zinc-300 border-[#2a2a2a] hover:bg-[#222]'
+            }`}
+          >
+            <Thermometer className="w-3.5 h-3.5 text-orange-400" />
+            <span>Thermal Curves</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab('consumption')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer border ${
+              mobileTab === 'consumption'
+                ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-500/20'
+                : 'bg-[#121212] text-zinc-300 border-[#2a2a2a] hover:bg-[#222]'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-amber-400" />
+            <span>Fuel & Runtime</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab('benchmarks')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer border ${
+              mobileTab === 'benchmarks'
+                ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-500/20'
+                : 'bg-[#121212] text-zinc-300 border-[#2a2a2a] hover:bg-[#222]'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5 text-yellow-400" />
+            <span>Quality Scores</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab('guide')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer border ${
+              mobileTab === 'guide'
+                ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-500/20'
+                : 'bg-[#121212] text-zinc-300 border-[#2a2a2a] hover:bg-[#222]'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Meat Temp Guide</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileTab('all')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer border ${
+              mobileTab === 'all'
+                ? 'bg-orange-500 text-white border-orange-400 shadow-lg shadow-orange-500/20'
+                : 'bg-[#121212] text-zinc-400 border-[#2a2a2a] hover:bg-[#222]'
+            }`}
+          >
+            <span>🌐 All Sections</span>
+          </button>
+        </div>
+      </div>
+
       {/* SECTION 1: Thermal Curve Analytics & Cook Temperature Plot */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-6 shadow-xl">
+      {(mobileTab === 'all' || mobileTab === 'thermal') && (
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-3.5 sm:p-6 shadow-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#2a2a2a]">
           <div>
             <div className="flex items-center space-x-2">
@@ -483,90 +613,107 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         </div>
 
         {activeCook && (
-          <div className="mt-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="mt-4 sm:mt-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
             
             {/* Thermal Line Chart Container */}
-            <div className="lg:col-span-3 bg-[#121212] p-4 sm:p-5 rounded-xl border border-[#2a2a2a] flex flex-col justify-between space-y-4">
+            <div className="lg:col-span-3 bg-[#121212] p-3 sm:p-5 rounded-xl border border-[#2a2a2a] flex flex-col justify-between space-y-4">
               {/* Thermal Summary Metrics & Interactive Line Curve Toggles */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#2a2a2a] pb-3">
                 {/* Metric Summary Chips */}
-                <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2.5 py-1 rounded-lg flex items-center space-x-1.5">
-                    <span className="text-zinc-400">Meat Rise:</span>
-                    <span className="text-red-400 font-bold">{startMeatTemp}°F → {finalMeatTemp}°F</span>
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs font-mono">
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                    <span className="text-zinc-400 text-[11px]">Rise:</span>
+                    <span className="text-red-400 font-bold text-[11px] sm:text-xs">{startMeatTemp}°F → {finalMeatTemp}°F</span>
                     <span className="text-emerald-400 font-bold text-[10px]">(+{meatTempRise}°F)</span>
                   </div>
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2.5 py-1 rounded-lg flex items-center space-x-1.5">
-                    <span className="text-zinc-400">Avg Pit:</span>
-                    <span className="text-orange-400 font-bold">{avgPitTemp}°F</span>
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                    <span className="text-zinc-400 text-[11px]">Avg Pit:</span>
+                    <span className="text-orange-400 font-bold text-[11px] sm:text-xs">{avgPitTemp}°F</span>
                   </div>
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2.5 py-1 rounded-lg flex items-center space-x-1.5">
-                    <span className="text-zinc-400">Peak Pit:</span>
-                    <span className="text-amber-400 font-bold">{maxPitTemp}°F</span>
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                    <span className="text-zinc-400 text-[11px]">Peak Pit:</span>
+                    <span className="text-amber-400 font-bold text-[11px] sm:text-xs">{maxPitTemp}°F</span>
                   </div>
                 </div>
 
-                {/* Line Curve Toggle Buttons for up to 4 Meats & Probes */}
-                <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-sans">
+                {/* Mobile Preset & Line Curve Toggle Buttons */}
+                <div className="flex items-center gap-1.5 text-[11px] font-sans overflow-x-auto pb-1 no-scrollbar max-w-full">
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCurves({ pit: true, meat1: true, meat2: false, meat3: false, meat4: false, target: true, ambient: false })}
+                    className="px-2 py-1 bg-orange-500/20 text-orange-300 border border-orange-500/40 font-bold rounded-md whitespace-nowrap cursor-pointer text-[10px] shrink-0"
+                    title="Focus on Pit & Main Probe for clean view on smartphones"
+                  >
+                    ⚡ Key Curves
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleCurves({ pit: true, meat1: true, meat2: true, meat3: true, meat4: true, target: true, ambient: true })}
+                    className="px-2 py-1 bg-[#1a1a1a] text-zinc-300 border border-[#2a2a2a] font-bold rounded-md whitespace-nowrap cursor-pointer text-[10px] shrink-0"
+                    title="Show all 4 probes + ambient"
+                  >
+                    📊 All
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, pit: !prev.pit }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.pit
                         ? 'bg-orange-500/20 text-orange-400 border-orange-500/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
                     }`}
                   >
-                    🔥 Pit Temp
+                    🔥 Pit
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, meat1: !prev.meat1 }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.meat1
                         ? 'bg-red-500/20 text-red-400 border-red-500/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
                     }`}
                   >
-                    🥩 Probe 1 (Flat)
+                    🥩 P1
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, meat2: !prev.meat2 }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.meat2
                         ? 'bg-purple-500/20 text-purple-400 border-purple-500/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
                     }`}
                   >
-                    🍖 Probe 2 (Point)
+                    🍖 P2
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, meat3: !prev.meat3 }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.meat3
                         ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
                     }`}
                   >
-                    🍗 Probe 3 (Pork)
+                    🍗 P3
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, meat4: !prev.meat4 }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.meat4
                         ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
                     }`}
                   >
-                    🥩 Probe 4 (Ribs)
+                    🥩 P4
                   </button>
                   <button
                     type="button"
                     onClick={() => setVisibleCurves((prev) => ({ ...prev, target: !prev.target }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer whitespace-nowrap text-[10px] sm:text-[11px] shrink-0 ${
                       visibleCurves.target
                         ? 'bg-zinc-700/30 text-zinc-300 border-zinc-600/40 font-bold'
                         : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
@@ -574,22 +721,11 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                   >
                     🎯 Target
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setVisibleCurves((prev) => ({ ...prev, ambient: !prev.ambient }))}
-                    className={`px-2 py-1 rounded-md border transition-all cursor-pointer ${
-                      visibleCurves.ambient
-                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40 font-bold'
-                        : 'bg-[#1a1a1a] text-zinc-500 border-[#2a2a2a] line-through'
-                    }`}
-                  >
-                    🌤️ Ambient
-                  </button>
                 </div>
               </div>
 
               {/* Main Refined Line Chart */}
-              <div className="h-80 w-full">
+              <div className="h-64 sm:h-80 w-full">
                 {(() => {
                   const chartReadings = (activeCook.temperatureReadings || []).map((r) => {
                     const m2 = r.meatTemp2 ?? Math.max(32, r.meatTemp - 5);
@@ -618,7 +754,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
                   return (
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartReadings} margin={{ top: 15, right: 25, left: 0, bottom: 20 }}>
+                      <ComposedChart data={chartReadings} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                         <defs>
                           <linearGradient id="pitAreaGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#f97316" stopOpacity={0.25} />
@@ -634,19 +770,20 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                         <XAxis
                           dataKey="time"
                           stroke="#a0a0a0"
-                          fontSize={11}
+                          fontSize={10}
                           tickLine={false}
-                          label={{ value: 'Cooking Elapsed Time (HH:MM)', position: 'insideBottom', offset: -12, fill: '#71717a', fontSize: 11 }}
+                          minTickGap={20}
                         />
                         <YAxis
                           stroke="#a0a0a0"
-                          fontSize={11}
+                          fontSize={10}
                           domain={[0, (dataMax: number) => Math.max(activeUnit === 'C' ? 140 : 275, dataMax + 20)]}
                           unit={`°${activeUnit}`}
                           tickLine={false}
+                          width={36}
                         />
                         <Tooltip content={<CustomThermalTooltip tempUnit={activeUnit} />} />
-                        <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '12px', color: '#a0a0a0' }} />
+                        <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: '11px', color: '#a0a0a0' }} />
 
                         {/* Reference Line for Target Meat Finish Goal */}
                         <ReferenceLine
@@ -655,7 +792,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                           strokeDasharray="4 4"
                           strokeOpacity={0.6}
                           label={{
-                            value: `Target Finish (${formatTemp(203, activeUnit)})`,
+                            value: `Goal (${formatTemp(203, activeUnit)})`,
                             fill: '#ef4444',
                             fontSize: 10,
                             position: 'insideTopRight',
@@ -671,10 +808,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                       <Line
                         type="monotone"
                         dataKey="targetTemp"
-                        name="Target Pit Temp"
+                        name="Target Pit"
                         stroke="#9ca3af"
                         strokeDasharray="5 5"
-                        strokeWidth={2}
+                        strokeWidth={1.5}
                         dot={false}
                       />
                     )}
@@ -682,66 +819,66 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                       <Line
                         type="monotone"
                         dataKey="cookingTemp"
-                        name="Cooking Pit Temp"
+                        name="Cooking Pit"
                         stroke="#f97316"
-                        strokeWidth={3}
-                        activeDot={{ r: 8, stroke: '#fff', strokeWidth: 2 }}
-                        dot={{ r: 4, fill: '#f97316' }}
+                        strokeWidth={2.5}
+                        activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
+                        dot={{ r: 2.5, fill: '#f97316' }}
                       />
                     )}
                     {visibleCurves.meat1 && (
                       <Line
                         type="monotone"
                         dataKey="meatTemp"
-                        name="Probe 1: Flat"
+                        name="Probe 1 (Flat)"
                         stroke="#ef4444"
-                        strokeWidth={3}
-                        activeDot={{ r: 7, stroke: '#fff', strokeWidth: 2 }}
-                        dot={{ r: 4, fill: '#ef4444' }}
+                        strokeWidth={2.5}
+                        activeDot={{ r: 6, stroke: '#fff', strokeWidth: 2 }}
+                        dot={{ r: 2.5, fill: '#ef4444' }}
                       />
                     )}
                     {visibleCurves.meat2 && (
                       <Line
                         type="monotone"
                         dataKey="meatTemp2"
-                        name="Probe 2: Point"
+                        name="Probe 2 (Point)"
                         stroke="#a855f7"
-                        strokeWidth={2.5}
-                        activeDot={{ r: 7 }}
-                        dot={{ r: 4, fill: '#a855f7' }}
+                        strokeWidth={2}
+                        activeDot={{ r: 6 }}
+                        dot={{ r: 2, fill: '#a855f7' }}
                       />
                     )}
                     {visibleCurves.meat3 && (
                       <Line
                         type="monotone"
                         dataKey="meatTemp3"
-                        name="Probe 3: Pork"
+                        name="Probe 3 (Pork)"
                         stroke="#f59e0b"
-                        strokeWidth={2.5}
-                        activeDot={{ r: 7 }}
-                        dot={{ r: 4, fill: '#f59e0b' }}
+                        strokeWidth={2}
+                        activeDot={{ r: 6 }}
+                        dot={{ r: 2, fill: '#f59e0b' }}
                       />
                     )}
                     {visibleCurves.meat4 && (
                       <Line
                         type="monotone"
                         dataKey="meatTemp4"
-                        name="Probe 4: Ribs"
+                        name="Probe 4 (Ribs)"
                         stroke="#10b981"
-                        strokeWidth={2.5}
-                        activeDot={{ r: 7 }}
-                        dot={{ r: 4, fill: '#10b981' }}
+                        strokeWidth={2}
+                        activeDot={{ r: 6 }}
+                        dot={{ r: 2, fill: '#10b981' }}
                       />
                     )}
                     {visibleCurves.ambient && (
                       <Line
                         type="monotone"
                         dataKey="ambientTemp"
-                        name="Ambient Temp"
+                        name="Ambient"
                         stroke="#38bdf8"
-                        strokeWidth={2}
-                        activeDot={{ r: 6 }}
-                        dot={{ r: 3, fill: '#38bdf8' }}
+                        strokeWidth={1.5}
+                        activeDot={{ r: 5 }}
+                        dot={{ r: 2, fill: '#38bdf8' }}
                       />
                     )}
                   </ComposedChart>
@@ -1172,10 +1309,13 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
           </div>
         )}
+      </div>
+      )}
 
-        {/* MEAT SAFETY & BBQ COOK TARGET TEMPS REFERENCE GUIDE */}
-        <div className="mt-6 pt-5 border-t border-[#2a2a2a]">
-          <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-4 sm:p-5 shadow-lg">
+      {/* MEAT SAFETY & BBQ COOK TARGET TEMPS REFERENCE GUIDE */}
+      {(mobileTab === 'all' || mobileTab === 'guide') && (
+      <div className="pt-2">
+        <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-4 sm:p-5 shadow-lg">
             {/* Collapsible Header */}
             <div className="flex items-center justify-between">
               <button
@@ -1429,9 +1569,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             )}
           </div>
         </div>
-      </div>
+      )}
 
       {/* SECTION 2: Daily Smoker Hours & Consumption Trends Chart */}
+      {(mobileTab === 'all' || mobileTab === 'consumption') && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Consumption Bar & Line Chart (2 Cols) */}
@@ -1525,9 +1666,11 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         </div>
 
       </div>
+      )}
 
       {/* SECTION 3: Quality Ratings & Pitmaster Metrics */}
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 shadow-xl space-y-6">
+      {(mobileTab === 'all' || mobileTab === 'benchmarks') && (
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-6 shadow-xl space-y-6">
         
         {/* Section Header with Overall Mastery Index Grade & Collapse Toggle */}
         <div
@@ -1874,8 +2017,8 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         </div>
       </div>
       )}
-
       </div>
+      )}
 
     </div>
   );

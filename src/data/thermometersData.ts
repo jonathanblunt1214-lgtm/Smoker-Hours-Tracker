@@ -16,15 +16,65 @@ export interface ThermometerDeviceDef {
   description: string;
   maxTempF: number;
   defaultTargetTempF: number;
+  latestFirmware?: string;
+  installedFirmware?: string;
+}
+
+export function getLatestSupportedFirmware(device?: ThermometerDeviceDef | null): string {
+  if (!device) return 'v3.2.0-BLE';
+  if (device.latestFirmware) return device.latestFirmware;
+  
+  switch (device.id) {
+    case 'meat-minder-pro':
+      return 'v3.2.0-BLE';
+    case 'meater-plus':
+      return 'v2.8.5-MEATER';
+    case 'thermoworks-signals':
+      return 'v4.3.0-TW';
+    case 'inkbird-int-11p':
+      return 'v2.2.1-INK';
+    case 'combustion-inc':
+      return 'v1.9.4-CINC';
+    case 'thermopro-tempspike':
+      return 'v3.0.2-TSP';
+    case 'typhur-sync':
+      return 'v2.6.0-TYP';
+    case 'weber-igrill-2':
+      return 'v2.1.0-WEB';
+    default: {
+      const cleanBrand = device.brand.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 4) || 'BLE';
+      return `v2.5.0-${cleanBrand}`;
+    }
+  }
+}
+
+export function getInitialInstalledFirmware(device?: ThermometerDeviceDef | null): string {
+  if (!device) return 'v1.8.2';
+  if (device.installedFirmware) return device.installedFirmware;
+  
+  switch (device.id) {
+    case 'meat-minder-pro': return 'v2.1.0-BLE';
+    case 'meater-plus': return 'v1.9.2-MEATER';
+    case 'thermoworks-signals': return 'v3.1.0-TW';
+    case 'inkbird-int-11p': return 'v1.5.0-INK';
+    case 'combustion-inc': return 'v1.2.0-CINC';
+    case 'thermopro-tempspike': return 'v2.1.0-TSP';
+    case 'typhur-sync': return 'v1.8.0-TYP';
+    case 'weber-igrill-2': return 'v1.4.0-WEB';
+    default: {
+      const cleanBrand = device.brand.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 4) || 'BLE';
+      return `v1.8.2-${cleanBrand}`;
+    }
+  }
 }
 
 export const TOP_25_THERMOMETERS: ThermometerDeviceDef[] = [
   {
     id: 'meat-minder-pro',
     name: 'Meat Minder Pro (Wireless Dual-Probe)',
-    brand: 'Meat Minder',
+    brand: 'Meat Minder Pro',
     probeCount: 2,
-    wirelessType: 'Bluetooth 5.3',
+    wirelessType: 'Bluetooth BLE',
     rangeFeet: 500,
     isFeatured: true,
     serviceUUIDs: ['0000181a-0000-1000-8000-00805f9b34fb', '00001809-0000-1000-8000-00805f9b34fb'],
@@ -33,8 +83,8 @@ export const TOP_25_THERMOMETERS: ThermometerDeviceDef[] = [
       pitTemp: '00002a6f-0000-1000-8000-00805f9b34fb',
       battery: '00002a19-0000-1000-8000-00805f9b34fb',
     },
-    features: ['Ultra-Precision Core & Ambient Dual Sensors', 'High Temp Ceramic Handle (1000°F)', 'Smart Thermal Stall Predictor', 'Fast 1-sec Temp Refresh'],
-    description: 'Flagship competition wireless probe with real-time pit ambient and internal core temperature tracking.',
+    features: ['Bluetooth BLE Hardware Probe Protocol', 'Ultra-Precision Core & Ambient Dual Sensors', 'High Temp Ceramic Handle (1000°F)', 'Smart Thermal Stall Predictor', 'Fast 1-sec Temp Refresh'],
+    description: 'Flagship competition wireless probe operating on the native Bluetooth BLE Hardware Probe Protocol with real-time ambient pit and internal core temperature streaming.',
     maxTempF: 572,
     defaultTargetTempF: 203,
   },

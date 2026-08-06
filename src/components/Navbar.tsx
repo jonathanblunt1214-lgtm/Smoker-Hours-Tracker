@@ -1,5 +1,6 @@
 import React from 'react';
-import { Flame, BarChart3, BookOpen, PlusCircle, Wrench, Sparkles, Clock, Settings, Calendar } from 'lucide-react';
+import { Flame, BarChart3, BookOpen, PlusCircle, Wrench, Sparkles, Clock, Settings, Calendar, Database, Brain, Crown } from 'lucide-react';
+import { isMasterAdmin } from '../utils/adminAuth';
 
 interface NavbarProps {
   activeTab: 'analytics' | 'logs' | 'planner' | 'new-cook' | 'maintenance' | 'ai-pitmaster';
@@ -7,8 +8,11 @@ interface NavbarProps {
   smokerHours: number;
   smokerName: string;
   tempUnit: 'F' | 'C';
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: 'appearance' | 'alerts' | 'cloud' | 'data') => void;
   isDriveConnected?: boolean;
+  isOnline?: boolean;
+  currentUserEmail?: string | null;
+  onOpenMasterAdmin?: () => void;
 }
 
 const SmokeStackIcon: React.FC<{ className?: string }> = ({ className = "h-5 w-5" }) => (
@@ -58,10 +62,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   tempUnit,
   onOpenSettings,
   isDriveConnected = false,
+  currentUserEmail,
+  onOpenMasterAdmin,
 }) => {
+  const isAdmin = isMasterAdmin(currentUserEmail);
   return (
-    <header className="sticky top-0 z-40 bg-[#161616]/95 backdrop-blur-md border-b border-[#2a2a2a] text-[#e0e0e0] shadow-xl">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 md:px-6">
+    <header className="sticky top-0 z-40 bg-[#161616] border-b border-[#2a2a2a] text-[#e0e0e0] shadow-xl">
+      <div className="w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto px-2 sm:px-4 md:px-6">
         <div className="flex items-center justify-between h-14">
           {/* Brand Logo & Smoker Name */}
           <div className="flex items-center space-x-2.5 shrink-0">
@@ -149,13 +156,35 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'text-purple-400 hover:bg-[#222222] hover:text-purple-300'
               }`}
             >
-              <Sparkles className="h-3.5 w-3.5 text-purple-400" />
-              <span>AI Pitmaster</span>
+              <Brain className="h-3.5 w-3.5 text-purple-400" />
+              <span>CharGPT</span>
             </button>
           </nav>
 
           {/* Consolidated Right Controls Group */}
           <div className="flex items-center space-x-2">
+            {(isAdmin || onOpenMasterAdmin) && (
+              <button
+                type="button"
+                onClick={onOpenMasterAdmin}
+                className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gradient-to-r from-purple-950/80 via-amber-950/80 to-orange-950/80 hover:from-purple-900 hover:to-orange-900 border border-purple-500/40 hover:border-amber-400 rounded-xl text-xs font-extrabold text-amber-300 transition-all cursor-pointer active:scale-95 shadow-md shadow-purple-950/30"
+                title="Master Admin & Developer Control Dashboard (jonathanblunt1214@gmail.com)"
+              >
+                <Crown className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+                <span className="hidden sm:inline text-[11px] font-mono">Master Admin</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => onOpenSettings('data')}
+              className="hidden sm:inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-[#222222] hover:bg-[#2a2a2a] border border-[#2a2a2a] hover:border-orange-500/40 rounded-xl text-xs font-semibold text-zinc-300 hover:text-white transition-all cursor-pointer active:scale-95"
+              title="Manage User Accounts & Data Backups (Local, OneDrive, Google Drive)"
+            >
+              <Database className="h-3.5 w-3.5 text-blue-400" />
+              <span className="hidden lg:inline text-[11px]">Data & Backup</span>
+            </button>
+
             <div className="flex items-center bg-[#222222] border border-[#2a2a2a] rounded-xl p-0.5 shadow-inner">
               <div className="flex items-center space-x-1 px-2 py-1 text-zinc-300 border-r border-[#2a2a2a]">
                 <Clock className="h-3.5 w-3.5 text-orange-400 shrink-0" />
@@ -164,7 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <button
                 type="button"
-                onClick={onOpenSettings}
+                onClick={() => onOpenSettings('appearance')}
                 className="flex items-center space-x-1 px-2.5 py-1 hover:bg-[#2a2a2a] rounded-r-lg text-xs font-bold text-zinc-200 hover:text-white transition-all cursor-pointer active:scale-95"
                 title="Pitmaster Settings Menu"
               >
@@ -232,8 +261,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             activeTab === 'ai-pitmaster' ? 'bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40' : 'text-purple-400 hover:text-purple-300'
           }`}
         >
-          <Sparkles className="h-4 w-4 mb-0.5" />
-          <span>AI Pit</span>
+          <Brain className="h-4 w-4 mb-0.5" />
+          <span>CharGPT</span>
         </button>
       </div>
     </header>

@@ -1,4 +1,5 @@
 import { RecipeSuggestion } from '../data/recipeSuggestions';
+import { AI_PITMASTER_NAME } from '../constants/appName';
 import { ProteinType } from '../types';
 
 export function parseWebSearchResultToRecipe(webText: string, searchCut: string): RecipeSuggestion {
@@ -108,7 +109,7 @@ export function parseWebSearchResultToRecipe(webText: string, searchCut: string)
     proTip: `Online Research Advice: Maintain steady pit ambient temp and probe for tender texture rather than time alone.`,
     prepTimeMinutes: 20,
     flavorProfile: `Smoky ${formattedTitle} with ${recommendedWood}`,
-    tags: ['🌐 Web Search Recipe', formattedTitle, 'AI Pitmaster Grounded'],
+    tags: ['🌐 Web Search Recipe', formattedTitle, `${AI_PITMASTER_NAME} Grounded`],
   };
 }
 

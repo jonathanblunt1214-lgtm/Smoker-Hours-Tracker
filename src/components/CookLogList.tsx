@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { CookLog, ProteinType } from '../types';
+import { CookLog, ProteinType, SmokerProfile } from '../types';
 import { RecipeSuggestion } from '../data/recipeSuggestions';
 import { RecipeSuggestions } from './RecipeSuggestions';
-import { Search, Filter, Calendar, Clock, Flame, FileText, Trash2, PlusCircle, Star, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Search, Filter, Calendar, Clock, Flame, FileText, Trash2, PlusCircle, Star, CheckCircle2, ChevronDown, ChevronUp, Award } from 'lucide-react';
 
 interface CookLogListProps {
   cookLogs: CookLog[];
+  profile?: SmokerProfile;
   onSelectCook: (cook: CookLog) => void;
+  onOpenCertificate?: (cook: CookLog) => void;
   onDeleteCook: (id: string) => void;
   onNewCookClick: () => void;
   onStartCookFromRecipe?: (recipe: RecipeSuggestion) => void;
@@ -15,7 +17,9 @@ interface CookLogListProps {
 
 export const CookLogList: React.FC<CookLogListProps> = ({
   cookLogs,
+  profile,
   onSelectCook,
+  onOpenCertificate,
   onDeleteCook,
   onNewCookClick,
   onStartCookFromRecipe,
@@ -304,15 +308,26 @@ export const CookLogList: React.FC<CookLogListProps> = ({
 
                       {/* Bottom Card Buttons */}
                       {!isCollapsed && (
-                        <div className="mt-5 pt-3 border-t border-[#2a2a2a] flex items-center justify-between gap-2">
+                        <div className="mt-5 pt-3 border-t border-[#2a2a2a] flex flex-wrap items-center justify-between gap-2">
                           <button
                             type="button"
                             onClick={() => onSelectCook(log)}
                             className="flex-1 py-2 px-3 bg-[#1a1a1a] hover:bg-[#2a2a2a] text-orange-400 rounded-xl font-semibold text-xs flex items-center justify-center space-x-1.5 transition-all cursor-pointer border border-[#2a2a2a]"
                           >
                             <FileText className="w-3.5 h-3.5" />
-                            <span>View Smoker Log Sheet</span>
+                            <span>Journal Sheet</span>
                           </button>
+
+                          {onOpenCertificate && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenCertificate(log)}
+                              className="flex-1 py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-xl font-extrabold text-xs flex items-center justify-center space-x-1.5 transition-all cursor-pointer border border-amber-500/30"
+                            >
+                              <Award className="w-3.5 h-3.5 text-amber-400" />
+                              <span>🏆 Certificate Badge</span>
+                            </button>
+                          )}
 
                           <button
                             type="button"
@@ -338,6 +353,7 @@ export const CookLogList: React.FC<CookLogListProps> = ({
       {onStartCookFromRecipe && (
         <RecipeSuggestions
           cookLogs={cookLogs}
+          profile={profile}
           onStartCookFromRecipe={onStartCookFromRecipe}
           onAskAIPitmaster={onAskAIPitmaster}
           isCollapsible={true}

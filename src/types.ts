@@ -26,6 +26,81 @@ export interface SmokerMaintenanceTask {
   description: string;
 }
 
+export type SmokerModCategory =
+  | 'Thermal & Insulation'
+  | 'Seals & Airflow'
+  | 'Electronics & Controllers'
+  | 'Capacity & Racks'
+  | 'Heat Mass & Distribution'
+  | 'Combustion & Fuel';
+
+export interface SmokerModItem {
+  id: string;
+  name: string;
+  category: SmokerModCategory;
+  targetSmokerType: 'manufactured' | 'custom' | 'both';
+  applicableSmokerTypes?: string[]; // e.g. ['Pellet Smoker / Grill', 'Reverse Flow Offset', 'Insulated Cabinet Smoker']
+  description: string;
+  burnRateMultiplier: number; // e.g., 0.82 (18% reduction in fuel burn rate)
+  thermalEfficiencyBoost: number; // e.g., +0.18 multiplier
+  capacityAddLbs: number; // e.g., +18 lbs hopper or charcoal expansion
+  cookingAreaAddSqIn: number; // e.g., +350 sq in upper shelf
+  tempStabilityDeltaDegrees: number; // e.g., -8°F fluctuation (improves stability)
+  heatLossReductionPct: number; // e.g., 25% reduction in heat loss
+  estimatedCostRange: string; // e.g., "$30 - $65"
+  popularBrandsOrBuilders?: string[]; // e.g., ["Traeger", "Yoder", "Pit Boss", "Camp Chef", "Custom Offsets"]
+  difficultyLevel: 'Easy Tap/On' | 'Moderate Bolt-On' | 'Advanced Fabrication';
+  benefitsList: string[];
+}
+
+export interface AppliedSmokerMod {
+  modId: string;
+  enabled: boolean;
+  notes?: string;
+  installedDate?: string;
+  customCostPaid?: number;
+}
+
+export interface CustomSmokerSpec {
+  id: string;
+  name: string;
+  builderName: string;
+  smokerType: string;
+  fuelType: 'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas';
+  metalGauge: string;
+  chamberVolumeSqIn: number;
+  hopperCapacityLbs: number;
+  baselineBurnRateLbsHr: number;
+  draftType: string;
+  notes?: string;
+  createdAt: string;
+  pitmasterAlias?: string;
+  isCommunityShared?: boolean;
+  appliedModIds?: string[];
+  appliedMods?: AppliedSmokerMod[];
+}
+
+export interface ManufacturerSmokerSpec {
+  id: string;
+  brand: string;
+  model: string;
+  category: string;
+  fuelType: 'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas';
+  factoryBaselineBurnRateLbsHr: number;
+  factoryHighHeatBurnRateLbsHr: number;
+  hopperCapacityLbs: number;
+  cookingAreaSqIn: number;
+  insulationType: string;
+  thermalEfficiencyRating: 'Extreme' | 'High' | 'Standard' | 'Moderate';
+  controllerType?: string;
+  notes?: string;
+  createdAt: string;
+  pitmasterAlias?: string;
+  isVerifiedManufacturerData?: boolean;
+  appliedModIds?: string[];
+  appliedMods?: AppliedSmokerMod[];
+}
+
 export interface SmokerProfile {
   id: string;
   name: string;
@@ -38,6 +113,60 @@ export interface SmokerProfile {
   pelletHopperCapacityLbs: number;
   lastRefillHours?: number; // Runtime hours at last hopper refill
   maintenanceTasks: SmokerMaintenanceTask[];
+  isCustomBuilt?: boolean;
+  customSpecs?: CustomSmokerSpec;
+  manufacturerSpecs?: ManufacturerSmokerSpec;
+  appliedModIds?: string[];
+  appliedMods?: AppliedSmokerMod[];
+  activeBlendComponents?: FuelBlendComponent[];
+}
+
+export interface LowPowerModeSettings {
+  enabled: boolean;
+  reduceAnimations: boolean;
+  slowTelemetryPolling: boolean;
+  disableGpuBlurEffects: boolean;
+  dimBrightnessOnBattery?: boolean;
+}
+
+export interface RetailerFuelItem {
+  id: string;
+  retailerName: 'Home Depot' | "Lowe's" | 'Tractor Supply' | 'Amazon' | 'BBQGuys' | 'Walmart' | 'Academy Sports';
+  productTitle: string;
+  brand: string;
+  category: 'Wood Pellets' | 'Charcoal Pellets' | 'Lump Charcoal' | 'Wood Chunks / Splits';
+  bagWeightLbs: number;
+  bagPrice: number;
+  costPerLb: number;
+  isAmazonBestSeller?: boolean;
+  rating?: number;
+  reviewCount?: number;
+  retailerUrl?: string;
+  inStock?: boolean;
+  lastUpdatedDate: string;
+}
+
+export interface CustomFuelBlendPreset {
+  id: string;
+  title: string;
+  brand?: string;
+  description: string;
+  components: FuelBlendComponent[];
+  btuPerLb?: number;
+  efficiencyRating?: number;
+  costPerLb?: number;
+  createdAt?: string;
+}
+
+export interface FuelBlendComponent {
+  id?: string;
+  species?: string;
+  woodType?: string;
+  percentage: number;
+  costPerLb?: number;
+  btuPerLb?: number;
+  moisturePercent?: number;
+  smokeProfile?: string;
 }
 
 export interface FuelLog {
@@ -49,6 +178,12 @@ export interface FuelLog {
   costPerLb: number;
   pricePaid?: number;
   notes?: string;
+  // Custom Fuel Blend properties
+  isBlend?: boolean;
+  blendComponents?: FuelBlendComponent[];
+  calculatedBtuPerLb?: number;
+  calculatedEfficiencyRating?: number; // e.g. 92.5 (% efficiency)
+  estimatedRunTimeHoursPer10Lbs?: number; // e.g. 8.8 hrs
 }
 
 export interface ProbeAlertConfig {
@@ -86,6 +221,8 @@ export interface CookLog {
   smokerType: SmokerType | string;
   proteinType: ProteinType;
   proteinCut: string;
+  meatWeightLbs?: number;
+  meatWeightKg?: number;
   startingSmokerHours: number;
   hoursLogged: number;
   endingSmokerHours: number;
@@ -126,3 +263,131 @@ export interface SmokerStats {
   lbsFuelPerHour: number;
   successRatePercent: number;
 }
+
+export interface CharGPTRule {
+  id: string;
+  category: 'preference' | 'technique' | 'rub_recipe' | 'wood_pairing' | 'smoker_quirk' | 'general';
+  title: string;
+  detail: string;
+  source: 'user_taught' | 'auto_analyzed' | 'cook_log_insight';
+  createdAt: string;
+  confidenceScore?: number;
+}
+
+export interface CharGPTMemory {
+  totalInteractions: number;
+  totalLogsAnalyzed: number;
+  learnedRules: CharGPTRule[];
+  favoriteProteins: string[];
+  preferredWoodTypes: string[];
+  topTechniques: string[];
+  lastEvolvedAt?: string;
+}
+
+export interface UserAchievement {
+  id: string;
+  title: string;
+  description: string;
+  iconName: string;
+  unlocked: boolean;
+  unlockedAt?: string;
+}
+
+export interface UserPitmasterAccount {
+  name: string;
+  title: string;
+  email?: string;
+  xp: number;
+  level: number;
+  levelTitle: string;
+  nextLevelXp: number;
+  achievements: UserAchievement[];
+  createdAt: string;
+  linkedSmokerId?: string;
+  linkedSmokerName?: string;
+  linkedSmokerModel?: string;
+  linkedSmokerType?: string;
+  linkedSmokerFuelType?: string;
+  linkedSmokerHopperCapacityLbs?: number;
+  linkedSmokerTotalHours?: number;
+}
+
+export interface GranularDataSharingPermissions {
+  shareProteinAndCuts: boolean;        // Meat cuts, primal origins, protein categories
+  shareMeatWeightAndDimensions: boolean; // Meat weight (lbs/kg), thickness, bone profile
+  shareSmokerSpecsAndMods: boolean;     // Smoker model, custom mods, metal gauge, capacity
+  shareFuelAndWoodBlends: boolean;      // Wood species/blend, pellet burn rates, fuel costs
+  shareThermalTempCurves: boolean;      // Pit set temps, internal probe readings, stall duration
+  shareRatingsAndFlavorScores: boolean;  // Smoke ring, bark rating, tenderness, overall score
+  shareWeatherAndLocation: boolean;     // Zipcode, outdoor weather conditions
+  shareCustomRubRecipes: boolean;       // Rub seasonings, glazes, mop sauces, notes
+  shareCookPhotos: boolean;             // Meat scan photos & cook log photos
+}
+
+export interface FederatedLearningConfig {
+  enabled: boolean;
+  anonymizeData: boolean;
+  autoSyncContributions: boolean;
+  contributedCount: number;
+  lastSyncedAt?: string;
+  granularSharing?: GranularDataSharingPermissions;
+}
+
+export interface FederatedPoolStats {
+  totalContributions: number;
+  proteinsLearned: Record<string, number>;
+  topPelletBlends: Array<{
+    blend: string;
+    rating: number;
+    burnEfficiency: string;
+    totalCooks: number;
+  }>;
+  averageStalls: Array<{
+    protein: string;
+    stallTemp: string;
+    avgDurationHrs: number;
+  }>;
+  federatedAccuracyRating: string;
+  lastPoolUpdate: string;
+}
+
+export interface VerifiedMeatCut {
+  id: string;
+  name: string;
+  aliases: string[];
+  proteinType: ProteinType;
+  primalOrigin: string;
+  impsCode?: string;
+  description: string;
+  visualKeyFeatures: string[];
+  muscleAnatomy?: string;
+  idealSmokeTempF: number;
+  targetInternalTempF: number;
+  cookingStrategy: string;
+  verifiedStatus: 'Local User Confirmed' | 'Global Online Verified' | 'Community Master Cut';
+  onlineVerificationDate?: string;
+  onlineSourceCitations?: string[];
+  samplePhotoUrl?: string;
+  userUploadedPhotos?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CutScanResult {
+  identifiedCutName: string;
+  confidenceScore: number;
+  proteinType: ProteinType;
+  primalOrigin: string;
+  impsCode?: string;
+  aliases: string[];
+  visualMarkersDetected: string[];
+  anatomyDetails: string;
+  recommendedCookingStrategy: string;
+  idealSmokeTempF: number;
+  targetInternalTempF: number;
+  matchedDatabaseCutId?: string;
+  onlineVerificationDetails?: string;
+  isUnknownOrRareCut: boolean;
+  explanation: string;
+}
+

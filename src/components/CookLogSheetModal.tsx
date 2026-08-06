@@ -1,17 +1,21 @@
 import React from 'react';
 import { CookLog } from '../types';
-import { X, Printer, Flame, CheckSquare, Square, FileText, Sparkles } from 'lucide-react';
+import { AI_PITMASTER_NAME } from '../constants/appName';
+import { X, Printer, Flame, CheckSquare, Square, FileText, Sparkles, Award, DollarSign, Database, TrendingDown, ShoppingBag } from 'lucide-react';
+import { calculateCookPelletHourlyCost } from '../utils/retailerPriceSync';
 
 interface CookLogSheetModalProps {
   cook: CookLog | null;
   onClose: () => void;
   onAnalyzeWithAI?: (cook: CookLog) => void;
+  onOpenCertificate?: (cook: CookLog) => void;
 }
 
 export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
   cook,
   onClose,
   onAnalyzeWithAI,
+  onOpenCertificate,
 }) => {
   if (!cook) return null;
 
@@ -19,9 +23,11 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
     window.print();
   };
 
+  const hourlyAnalysis = calculateCookPelletHourlyCost(cook);
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl relative font-sans my-8">
+    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-4xl p-4 sm:p-8 shadow-2xl relative font-sans my-8">
         
         {/* Top Actions bar (Non-printable) */}
         <div className="flex items-center justify-between pb-4 border-b border-amber-900/20 print:hidden">
@@ -29,7 +35,17 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
             <Flame className="w-5 h-5 text-amber-700" />
             <span className="font-bold text-amber-950">Official Pitmaster Smoker Journal Sheet</span>
           </div>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+            {onOpenCertificate && (
+              <button
+                type="button"
+                onClick={() => onOpenCertificate(cook)}
+                className="inline-flex items-center px-3 py-1.5 rounded-lg bg-amber-600 text-white font-extrabold text-xs hover:bg-amber-500 transition-colors shadow-sm cursor-pointer border border-amber-700"
+              >
+                <Award className="w-4 h-4 mr-1.5 text-amber-200" />
+                <span>🏆 Master Chef Certificate</span>
+              </button>
+            )}
             {onAnalyzeWithAI && (
               <button
                 type="button"
@@ -39,7 +55,7 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
                 className="inline-flex items-center px-3 py-1.5 rounded-lg bg-orange-600 text-amber-100 font-extrabold text-xs hover:bg-orange-700 transition-colors shadow-sm cursor-pointer"
               >
                 <Sparkles className="w-4 h-4 mr-1.5 text-amber-300" />
-                Analyze with AI Pitmaster
+                Analyze with {AI_PITMASTER_NAME}
               </button>
             )}
             <button
@@ -231,6 +247,65 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
                 <p><strong>Rub:</strong> {cook.seasoningRubs || 'Standard BBQ Rub'}</p>
                 <p className="mt-1"><strong>Sauce / Glaze:</strong> {cook.saucesGlazes || 'None / Served on side'}</p>
                 <p className="mt-1"><strong>Fuel Used:</strong> {cook.fuelType}</p>
+              </div>
+            </div>
+
+            {/* PELLET DATABASE HOURLY COST ANALYSIS */}
+            <div className="bg-gradient-to-r from-emerald-900/10 via-amber-100/80 to-emerald-900/10 p-3.5 rounded-xl border border-emerald-800/30 space-y-2">
+              <div className="flex items-center justify-between border-b border-amber-900/20 pb-1.5">
+                <div className="flex items-center space-x-2">
+                  <Database className="w-4 h-4 text-emerald-800" />
+                  <span className="font-extrabold font-serif uppercase text-amber-950 text-xs tracking-wider">
+                    Pellet Database Hourly Burn Cost Analysis
+                  </span>
+                </div>
+                <span className="text-[10px] font-mono font-bold bg-emerald-800/10 text-emerald-900 px-2 py-0.5 rounded border border-emerald-800/20">
+                  Synced Retail Prices
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs pt-1">
+                <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-900/20">
+                  <span className="text-[10px] text-amber-900 block font-serif">Fuel Price / lb:</span>
+                  <span className="font-bold text-emerald-900 text-sm">
+                    ${hourlyAnalysis.matchedCostPerLb.toFixed(2)} / lb
+                  </span>
+                  <span className="text-[10px] text-amber-800 block truncate">
+                    ({hourlyAnalysis.matchedBrand})
+                  </span>
+                </div>
+
+                <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-900/20">
+                  <span className="text-[10px] text-amber-900 block font-serif">Burn Rate:</span>
+                  <span className="font-bold text-amber-950 text-sm">
+                    {hourlyAnalysis.burnRateLbsPerHr} lbs / hr
+                  </span>
+                  <span className="text-[10px] text-amber-800 block">
+                    ({hourlyAnalysis.totalFuelLbs} lbs used)
+                  </span>
+                </div>
+
+                <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-900/20">
+                  <span className="text-[10px] text-amber-900 block font-serif">Hourly Cook Cost:</span>
+                  <span className="font-bold text-emerald-900 text-sm">
+                    ${hourlyAnalysis.hourlyCostDollars.toFixed(2)} / hr
+                  </span>
+                  <span className="text-[10px] text-amber-800 block">
+                    (Pit burn expense)
+                  </span>
+                </div>
+
+                <div className="bg-amber-100/80 p-2 rounded-lg border border-amber-900/20">
+                  <span className="text-[10px] text-amber-900 block font-serif">Total Fuel Expense:</span>
+                  <span className="font-bold text-amber-950 text-sm">
+                    ${hourlyAnalysis.totalCookFuelCostDollars.toFixed(2)}
+                  </span>
+                  <span className="text-[10px] text-emerald-800 font-semibold block">
+                    {hourlyAnalysis.costSavingsComparedToAvg >= 0
+                      ? `Saved $${Math.abs(hourlyAnalysis.costSavingsComparedToAvg).toFixed(2)} vs avg`
+                      : `$${Math.abs(hourlyAnalysis.costSavingsComparedToAvg).toFixed(2)} over avg`}
+                  </span>
+                </div>
               </div>
             </div>
 

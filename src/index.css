@@ -96,6 +96,14 @@
 }
 
 /* Safe, highly visible Colorblind Accessibility Mode */
+.modal-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 95vw;
+}
+
 .colorblind-contrast {
   --colorblind-border: #f97316;
 }
@@ -112,18 +120,56 @@
   border-style: solid !important;
 }
 
-/* Scrollbar styling for sleek dark theme */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Global scrollbar removal - completely hide scrollbars while maintaining full touch & wheel scrollability */
+*:not(.web-carousel-scrollbar) {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
 }
-::-webkit-scrollbar-track {
-  background: #121212;
+
+*:not(.web-carousel-scrollbar)::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+  width: 0px;
+  height: 0px;
+  background: transparent;
 }
-::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
-  border-radius: 4px;
+
+/* Custom Web & PC Carousel Scrollbar - visible on Desktop/Web, touch-optimized on Mobile */
+@media (min-width: 640px) {
+  .web-carousel-scrollbar {
+    -ms-overflow-style: auto !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: #f97316 #1a1626 !important;
+  }
+
+  .web-carousel-scrollbar::-webkit-scrollbar {
+    display: block !important;
+    height: 8px !important;
+    width: 8px !important;
+  }
+
+  .web-carousel-scrollbar::-webkit-scrollbar-track {
+    background: #1a1626 !important;
+    border-radius: 9999px !important;
+    border: 1px solid #2a2a2a !important;
+  }
+
+  .web-carousel-scrollbar::-webkit-scrollbar-thumb {
+    background: #f97316 !important;
+    border-radius: 9999px !important;
+  }
+
+  .web-carousel-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #ea580c !important;
+  }
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+
+@media (max-width: 639px) {
+  .web-carousel-scrollbar {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
+  .web-carousel-scrollbar::-webkit-scrollbar {
+    display: none !important;
+    height: 0px !important;
+  }
 }

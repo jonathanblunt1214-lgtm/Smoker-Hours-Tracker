@@ -7,23 +7,23 @@ export const INITIAL_SMOKER_PROFILE: SmokerProfile = {
   smokerType: 'Vertical Pellet Smoker',
   fuelType: 'Pellets',
   fuelOnHand: '120 lbs',
-  initialHours: 148.25, // Baseline from prompt log sheet!
-  currentHours: 160.75, // Cumulative after Cook 48 (148.25 + 12.5 = 160.75)
+  initialHours: 129.75, // Baseline starting hours before Cook 45
+  currentHours: 160.75, // Cumulative after Cook 48 (129.75 + 31.0 = 160.75)
   pelletHopperCapacityLbs: 60,
-  lastRefillHours: 162.75, // 10 hrs ago (172.75 - 162.75 = 10.0 hrs since refill)
+  lastRefillHours: 152.0, // 8.75 hrs ago (160.75 - 152.0 = 8.75 hrs since refill)
   maintenanceTasks: [
     {
       id: 'task-1',
       title: 'Clean Firepot Ash & Burn Pot',
       intervalHours: 12,
-      lastPerformedHours: 168.0,
+      lastPerformedHours: 152.0,
       description: 'Vacuum out ash buildup from burn pot to ensure smooth ignition.',
     },
     {
       id: 'task-2',
       title: 'Scrape Heat Shield & Grease Tray',
       intervalHours: 25,
-      lastPerformedHours: 155.0,
+      lastPerformedHours: 145.0,
       description: 'Remove grease residue and foil liner from heat deflector.',
     },
     {

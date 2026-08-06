@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { SmokerProfile, CookLog, FuelLog } from './types';
+import { SmokerProfile, CookLog, FuelLog, CustomSmokerSpec, ManufacturerSmokerSpec, LowPowerModeSettings } from './types';
 import {
   loadSmokerProfile,
   saveSmokerProfile,
@@ -9,14 +9,21 @@ import {
   loadFuelLogs,
   saveFuelLogs,
   resetAllDataToDefault,
+  loadLowPowerMode,
+  saveLowPowerMode,
+  checkAndRunAutoCacheClear,
+  autoEvolveCharGPTMemory,
 } from './utils/storage';
+import { checkAndUpdateRetailerPricesOnline } from './utils/retailerPriceSync';
 import { RecipeSuggestion } from './data/recipeSuggestions';
-import { initAuth } from './lib/driveSync';
+import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from './constants/appName';
+import { initAuth, saveToGoogleDrive } from './lib/driveSync';
 import { Navbar } from './components/Navbar';
 import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { CookLogList } from './components/CookLogList';
 import { CookLogSheetModal } from './components/CookLogSheetModal';
+import { CookCertificateModal } from './components/CookCertificateModal';
 import { CookLogForm } from './components/CookLogForm';
 import { CookPlanner } from './components/CookPlanner';
 import { FuelAndMaintenance } from './components/FuelAndMaintenance';
@@ -24,6 +31,8 @@ import { AIPitmasterModal } from './components/AIPitmasterModal';
 import { GoogleDriveSyncModal } from './components/GoogleDriveSyncModal';
 import { BluetoothManagerModal } from './components/BluetoothManagerModal';
 import { SettingsModal } from './components/SettingsModal';
+import { CustomSmokerModal } from './components/CustomSmokerModal';
+import { MasterAdminDashboardModal } from './components/MasterAdminDashboardModal';
 
 export default function App() {
   const [profile, setProfile] = useState<SmokerProfile>(loadSmokerProfile);
@@ -63,6 +72,25 @@ export default function App() {
     return localStorage.getItem('smoker_auto_sync') === 'true';
   });
 
+  // Low Power & Performance Mode State
+  const [lowPowerSettings, setLowPowerSettings] = useState<LowPowerModeSettings>(() => loadLowPowerMode());
+
+  const toggleLowPowerMode = (subKey?: keyof LowPowerModeSettings) => {
+    let updated: LowPowerModeSettings;
+    if (!subKey) {
+      updated = { ...lowPowerSettings, enabled: !lowPowerSettings.enabled };
+    } else {
+      updated = { ...lowPowerSettings, [subKey]: !lowPowerSettings[subKey] };
+    }
+    setLowPowerSettings(updated);
+    saveLowPowerMode(updated);
+    showToast(
+      updated.enabled
+        ? '⚡ Low Power Mode Enabled (Battery saver, animations reduced)'
+        : '🔋 Standard High-Performance Mode Restored'
+    );
+  };
+
   const toggleThemeMode = () => {
     const nextTheme = themeMode === 'dark' ? 'light' : 'dark';
     setThemeMode(nextTheme);
@@ -100,6 +128,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'analytics' | 'logs' | 'planner' | 'new-cook' | 'maintenance' | 'ai-pitmaster'>('analytics');
   const [selectedSheetCook, setSelectedSheetCook] = useState<CookLog | null>(null);
+  const [selectedCertificateCook, setSelectedCertificateCook] = useState<CookLog | null>(null);
   const [prefilledRecipe, setPrefilledRecipe] = useState<RecipeSuggestion | null>(null);
   const [aiInitialCookId, setAiInitialCookId] = useState<string | null>(null);
   const [aiInitialPrompt, setAiInitialPrompt] = useState<string | null>(null);
@@ -109,9 +138,25 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(() => navigator.onLine);
 
   useEffect(() => {
+    // Run auto cache clear check for smartphone storage optimization
+    const autoClearRes = checkAndRunAutoCacheClear();
+    if (autoClearRes.ran && autoClearRes.message) {
+      showToast(autoClearRes.message);
+    }
+
+    // Run 24-hour retail price data update check on mount
+    const syncRes = checkAndUpdateRetailerPricesOnline();
+    if (syncRes.updated) {
+      showToast(syncRes.message);
+    }
+
     const handleOnline = () => {
       setIsOnline(true);
       showToast('🌐 Network reconnected! All offline smoke logs synchronized.');
+      const res = checkAndUpdateRetailerPricesOnline();
+      if (res.updated) {
+        showToast(res.message);
+      }
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -126,9 +171,12 @@ export default function App() {
     };
   }, []);
 
-  // Settings, Bluetooth & Google Drive Modal States
+  // Settings, Bluetooth, Custom Smokers, Master Admin & Google Drive Modal States
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'appearance' | 'alerts' | 'cloud' | 'data'>('appearance');
   const [isBluetoothModalOpen, setIsBluetoothModalOpen] = useState(false);
+  const [isCustomSmokerModalOpen, setIsCustomSmokerModalOpen] = useState(false);
+  const [isMasterAdminModalOpen, setIsMasterAdminModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
@@ -147,20 +195,100 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Automatically synchronize profile hours with cook logs to ensure total hours match everywhere
+  useEffect(() => {
+    if (cookLogs && cookLogs.length > 0) {
+      const minStartingHours = Math.min(...cookLogs.map((c) => c.startingSmokerHours || 0));
+      const maxEndingHours = Math.max(...cookLogs.map((c) => c.endingSmokerHours || 0));
+
+      setProfile((prev) => {
+        let updated = false;
+        const newProfile = { ...prev };
+
+        if (minStartingHours > 0 && prev.initialHours !== minStartingHours) {
+          newProfile.initialHours = minStartingHours;
+          updated = true;
+        }
+        const effectiveCurrentHours = Math.max(prev.currentHours || 0, maxEndingHours);
+        if (effectiveCurrentHours !== prev.currentHours) {
+          newProfile.currentHours = effectiveCurrentHours;
+          updated = true;
+        }
+
+        return updated ? newProfile : prev;
+      });
+    }
+  }, [cookLogs]);
+
   // Sync profile changes
   useEffect(() => {
     saveSmokerProfile(profile);
   }, [profile]);
 
-  // Sync cook log changes
+  // Sync cook log changes & run automatic in-app ML training (sandboxed)
   useEffect(() => {
     saveCookLogs(cookLogs);
+    if (cookLogs && cookLogs.length > 0) {
+      try {
+        autoEvolveCharGPTMemory(cookLogs);
+      } catch (e) {
+        console.error('In-App ML auto-training error:', e);
+      }
+    }
   }, [cookLogs]);
 
   // Sync fuel log changes
   useEffect(() => {
     saveFuelLogs(fuelLogs);
   }, [fuelLogs]);
+
+  // Daily Automatic Backup Runner for Non-Local Cloud Storage
+  useEffect(() => {
+    try {
+      const savedConfigStr = localStorage.getItem('pitmaster_auto_backup_config');
+      const savedOneDriveStr = localStorage.getItem('pitmaster_onedrive_account');
+      const oneDriveConnected = savedOneDriveStr ? JSON.parse(savedOneDriveStr)?.connected : false;
+
+      const hasUserAccount = Boolean(currentUser || accessToken || oneDriveConnected);
+      if (!hasUserAccount) return;
+
+      let autoConfig = savedConfigStr
+        ? JSON.parse(savedConfigStr)
+        : { enabled: true, googleDrive: true, oneDrive: true, lastAutoBackup: null };
+
+      if (!autoConfig.enabled) return;
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const lastBackupDateStr = autoConfig.lastAutoBackup ? autoConfig.lastAutoBackup.slice(0, 10) : null;
+
+      // Run daily backup if it hasn't run today
+      if (lastBackupDateStr !== todayStr) {
+        const backupPayload = {
+          app: 'Pitmaster Log & Smoker Monitor',
+          timestamp: new Date().toISOString(),
+          profile,
+          cookLogs,
+          fuelLogs,
+        };
+
+        // Store daily backup snapshot
+        localStorage.setItem('pitmaster_daily_auto_backup_vault', JSON.stringify(backupPayload));
+
+        // Sync with Google Drive if access token available
+        if (accessToken) {
+          saveToGoogleDrive(accessToken, { profile, cookLogs, fuelLogs }).catch(console.warn);
+        }
+
+        const nowIso = new Date().toISOString();
+        const updatedConfig = { ...autoConfig, lastAutoBackup: nowIso };
+        localStorage.setItem('pitmaster_auto_backup_config', JSON.stringify(updatedConfig));
+
+        console.log('Daily automatic backup of log and user data completed.');
+      }
+    } catch (e) {
+      console.warn('Auto backup check encountered an issue:', e);
+    }
+  }, [currentUser, accessToken, cookLogs, fuelLogs, profile]);
 
   const showToast = (msg: string) => {
     setNotification(msg);
@@ -197,11 +325,11 @@ export default function App() {
   const handleAskAIPitmasterAboutRecipe = (recipe: RecipeSuggestion, customQuery?: string) => {
     const query =
       customQuery ||
-      `Hello AI Pitmaster! Please analyze the suggested cook "${recipe.title}" (${recipe.proteinCut}). What wood pellet blends, rub formulas, or temperature curve tweaks do you recommend for optimal results on my smoker (${profile.name || profile.smokerType || 'pellet grill'})?`;
+      `Hello ${AI_PITMASTER_NAME}! Please analyze the suggested cook "${recipe.title}" (${recipe.proteinCut}). What wood pellet blends, rub formulas, or temperature curve tweaks do you recommend for optimal results on my smoker (${profile.name || profile.smokerType || 'pellet grill'})?`;
     setAiInitialPrompt(query);
     setAiInitialCookId('ALL_LOGS');
     handleTabChange('ai-pitmaster');
-    showToast(`Loaded AI Pitmaster consultation for "${recipe.title}"!`);
+    showToast(`Loaded ${AI_PITMASTER_NAME} consultation for "${recipe.title}"!`);
   };
 
   const handleDeleteCook = (id: string) => {
@@ -214,7 +342,51 @@ export default function App() {
 
   const handleUpdateProfile = (updated: SmokerProfile) => {
     setProfile(updated);
-    showToast('Smoker maintenance schedule updated.');
+    showToast('Smoker profile updated.');
+  };
+
+  const handleCustomSmokerCreated = (
+    newSmoker: CustomSmokerSpec | ManufacturerSmokerSpec,
+    setActiveAsCurrent: boolean
+  ) => {
+    const isMfg = 'brand' in newSmoker;
+    const displayName = isMfg ? `${newSmoker.brand} ${newSmoker.model}` : newSmoker.name;
+
+    if (setActiveAsCurrent) {
+      if (isMfg) {
+        const mfg = newSmoker as ManufacturerSmokerSpec;
+        const updatedProfile: SmokerProfile = {
+          ...profile,
+          name: mfg.brand,
+          model: mfg.model,
+          smokerType: (mfg.category as any) || profile.smokerType,
+          fuelType: mfg.fuelType || profile.fuelType,
+          pelletHopperCapacityLbs: mfg.hopperCapacityLbs || profile.pelletHopperCapacityLbs,
+          isCustomBuilt: false,
+          manufacturerSpecs: mfg,
+        };
+        setProfile(updatedProfile);
+        saveSmokerProfile(updatedProfile);
+        showToast(`Active smoker set to manufacturer model "${displayName}"!`);
+      } else {
+        const custom = newSmoker as CustomSmokerSpec;
+        const updatedProfile: SmokerProfile = {
+          ...profile,
+          name: custom.name,
+          model: custom.builderName || 'Custom Build',
+          smokerType: (custom.smokerType as any) || profile.smokerType,
+          fuelType: custom.fuelType || profile.fuelType,
+          pelletHopperCapacityLbs: custom.hopperCapacityLbs || profile.pelletHopperCapacityLbs,
+          isCustomBuilt: true,
+          customSpecs: custom,
+        };
+        setProfile(updatedProfile);
+        saveSmokerProfile(updatedProfile);
+        showToast(`Active smoker set to custom build "${displayName}"!`);
+      }
+    } else {
+      showToast(`Smoker specs for "${displayName}" saved to user account.`);
+    }
   };
 
   const handleAddFuelLog = (newFuel: FuelLog) => {
@@ -276,9 +448,14 @@ export default function App() {
         smokerHours={profile.currentHours}
         smokerName={profile.name}
         tempUnit={tempUnit}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenSettings={(tab) => {
+          setSettingsInitialTab(tab || 'appearance');
+          setIsSettingsModalOpen(true);
+        }}
         isDriveConnected={!!currentUser && !!accessToken}
         isOnline={isOnline}
+        currentUserEmail={currentUser?.email || 'jonathanblunt1214@gmail.com'}
+        onOpenMasterAdmin={() => setIsMasterAdminModalOpen(true)}
       />
 
       {/* Smoker Overview Metric Banner */}
@@ -288,10 +465,19 @@ export default function App() {
         fuelLogs={fuelLogs}
         onQuickLogClick={() => handleTabChange('new-cook')}
         onUpdateProfile={handleUpdateProfile}
+        onOpenSettings={(tab) => {
+          setSettingsInitialTab(tab || 'smokers');
+          setIsSettingsModalOpen(true);
+        }}
+        onOpenCharGPT={(prompt) => {
+          if (prompt) setAiInitialPrompt(prompt);
+          handleTabChange('ai-pitmaster');
+        }}
+        onOpenAlexaPush={() => handleTabChange('ai-pitmaster')}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8 pt-4 sm:pt-6 pb-12 overflow-x-hidden">
+      <main className="flex-1 w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto px-1.5 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-12 overflow-x-hidden">
         {activeTab === 'analytics' && (
           <AnalyticsDashboard
             cookLogs={cookLogs}
@@ -307,7 +493,9 @@ export default function App() {
         {activeTab === 'logs' && (
           <CookLogList
             cookLogs={cookLogs}
+            profile={profile}
             onSelectCook={(cook) => setSelectedSheetCook(cook)}
+            onOpenCertificate={(cook) => setSelectedCertificateCook(cook)}
             onDeleteCook={handleDeleteCook}
             onNewCookClick={() => {
               setPrefilledRecipe(null);
@@ -327,7 +515,7 @@ export default function App() {
               setAiInitialPrompt(promptText);
               setAiInitialCookId('ALL_LOGS');
               handleTabChange('ai-pitmaster');
-              showToast('Loaded AI Pitmaster consultation for planned cook schedule!');
+              showToast(`Loaded ${AI_PITMASTER_NAME} consultation for planned cook schedule!`);
             }}
           />
         )}
@@ -344,6 +532,10 @@ export default function App() {
             }}
             onUpdateProfile={handleUpdateProfile}
             onOpenBluetoothModal={() => setIsBluetoothModalOpen(true)}
+            onOpenSettings={(tab) => {
+              setSettingsInitialTab(tab || 'smokers');
+              setIsSettingsModalOpen(true);
+            }}
           />
         )}
 
@@ -365,6 +557,10 @@ export default function App() {
             profile={profile}
             initialCookId={aiInitialCookId}
             initialPrompt={aiInitialPrompt}
+            currentUserEmail={currentUser?.email || 'jonathanblunt1214@gmail.com'}
+            onNavigateToPlanner={() => setActiveTab('planner')}
+            onNavigateToNewCook={() => setActiveTab('new-cook')}
+            onOpenMasterAdmin={() => setIsMasterAdminModalOpen(true)}
           />
         )}
       </main>
@@ -373,10 +569,26 @@ export default function App() {
       <CookLogSheetModal
         cook={selectedSheetCook}
         onClose={() => setSelectedSheetCook(null)}
+        onOpenCertificate={(cook) => {
+          setSelectedSheetCook(null);
+          setSelectedCertificateCook(cook);
+        }}
         onAnalyzeWithAI={(cook) => {
           setSelectedSheetCook(null);
           setAiInitialCookId(cook.id);
           setAiInitialPrompt(`Analyze my cook log for "${cook.title}" (${cook.proteinCut}) and suggest key pitmaster improvements.`);
+          setActiveTab('ai-pitmaster');
+        }}
+      />
+
+      {/* Official Master Chef Cook Certificate Badge Modal */}
+      <CookCertificateModal
+        cook={selectedCertificateCook}
+        onClose={() => setSelectedCertificateCook(null)}
+        onAnalyzeWithAI={(cook) => {
+          setSelectedCertificateCook(null);
+          setAiInitialCookId(cook.id);
+          setAiInitialPrompt(`Analyze my certificate cook for "${cook.title}" (${cook.proteinCut}) and evaluate heat stability.`);
           setActiveTab('ai-pitmaster');
         }}
       />
@@ -413,6 +625,7 @@ export default function App() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
+        initialTab={settingsInitialTab}
         tempUnit={tempUnit}
         onToggleTempUnit={toggleTempUnit}
         themeMode={themeMode}
@@ -431,11 +644,57 @@ export default function App() {
         driveUserEmail={currentUser?.email}
         onResetData={handleResetData}
         isOnline={isOnline && !forceOffline}
+        currentUser={currentUser}
+        accessToken={accessToken}
+        onAuthSuccess={(user, token) => {
+          setCurrentUser(user);
+          setAccessToken(token);
+        }}
+        onLogout={() => {
+          setCurrentUser(null);
+          setAccessToken(null);
+        }}
+        currentAppData={{
+          profile,
+          cookLogs,
+          fuelLogs,
+        }}
+        onRestoreData={handleRestoreFromDrive}
+        onOpenCustomSmokerModal={() => setIsCustomSmokerModalOpen(true)}
+        profile={profile}
+        onUpdateProfile={setProfile}
+        lowPowerSettings={lowPowerSettings}
+        onToggleLowPowerMode={toggleLowPowerMode}
+      />
+
+      {/* Custom Built Smoker Specifications Modal */}
+      <CustomSmokerModal
+        isOpen={isCustomSmokerModalOpen}
+        onClose={() => setIsCustomSmokerModalOpen(false)}
+        currentUser={currentUser}
+        pitmasterAlias={profile.name || currentUser?.email || 'Pitmaster Guest'}
+        onSmokerCreated={handleCustomSmokerCreated}
+      />
+
+      {/* Master Admin & Developer Dashboard Modal */}
+      <MasterAdminDashboardModal
+        isOpen={isMasterAdminModalOpen}
+        onClose={() => setIsMasterAdminModalOpen(false)}
+        currentUserEmail={currentUser?.email || 'jonathanblunt1214@gmail.com'}
+        profile={profile}
+        cookLogs={cookLogs}
+        fuelLogs={fuelLogs}
+        onRefreshData={() => {
+          setProfile(loadSmokerProfile());
+          setCookLogs(loadCookLogs());
+          setFuelLogs(loadFuelLogs());
+        }}
+        showToast={showToast}
       />
 
       {/* Footer */}
       <footer className="border-t border-[#2a2a2a] bg-[#121212] py-5 text-center text-xs text-zinc-500 font-mono">
-        <p>Pitmaster Log & Smoker Consumption Monitor • Pit boss Copperhead & Vertical Pellet Smoker Journal</p>
+        <p>© {new Date().getFullYear()} Smoke Stack • Smart BBQ Smoker & Pellet Journal</p>
       </footer>
 
     </div>

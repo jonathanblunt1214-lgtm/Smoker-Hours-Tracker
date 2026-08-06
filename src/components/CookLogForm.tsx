@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CookLog, ProteinType, SmokerProfile, SmokerType, TemperatureReading } from '../types';
 import { RecipeSuggestion } from '../data/recipeSuggestions';
+import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { getManufacturerSpecs } from '../utils/smokerManufacturerData';
+import { getEffectiveSmokerSpecs, calculateFuelConsumptionLbs } from '../utils/smokerCalculations';
 import { Flame, Plus, Trash2, Clock, Scale, Thermometer, Save, X, AlertCircle, CloudSun, MapPin, RefreshCw, Search, Loader2, CheckCircle2, Zap, Play, Pause, RotateCcw, Timer, Sparkles, Bluetooth, Camera, Upload, Image as ImageIcon, SwitchCamera, Check, Navigation, Wind, Droplets, Compass, Bot } from 'lucide-react';
 
 interface CookLogFormProps {
@@ -12,6 +14,7 @@ interface CookLogFormProps {
   onCancel: () => void;
   onUpdateProfile?: (updated: SmokerProfile) => void;
   onOpenBluetoothModal?: () => void;
+  onOpenSettings?: (tab?: 'appearance' | 'alerts' | 'cloud' | 'data' | 'smokers') => void;
 }
 
 export const CookLogForm: React.FC<CookLogFormProps> = ({
@@ -22,6 +25,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   onCancel,
   onUpdateProfile,
   onOpenBluetoothModal,
+  onOpenSettings,
 }) => {
   const today = new Date().toISOString().split('T')[0];
 
@@ -47,6 +51,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   };
   const [proteinType, setProteinType] = useState<ProteinType>('Beef');
   const [proteinCut, setProteinCut] = useState('');
+  const [meatWeightLbs, setMeatWeightLbs] = useState<number>(12.0);
   const [hoursLogged, setHoursLogged] = useState<number>(8.0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [timerSeconds, setTimerSeconds] = useState<number>(8.0 * 3600);
@@ -179,10 +184,12 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     setSearchedCutQuery(cutToQuery);
 
     try {
-      const res = await fetch('/api/ai-pitmaster', {
+      const res = await fetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          smokerProfile: profile,
+          effectiveSpecs: getEffectiveSmokerSpecs(profile),
           prompt: `Actively search online for real competition smoking recipes, target pit temperatures, target internal meat finish temperatures, recommended wood pellet flavor pairings, and rub formulas for "${cutToQuery}". Provide a structured summary.`,
         }),
       });
@@ -613,7 +620,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   const [hourlyPullNotice, setHourlyPullNotice] = useState<string | null>(null);
   const [isAiAnalyzingNotes, setIsAiAnalyzingNotes] = useState(false);
 
-  // Smart local fallback for AI Pitmaster Next Time Notes recommendation
+  // Smart local fallback for CharGPT Next Time Notes recommendation
   const generateLocalFallbackNotes = (pType: string, pCut: string, notes: string, lastReading?: TemperatureReading) => {
     const text = (notes || '').toLowerCase();
     const proteinStr = `${pType} ${pCut}`.toLowerCase();
@@ -649,16 +656,18 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     return `For the next ${pCut || pType || 'cook'}: Maintain steady pit temp, spritz hourly after bark sets, and rest minimum 90 mins before carving.`;
   };
 
-  // AI Pitmaster Analysis Handler for Next Time Notes
+  // CharGPT Analysis Handler for Next Time Notes
   const handleAnalyzeAndSuggestNextTimeNotes = async () => {
     setIsAiAnalyzingNotes(true);
     const lastReading = readings[readings.length - 1];
 
     try {
-      const res = await fetch('/api/ai-pitmaster', {
+      const res = await fetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          smokerProfile: profile,
+          effectiveSpecs: getEffectiveSmokerSpecs(profile),
           prompt: `The user selected "NO, Needs Adjustments" for this cook log. Analyze the cook details below, and generate 1-2 concise, expert, highly actionable sentences for "Next Time Notes" explaining what exact technique, timing, or temperature adjustment to make for the next cook.
 
 Cook Title: ${title || 'Smoker Cook'}
@@ -681,7 +690,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         if (data.text) {
           const cleanedText = data.text.replace(/^[*\-\s]+/, '').trim();
           setNextTimeNotes(cleanedText);
-          setHourlyPullNotice(`✨ AI Pitmaster analyzed your cook log & generated Next Time Notes!`);
+          setHourlyPullNotice(`✨ ${AI_NAME} analyzed your cook log & generated Next Time Notes!`);
           setTimeout(() => setHourlyPullNotice(null), 5000);
           setIsAiAnalyzingNotes(false);
           return;
@@ -694,7 +703,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
     // Fallback if API offline or missing key
     const fallback = generateLocalFallbackNotes(proteinType, proteinCut, finishedNotes, lastReading);
     setNextTimeNotes(fallback);
-    setHourlyPullNotice(`✨ AI Pitmaster analyzed your cook log & generated Next Time Notes!`);
+    setHourlyPullNotice(`✨ ${AI_NAME} analyzed your cook log & generated Next Time Notes!`);
     setTimeout(() => setHourlyPullNotice(null), 5000);
     setIsAiAnalyzingNotes(false);
   };
@@ -824,17 +833,17 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
   const startingHours = profile.currentHours;
   const endingHours = Number((startingHours + Number(hoursLogged || 0)).toFixed(2));
 
-  // Automated Manufacturer Burn Rate Metric Calculation
-  const mfrSpec = getManufacturerSpecs(profile.name, profile.model, smokerType || profile.smokerType || '');
+  // Automated Smoker Burn Rate Metric Calculation via Centralized Physics Utility
+  const effectiveSpecs = getEffectiveSmokerSpecs(profile);
   const ambientTempF = weatherData ? weatherData.tempF : 72;
-  let weatherFactor = 1;
-  if (ambientTempF < 60) {
-    weatherFactor = 1 + (60 - ambientTempF) * 0.008;
-  } else if (ambientTempF > 85) {
-    weatherFactor = 1 - (ambientTempF - 85) * 0.004;
-  }
-  const effectiveBurnRateLbsHr = Number((mfrSpec.factoryBaselineBurnRateLbsHr * weatherFactor).toFixed(2));
-  const autoCalculatedFuelLbs = Number(((hoursLogged || 0) * effectiveBurnRateLbsHr).toFixed(1));
+  const autoCalculatedFuelLbs = calculateFuelConsumptionLbs(
+    hoursLogged || 0,
+    225,
+    profile
+  );
+  const effectiveBurnRateLbsHr = hoursLogged && hoursLogged > 0
+    ? Number((autoCalculatedFuelLbs / hoursLogged).toFixed(2))
+    : effectiveSpecs.baselineBurnRateLbsHr;
 
   // Auto-sync fuel calculation when hoursLogged, smokerType, weather, or auto state changes
   useEffect(() => {
@@ -891,6 +900,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       smokerType,
       proteinType,
       proteinCut: proteinCut || `${proteinType} Cut`,
+      meatWeightLbs: Number(meatWeightLbs) || undefined,
       startingSmokerHours: startingHours,
       hoursLogged: Number(hoursLogged) || 0,
       endingSmokerHours: endingHours,
@@ -913,7 +923,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
   };
 
   return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 sm:p-8 shadow-2xl max-w-5xl mx-auto mb-12">
+    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-8 shadow-2xl w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-5xl mx-auto mb-12">
       
       {/* Header */}
       <div className="flex items-center justify-between pb-6 border-b border-[#2a2a2a]">
@@ -1160,14 +1170,20 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
                 Smoker Type
               </label>
-              <span className="text-[10px] text-orange-400 font-mono bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20">
-                Global Variable
-              </span>
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={() => onOpenSettings('smokers')}
+                  className="text-[10px] text-orange-400 hover:text-orange-300 font-bold bg-orange-500/10 hover:bg-orange-500/20 px-2 py-0.5 rounded border border-orange-500/30 transition-all cursor-pointer"
+                >
+                  ⚙️ Specs in Settings
+                </button>
+              )}
             </div>
             <input
               type="text"
               list="smoker-type-options"
-              placeholder="e.g. Vertical Pellet Smoker, Offset..."
+              placeholder="e.g. Vertical Pellet Smoker, Custom Offset..."
               value={smokerType}
               onChange={(e) => handleSmokerTypeChange(e.target.value)}
               className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -1182,9 +1198,12 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
               <option value="Kamado Grill" />
               <option value="Electric Smoker" />
               <option value="Gas / Propane Smoker" />
+              <option value="Custom Reverse Flow Offset" />
+              <option value="Custom Insulated Cabinet Smoker" />
+              <option value="Custom Ugly Drum Smoker (UDS)" />
             </datalist>
             <p className="text-[10px] text-zinc-500 mt-1">
-              Editable global variable synced with your Smoker Profile.
+              Synced with your active Smoker Profile.
             </p>
           </div>
 
@@ -1242,7 +1261,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
           <div className="md:col-span-2 space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
-                Protein Cut & Weight
+                Protein Cut & Meat Mass
               </label>
               <button
                 type="button"
@@ -1263,13 +1282,29 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                 )}
               </button>
             </div>
-            <input
-              type="text"
-              placeholder="e.g. 14 lb Choice Full Packer Brisket, Bear Shoulder, Wild Duck"
-              value={proteinCut}
-              onChange={(e) => setProteinCut(e.target.value)}
-              className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                type="text"
+                placeholder="e.g. Choice Full Packer Brisket, Bear Shoulder, Wild Duck"
+                value={proteinCut}
+                onChange={(e) => setProteinCut(e.target.value)}
+                className="sm:col-span-2 bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+              <div className="flex items-center space-x-1.5 bg-[#121212] border border-[#2a2a2a] rounded-xl px-3 py-1.5">
+                <Scale className="w-4 h-4 text-orange-400 shrink-0" />
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="150"
+                  placeholder="Mass (lbs)"
+                  value={meatWeightLbs}
+                  onChange={(e) => setMeatWeightLbs(Number(e.target.value))}
+                  className="w-full bg-transparent text-white font-bold text-xs focus:outline-none"
+                />
+                <span className="text-[10px] text-zinc-400 font-mono font-bold">lbs</span>
+              </div>
+            </div>
 
             {/* Online Recipe Web Result Drawer */}
             {webRecipeText && (
@@ -1277,7 +1312,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                 <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
                   <div className="flex items-center space-x-2 text-orange-400 font-bold">
                     <Bot className="w-4 h-4 text-orange-400" />
-                    <span>AI Pitmaster Online Web Recipe Guide for "{proteinCut || proteinType}"</span>
+                    <span>{APP_NAME} Online Web Recipe Guide for "{proteinCut || proteinType}"</span>
                   </div>
                   <button
                     type="button"
@@ -1466,7 +1501,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   <span className="text-orange-400 font-extrabold">{hoursLogged || 0} hrs × {effectiveBurnRateLbsHr} lbs/hr = {autoCalculatedFuelLbs} lbs</span>
                 </div>
                 <p className="text-[10px] text-zinc-500 font-sans leading-tight">
-                  Derived from {mfrSpec.brandModel} factory rate ({mfrSpec.factoryBaselineBurnRateLbsHr} lbs/hr){weatherData ? ` adjusted for ${weatherData.tempF}°F ambient weather` : ''}.
+                  Derived from {effectiveSpecs.displayName} rate ({effectiveSpecs.baselineBurnRateLbsHr} lbs/hr){weatherData ? ` adjusted for ${weatherData.tempF}°F ambient weather` : ''}.
                 </p>
               </div>
             </div>
@@ -1899,8 +1934,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
                   <span>
                     {isAiAnalyzingNotes
-                      ? 'AI Pitmaster is analyzing log notes & temp curves for adjustments...'
-                      : 'AI Pitmaster analyzed log & updated Next Time Notes below!'}
+                      ? `${AI_NAME} is analyzing log notes & temp curves for adjustments...`
+                      : `${AI_NAME} analyzed log & updated Next Time Notes below!`}
                   </span>
                 </p>
               )}
@@ -1916,7 +1951,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   onClick={handleAnalyzeAndSuggestNextTimeNotes}
                   disabled={isAiAnalyzingNotes}
                   className="text-[11px] font-bold text-orange-400 hover:text-orange-300 flex items-center space-x-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/25 px-2.5 py-1 rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50 min-h-[32px]"
-                  title="Ask AI Pitmaster to analyze finished product notes and suggest next time adjustments"
+                  title={`Ask ${AI_NAME} to analyze finished product notes and suggest next time adjustments`}
                 >
                   {isAiAnalyzingNotes ? (
                     <>
@@ -1926,7 +1961,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5 text-orange-400" />
-                      <span>AI Pitmaster Analyze</span>
+                      <span>{AI_NAME} Analyze</span>
                     </>
                   )}
                 </button>

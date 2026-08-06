@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SmokerProfile, CookLog, FuelLog } from '../types';
-import { Clock, Flame, ShieldCheck, Scale, AlertTriangle } from 'lucide-react';
+import { Clock, Flame, ShieldCheck, Scale, AlertTriangle, Wrench, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface SmokerOverviewBannerProps {
   profile: SmokerProfile;
@@ -8,6 +8,9 @@ interface SmokerOverviewBannerProps {
   fuelLogs: FuelLog[];
   onQuickLogClick: () => void;
   onUpdateProfile?: (updatedProfile: SmokerProfile) => void;
+  onOpenSettings?: (tab?: 'appearance' | 'alerts' | 'cloud' | 'data' | 'smokers') => void;
+  onOpenCharGPT?: (prompt?: string) => void;
+  onOpenAlexaPush?: () => void;
 }
 
 export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
@@ -16,12 +19,16 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
   fuelLogs,
   onQuickLogClick,
   onUpdateProfile,
+  onOpenSettings,
+  onOpenCharGPT,
+  onOpenAlexaPush,
 }) => {
+  const [showMobileMetrics, setShowMobileMetrics] = useState<boolean>(false);
+
   // Calculate total hours logged across all cooks & cross-reference latest ending smoker hours
   const totalHoursLogged = cookLogs.reduce((acc, curr) => acc + (curr.hoursLogged || 0), 0);
-  const displayedHoursToDate = cookLogs.length > 0 
-    ? Math.max(...cookLogs.map((c) => c.endingSmokerHours || 0))
-    : profile.currentHours;
+  const maxCookHours = cookLogs.length > 0 ? Math.max(...cookLogs.map((c) => c.endingSmokerHours || 0)) : 0;
+  const displayedHoursToDate = Math.max(profile.currentHours || 0, maxCookHours);
 
   const totalFuelLbs = cookLogs.reduce((acc, curr) => acc + (curr.fuelLbsConsumed || 0), 0);
   const avgBurnRate = totalHoursLogged > 0 ? (totalFuelLbs / totalHoursLogged).toFixed(2) : '1.20';
@@ -64,7 +71,7 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
 
   return (
     <div className="bg-[#1a1a1a] border-b border-[#2a2a2a] text-[#e0e0e0] py-3.5 sm:py-5 px-3 sm:px-6 md:px-8 shadow-md flex flex-col justify-center w-full overflow-x-hidden">
-      <div className="max-w-7xl w-full mx-auto my-auto flex flex-col justify-center space-y-3.5 sm:space-y-5">
+      <div className="w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto my-auto flex flex-col justify-center space-y-3.5 sm:space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 w-full my-auto">
           
           {/* Main Title & Equipment tag */}
@@ -86,21 +93,31 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
             </p>
           </div>
 
-          {/* Action button */}
-          <div className="flex items-center shrink-0 w-full md:w-auto">
+          {/* Action button & Mobile Stats Toggle */}
+          <div className="flex items-center space-x-2 shrink-0 w-full md:w-auto">
             <button
               onClick={onQuickLogClick}
-              className="w-full md:w-auto inline-flex items-center justify-center px-4 py-2.5 sm:py-2.5 rounded-xl font-bold text-xs bg-orange-500 text-zinc-950 hover:bg-orange-600 transition-all shadow-lg shadow-orange-950/40 cursor-pointer active:scale-98"
+              className="flex-1 md:flex-initial inline-flex items-center justify-center px-4 py-2.5 sm:py-2.5 rounded-xl font-bold text-xs bg-orange-500 text-zinc-950 hover:bg-orange-600 transition-all shadow-lg shadow-orange-950/40 cursor-pointer active:scale-98 min-h-[42px]"
             >
               <Flame className="w-4 h-4 mr-2" />
               Start Smoke Session
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowMobileMetrics(!showMobileMetrics)}
+              className="md:hidden px-3 py-2.5 bg-[#242424] hover:bg-[#2e2e2e] text-zinc-300 border border-[#333] rounded-xl text-xs font-bold flex items-center justify-center space-x-1 transition-all cursor-pointer min-h-[42px]"
+              title="Toggle Smoker Overview Metrics"
+            >
+              <span className="text-[11px] font-mono">{displayedHoursToDate.toFixed(1)}h</span>
+              {showMobileMetrics ? <ChevronUp className="w-4 h-4 text-orange-400" /> : <ChevronDown className="w-4 h-4 text-orange-400" />}
             </button>
           </div>
 
         </div>
 
         {/* 4 Metric Cards Grid - Optimized for Mobile 2-column layout */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 w-full">
+        <div className={`grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4 w-full ${showMobileMetrics ? 'grid' : 'hidden md:grid'}`}>
           
           {/* Metric 1: Hours to Date */}
           <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl sm:rounded-2xl p-2.5 sm:p-4 shadow-sm hover:border-orange-500/40 transition-all flex flex-col justify-between min-h-[95px] sm:min-h-[110px]">
@@ -196,7 +213,6 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
               {dueMaintenanceCount > 0 ? 'Ash vacuum due' : 'Firepot clean'}
             </div>
           </div>
-
         </div>
 
       </div>

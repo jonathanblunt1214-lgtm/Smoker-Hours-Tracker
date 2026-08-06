@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { RecipeSuggestion, RECIPE_SUGGESTIONS } from '../data/recipeSuggestions';
-import { CookLog, ProteinType } from '../types';
+import { CookLog, ProteinType, SmokerProfile } from '../types';
+import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
+import { APP_NAME, AI_NAME, AI_PITMASTER_NAME, AI_ADVISOR_NAME } from '../constants/appName';
 import {
   parseWebSearchResultToRecipe,
   loadSavedWebRecipes,
@@ -16,6 +18,7 @@ import {
   Sparkles,
   PlusCircle,
   ChevronRight,
+  ChevronLeft,
   Info,
   CheckCircle2,
   Zap,
@@ -35,6 +38,7 @@ import {
 
 interface RecipeSuggestionsProps {
   cookLogs?: CookLog[];
+  profile?: SmokerProfile;
   onStartCookFromRecipe: (recipe: RecipeSuggestion) => void;
   onAskAIPitmaster?: (recipe: RecipeSuggestion, promptText?: string) => void;
   isCollapsible?: boolean;
@@ -42,6 +46,7 @@ interface RecipeSuggestionsProps {
 
 export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
   cookLogs = [],
+  profile,
   onStartCookFromRecipe,
   onAskAIPitmaster,
   isCollapsible = true,
@@ -53,12 +58,22 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
   const [selectedDuration, setSelectedDuration] = useState<string>('ALL');
   const [activeModalRecipe, setActiveModalRecipe] = useState<RecipeSuggestion | null>(null);
 
-  // AI Pitmaster inline advice states
+  // CharGPT inline advice states
   const [aiAdviceMap, setAiAdviceMap] = useState<Record<string, string>>({});
   const [loadingAiRecipeId, setLoadingAiRecipeId] = useState<string | null>(null);
   const [expandedAiRecipeId, setExpandedAiRecipeId] = useState<string | null>(null);
 
-  // AI Pitmaster Log Analysis state
+  // Carousel scroll ref for Web/PC left/right arrow navigation
+  const carouselRef = React.useRef<HTMLDivElement>(null);
+
+  const scrollCarousel = (direction: 'left' | 'right') => {
+    if (carouselRef.current) {
+      const scrollAmount = direction === 'left' ? -320 : 320;
+      carouselRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  // CharGPT Log Analysis state
   const [isAnalyzingOverallLogs, setIsAnalyzingOverallLogs] = useState(false);
   const [overallAnalysisText, setOverallAnalysisText] = useState<string | null>(null);
   const [showOverallAnalysis, setShowOverallAnalysis] = useState(false);
@@ -84,10 +99,12 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
     let grounding: any[] = [];
 
     try {
-      const res = await fetch('/api/ai-pitmaster', {
+      const res = await fetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          smokerProfile: profile,
+          effectiveSpecs: profile ? getEffectiveSmokerSpecs(profile) : null,
           prompt: `Actively search online for real competition smoking recipes, guides, and temperature benchmarks for "${query}".
 Return a complete, step-by-step smoking guide including:
 1. Recommended Cut Title & Overview for "${query}"
@@ -170,10 +187,12 @@ Return a complete, step-by-step smoking guide including:
 
     setIsAnalyzingOverallLogs(true);
     try {
-      const res = await fetch('/api/ai-pitmaster', {
+      const res = await fetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          smokerProfile: profile,
+          effectiveSpecs: profile ? getEffectiveSmokerSpecs(profile) : null,
           prompt: `Based on my complete cook log history, conduct a Pitmaster Log Analysis.
 Recommend which of the suggested recipes (Texas Brisket, Kansas City Pork Ribs, Pulled Pork, Smoked Wings, Smoked Salmon, Smoked Turkey Breast, Beef Short Ribs) I should cook next.
 Explain specifically how trying these recipes will help fix past issues logged in my journal (such as tenderness, bark, thermal stalls, or seasoning balance) and help me level up my pitmaster skills!`,
@@ -231,11 +250,13 @@ Explain specifically how trying these recipes will help fix past issues logged i
     setExpandedAiRecipeId(recipe.id);
 
     try {
-      const res = await fetch('/api/ai-pitmaster', {
+      const res = await fetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `You are the AI Pitmaster advisor. The user is asking for custom advice for cooking "${recipe.title}" (${recipe.proteinCut}).
+          smokerProfile: profile,
+          effectiveSpecs: profile ? getEffectiveSmokerSpecs(profile) : null,
+          prompt: `You are ${AI_PITMASTER_NAME}. The user is asking for custom advice for cooking "${recipe.title}" (${recipe.proteinCut}).
 
 ANALYZE USER'S LOG HISTORY:
 The user has ${cookLogs.length} logged smoking sessions in their journal. Review all past cook logs provided below to detect their past strengths, issues (bark, tenderness, juiciness ratings or notes), and smoker setup.
@@ -257,7 +278,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
         }
       }
     } catch (err) {
-      console.warn('AI Pitmaster API error, using smart local fallback advice', err);
+      console.warn(`${AI_PITMASTER_NAME} API error, using smart local fallback advice`, err);
     }
 
     // Smart fallback incorporating log history
@@ -413,7 +434,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   onClick={() => handleSearchWebRecipes(search)}
                   disabled={isSearchingWeb}
                   className="px-3 py-2.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/30 text-xs font-bold rounded-xl whitespace-nowrap flex items-center space-x-1.5 transition-all cursor-pointer shrink-0"
-                  title="Search online web recipes with AI Pitmaster"
+                  title={`Search online web recipes with ${AI_PITMASTER_NAME}`}
                 >
                   <Search className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Web Search</span>
@@ -478,13 +499,13 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
 
           </div>
 
-          {/* AI Pitmaster Web Recipe Search Drawer (if active result or loading) */}
+          {/* CharGPT Web Recipe Search Drawer (if active result or loading) */}
           {(isSearchingWeb || webSearchResult) && (
             <div className="bg-[#121212] border border-orange-500/40 rounded-xl p-5 space-y-4 shadow-xl animate-fadeIn">
               <div className="flex items-center justify-between pb-3 border-b border-[#2a2a2a]">
                 <div className="flex items-center space-x-2 text-orange-400 font-bold text-xs sm:text-sm">
                   <Bot className="w-5 h-5 text-orange-400" />
-                  <span>AI Pitmaster Online Web Recipe Search Results for "{webSearchTerm}"</span>
+                  <span>{AI_PITMASTER_NAME} Online Web Recipe Search Results for "{webSearchTerm}"</span>
                 </div>
                 <button
                   type="button"
@@ -551,7 +572,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
             </div>
           )}
 
-          {/* AI Pitmaster Log Analysis Banner */}
+          {/* CharGPT Log Analysis Banner */}
           <div className="bg-[#121212] border border-orange-500/30 rounded-xl p-4 space-y-3 shadow-lg">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start space-x-3">
@@ -561,14 +582,14 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 <div>
                   <div className="flex items-center space-x-2">
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
-                      <span>AI Pitmaster Log Analysis & Smart Recipe Match</span>
+                      <span>CharGPT Log Analysis & Smart Recipe Match</span>
                     </h3>
                     <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
                       {cookLogs.length} Logs Analyzed
                     </span>
                   </div>
                   <p className="text-[11px] text-zinc-400 mt-0.5">
-                    Ask AI Pitmaster to review your past smoke logs (tenderness, bark, ratings & notes) and suggest which recipes to cook next to level up your pitmaster skills.
+                    Ask CharGPT to review your past smoke logs (tenderness, bark, ratings & notes) and suggest which recipes to cook next based on learned preferences.
                   </p>
                 </div>
               </div>
@@ -599,7 +620,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
                   <div className="flex items-center space-x-2 text-orange-400 font-bold">
                     <BarChart3 className="w-4 h-4 text-orange-400" />
-                    <span>Personalized AI Pitmaster Recipe Recommendations</span>
+                    <span>Personalized {AI_PITMASTER_NAME} Recipe Recommendations</span>
                   </div>
                   <button
                     type="button"
@@ -613,7 +634,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 {isAnalyzingOverallLogs ? (
                   <div className="py-6 flex flex-col items-center justify-center space-y-2 text-zinc-400 text-xs">
                     <Loader2 className="w-6 h-6 animate-spin text-orange-400" />
-                    <span>Consulting AI Pitmaster against your complete cook journal history...</span>
+                    <span>Consulting {AI_PITMASTER_NAME} against your complete cook journal history...</span>
                   </div>
                 ) : (
                   <div className="text-zinc-200 whitespace-pre-line leading-relaxed text-xs font-sans">
@@ -635,7 +656,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   No Local Recipe Presets Found for "{search || selectedProtein}"
                 </h4>
                 <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                  Our built-in template library does not have an exact match, but AI Pitmaster can search online for real competition smoking guides for this cut!
+                  Our built-in template library does not have an exact match, but {AI_PITMASTER_NAME} can search online for real competition smoking guides for this cut!
                 </p>
               </div>
 
@@ -676,24 +697,64 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredRecipes.map((recipe) => {
-                const loggedMatches = cookLogs.filter(
-                  (c) => c.proteinType === recipe.proteinType || c.proteinCut?.toLowerCase().includes(recipe.proteinCut.toLowerCase())
-                );
-                const avgLogRating =
-                  loggedMatches.length > 0
-                    ? (
-                        loggedMatches.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) /
-                        loggedMatches.length
-                      ).toFixed(1)
-                    : null;
+            <div className="space-y-2.5">
+              {/* Carousel Header indicator & Web/PC Navigation Controls */}
+              <div className="flex items-center justify-between text-xs px-1 gap-2 flex-wrap sm:flex-nowrap">
+                <div className="flex items-center space-x-2 min-w-0">
+                  <Sparkles className="w-4 h-4 text-orange-400 shrink-0" />
+                  <span className="font-bold text-white uppercase tracking-wider text-[11px] sm:text-xs truncate">
+                    5-Item Recipe Suggestions Carousel
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span className="text-[10px] sm:text-xs font-mono text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                    Showing 5 of {filteredRecipes.length} Matches
+                  </span>
 
-                return (
-                  <div
-                    key={recipe.id}
-                    className="bg-[#242424] border border-[#2a2a2a] hover:border-orange-500/40 rounded-xl p-5 shadow-lg transition-all flex flex-col justify-between group relative overflow-hidden"
-                  >
+                  {/* Web & PC Version Interactive Scroll Buttons */}
+                  <div className="hidden sm:flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => scrollCarousel('left')}
+                      className="p-1 rounded-lg bg-[#242424] hover:bg-orange-500/20 hover:text-orange-300 text-zinc-300 border border-[#2a2a2a] transition-all cursor-pointer"
+                      title="Scroll Left"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => scrollCarousel('right')}
+                      className="p-1 rounded-lg bg-[#242424] hover:bg-orange-500/20 hover:text-orange-300 text-zinc-300 border border-[#2a2a2a] transition-all cursor-pointer"
+                      title="Scroll Right"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Horizontal Swipe Carousel Container - Touch optimized for Smartphone, visible scrollbar on Web/PC */}
+              <div 
+                ref={carouselRef}
+                className="flex items-stretch gap-3 sm:gap-4 overflow-x-auto web-carousel-scrollbar snap-x snap-mandatory pb-4 pt-1 touch-pan-x w-full min-w-0"
+              >
+                {filteredRecipes.slice(0, 5).map((recipe) => {
+                  const loggedMatches = cookLogs.filter(
+                    (c) => c.proteinType === recipe.proteinType || c.proteinCut?.toLowerCase().includes(recipe.proteinCut.toLowerCase())
+                  );
+                  const avgLogRating =
+                    loggedMatches.length > 0
+                      ? (
+                          loggedMatches.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) /
+                          loggedMatches.length
+                        ).toFixed(1)
+                      : null;
+
+                  return (
+                    <div
+                      key={recipe.id}
+                      className="w-[84vw] sm:w-[320px] md:w-[340px] max-w-[340px] snap-align-start shrink-0 bg-[#242424] border border-[#2a2a2a] hover:border-orange-500/40 rounded-xl p-4 sm:p-5 shadow-lg transition-all flex flex-col justify-between group relative overflow-hidden"
+                    >
                     <div>
                       {/* Top Pill Row */}
                       <div className="flex items-center justify-between pb-3 border-b border-[#2a2a2a] text-xs">
@@ -781,13 +842,13 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                     </div>
                   </div>
 
-                  {/* Inline AI Pitmaster Advice Drawer */}
+                  {/* Inline CharGPT Advice Drawer */}
                   {expandedAiRecipeId === recipe.id && (
                     <div className="mt-3 p-3 bg-[#121212] border border-orange-500/30 rounded-xl space-y-2 animate-fadeIn text-xs">
                       <div className="flex items-center justify-between pb-1 border-b border-[#2a2a2a]">
                         <div className="flex items-center space-x-1.5 text-orange-400 font-bold">
                           <Bot className="w-4 h-4 text-orange-400" />
-                          <span>AI Pitmaster Custom Advice</span>
+                          <span>{AI_PITMASTER_NAME} Custom Advice</span>
                         </div>
                         {onAskAIPitmaster && (
                           <button
@@ -804,7 +865,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                       {loadingAiRecipeId === recipe.id ? (
                         <div className="py-3 flex items-center justify-center space-x-2 text-zinc-400 text-xs">
                           <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                          <span>Consulting AI Pitmaster for thermal advice...</span>
+                          <span>Consulting {AI_PITMASTER_NAME} for thermal advice...</span>
                         </div>
                       ) : (
                         <div className="text-zinc-300 whitespace-pre-line leading-relaxed text-[11px] font-sans">
@@ -833,7 +894,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                           ? 'bg-orange-500/20 text-orange-300 border-orange-500/50'
                           : 'bg-[#1a1a1a] hover:bg-orange-500/10 text-orange-400 border-orange-500/30'
                       }`}
-                      title="Ask AI Pitmaster for custom advice on this recipe"
+                      title={`Ask ${AI_PITMASTER_NAME} for custom advice on this recipe`}
                     >
                       {loadingAiRecipeId === recipe.id ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-400" />
@@ -855,6 +916,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   </div>
                 );
               })}
+              </div>
             </div>
           )}
 
@@ -863,8 +925,8 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
 
       {/* Recipe Full Modal View */}
       {activeModalRecipe && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative space-y-5 my-8 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 overflow-y-auto">
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-2xl p-4 sm:p-6 shadow-2xl relative space-y-5 my-8 max-h-[90vh] overflow-y-auto">
             
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-4 border-b border-[#2a2a2a]">
@@ -971,7 +1033,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
               </div>
             </div>
 
-            {/* AI Pitmaster Recipe Consultation Box */}
+            {/* CharGPT Recipe Consultation Box */}
             <div className="bg-[#121212] border border-orange-500/30 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
@@ -980,7 +1042,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                      AI Pitmaster Custom Advice
+                      {AI_PITMASTER_NAME} Custom Advice
                     </h4>
                     <p className="text-[10px] text-zinc-400">Tailored thermal curves, wood pairings & stall strategy</p>
                   </div>
@@ -997,7 +1059,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                     className="text-[11px] font-bold text-orange-400 hover:text-orange-300 flex items-center space-x-1.5 bg-orange-500/10 hover:bg-orange-500/20 px-3 py-1.5 rounded-xl border border-orange-500/30 cursor-pointer transition-all active:scale-95"
                   >
                     <MessageSquare className="w-3.5 h-3.5 text-orange-400" />
-                    <span>Chat in AI Pitmaster Tab</span>
+                    <span>Chat in {AI_NAME} Tab</span>
                   </button>
                 )}
               </div>
@@ -1016,12 +1078,12 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   {loadingAiRecipeId === activeModalRecipe.id ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
-                      <span>AI Pitmaster is analyzing recipe thermal curve...</span>
+                      <span>{AI_PITMASTER_NAME} is analyzing recipe thermal curve...</span>
                     </>
                   ) : (
                     <>
                       <Bot className="w-4 h-4 text-orange-400" />
-                      <span>✨ Generate AI Pitmaster Custom Advice for this Recipe</span>
+                      <span>✨ Generate {AI_PITMASTER_NAME} Custom Advice for this Recipe</span>
                     </>
                   )}
                 </button>

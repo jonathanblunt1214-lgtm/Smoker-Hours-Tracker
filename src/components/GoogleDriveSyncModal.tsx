@@ -9,7 +9,8 @@ import {
   AppDriveData,
 } from '../lib/driveSync';
 import { SmokerProfile, CookLog, FuelLog } from '../types';
-import { Cloud, CloudUpload, CloudDownload, LogOut, CheckCircle, AlertTriangle, X, RefreshCw } from 'lucide-react';
+import { Cloud, CloudUpload, CloudDownload, LogOut, CheckCircle, AlertTriangle, X, RefreshCw, ShieldCheck, FileText } from 'lucide-react';
+import { TermsOfServiceModal } from './TermsOfServiceModal';
 
 interface GoogleDriveSyncModalProps {
   isOpen: boolean;
@@ -41,6 +42,8 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   const [driveFileInfo, setDriveFileInfo] = useState<{ exists: boolean; fileId: string | null } | null>(null);
   const [confirmRestoreData, setConfirmRestoreData] = useState<AppDriveData | null>(null);
   const [confirmOverwriteSave, setConfirmOverwriteSave] = useState<boolean>(false);
+  const [termsAccepted, setTermsAccepted] = useState<boolean>(true);
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen && accessToken) {
@@ -61,6 +64,10 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   if (!isOpen) return null;
 
   const handleSignIn = async () => {
+    if (!termsAccepted) {
+      setStatusMsg({ type: 'error', text: 'Please review and accept the Terms of Service & Privacy Disclosure before signing up.' });
+      return;
+    }
     setLoading(true);
     setStatusMsg(null);
     try {
@@ -77,8 +84,8 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   };
 
   const handleSaveToDrive = async () => {
-    if (!accessToken) {
-      setStatusMsg({ type: 'error', text: 'Please sign in with Google first.' });
+    if (!accessToken || !currentUser) {
+      setStatusMsg({ type: 'error', text: '🔒 User Account Required: Non-local cloud backups require an active user account. Please sign in with Google below.' });
       return;
     }
 
@@ -152,8 +159,8 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-md p-4 sm:p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 animate-fade-in">
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-[96vw] sm:max-w-md p-4 sm:p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-[#242424] transition-colors cursor-pointer"
@@ -254,16 +261,50 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
         )}
 
         {!currentUser || !accessToken ? (
-          <div className="text-center py-4">
-            <p className="text-xs text-zinc-400 mb-4">
+          <div className="space-y-4 py-2">
+            <p className="text-xs text-zinc-300 leading-relaxed text-center">
               Connect your Google account to back up your smoker logs, maintenance records, and fuel history securely to Google Drive.
             </p>
 
+            {/* Terms & Privacy Pre-Sign-Up Notice */}
+            <div className="bg-[#121212] border border-[#2a2a2a] p-3 rounded-xl space-y-2 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-orange-400 flex items-center space-x-1.5 font-mono uppercase tracking-wider">
+                  <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
+                  <span>Data Access & Privacy Disclosure</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsTermsModalOpen(true)}
+                  className="text-[10px] text-blue-400 hover:underline flex items-center space-x-1 cursor-pointer font-semibold"
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>Read Full Terms</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-zinc-400 leading-normal">
+                By signing in, you grant the app permission to read/write a single backup file (<code className="text-orange-400 font-mono">pitmaster_smoker_data.json</code>) in your Google Drive. We do NOT access any other files or share your personal data.
+              </p>
+
+              <label className="flex items-start space-x-2 pt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  className="mt-0.5 rounded border-zinc-700 text-orange-500 focus:ring-orange-500 bg-[#1e1e1e] cursor-pointer"
+                />
+                <span className="text-[11px] text-zinc-300 leading-tight">
+                  I agree to the <button type="button" onClick={() => setIsTermsModalOpen(true)} className="text-orange-400 underline font-bold">Terms of Service</button> & Privacy Policy.
+                </span>
+              </label>
+            </div>
+
             {/* Official Material Google Sign In Button */}
-            <div className="flex justify-center">
+            <div className="flex justify-center pt-1">
               <button
                 onClick={handleSignIn}
-                disabled={loading}
+                disabled={loading || !termsAccepted}
                 className="gsi-material-button w-full sm:w-auto flex items-center justify-center bg-white hover:bg-gray-100 text-gray-700 font-semibold py-2.5 px-4 rounded-xl shadow-md border border-gray-300 transition-all cursor-pointer disabled:opacity-50"
               >
                 <div className="gsi-material-button-content-wrapper flex items-center space-x-3">
@@ -361,6 +402,13 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
           </p>
         </div>
       </div>
+
+      <TermsOfServiceModal
+        isOpen={isTermsModalOpen}
+        onClose={() => setIsTermsModalOpen(false)}
+        onAccept={() => setTermsAccepted(true)}
+        accepted={termsAccepted}
+      />
     </div>
   );
 };
