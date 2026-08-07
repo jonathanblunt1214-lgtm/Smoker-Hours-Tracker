@@ -54,7 +54,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
   tempUnit = 'F',
   onShowToast,
   isCollapsible = false,
-  defaultOpen = true,
+  defaultOpen = false,
   titleOverride,
 }) => {
   const [pushConfig, setPushConfig] = useState<CharGPTPushConfig>(loadPushConfig);

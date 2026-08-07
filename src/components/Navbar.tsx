@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, BarChart3, BookOpen, PlusCircle, Wrench, Sparkles, Clock, Settings, Calendar, Database, Brain, Crown } from 'lucide-react';
+import { Flame, BarChart3, BookOpen, PlusCircle, Wrench, Sparkles, Clock, Settings, Calendar, Database, Brain, Crown, Download, Cpu } from 'lucide-react';
 import { isMasterAdmin } from '../utils/adminAuth';
 
 interface NavbarProps {
@@ -13,6 +13,7 @@ interface NavbarProps {
   isOnline?: boolean;
   currentUserEmail?: string | null;
   onOpenMasterAdmin?: () => void;
+  onOpenDownloadStore?: () => void;
 }
 
 const SmokeStackIcon: React.FC<{ className?: string }> = ({ className = "h-5 w-5" }) => (
@@ -64,11 +65,12 @@ export const Navbar: React.FC<NavbarProps> = ({
   isDriveConnected = false,
   currentUserEmail,
   onOpenMasterAdmin,
+  onOpenDownloadStore,
 }) => {
   const isAdmin = isMasterAdmin(currentUserEmail);
   return (
-    <header className="sticky top-0 z-40 bg-[#161616] border-b border-[#2a2a2a] text-[#e0e0e0] shadow-xl">
-      <div className="w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto px-2 sm:px-4 md:px-6">
+    <header className="sticky top-0 z-40 bg-[#161616] border-b border-[#2a2a2a] text-[#e0e0e0] shadow-xl w-full">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14">
           {/* Brand Logo & Smoker Name */}
           <div className="flex items-center space-x-2.5 shrink-0">
@@ -166,9 +168,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             {(isAdmin || onOpenMasterAdmin) && (
               <button
                 type="button"
-                onClick={onOpenMasterAdmin}
+                onClick={() => onOpenSettings('data')}
                 className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gradient-to-r from-purple-950/80 via-amber-950/80 to-orange-950/80 hover:from-purple-900 hover:to-orange-900 border border-purple-500/40 hover:border-amber-400 rounded-xl text-xs font-extrabold text-amber-300 transition-all cursor-pointer active:scale-95 shadow-md shadow-purple-950/30"
-                title="Master Admin & Developer Control Dashboard (jonathanblunt1214@gmail.com)"
+                title="Account & System Admin Controls (jonathanblunt1214@gmail.com)"
               >
                 <Crown className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
                 <span className="hidden sm:inline text-[11px] font-mono">Master Admin</span>
@@ -184,6 +186,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Database className="h-3.5 w-3.5 text-blue-400" />
               <span className="hidden lg:inline text-[11px]">Data & Backup</span>
             </button>
+
+            {onOpenDownloadStore && (
+              <button
+                type="button"
+                onClick={onOpenDownloadStore}
+                className="inline-flex items-center space-x-1.5 px-2.5 py-1.5 bg-gradient-to-r from-orange-500/20 to-amber-500/20 hover:from-orange-500/30 hover:to-amber-500/30 border border-orange-500/40 rounded-xl text-xs font-bold text-orange-300 transition-all cursor-pointer active:scale-95 shadow-sm"
+                title="Download Smoke Stack App via Google Play Store, Apple App Store, Windows, or Raspberry Pi"
+              >
+                <Download className="h-3.5 w-3.5 text-orange-400" />
+                <span className="hidden sm:inline text-[11px]">Get App</span>
+              </button>
+            )}
 
             <div className="flex items-center bg-[#222222] border border-[#2a2a2a] rounded-xl p-0.5 shadow-inner">
               <div className="flex items-center space-x-1 px-2 py-1 text-zinc-300 border-r border-[#2a2a2a]">
@@ -209,7 +223,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Mobile Nav sub-bar */}
-      <div className="md:hidden flex items-center justify-around bg-[#121212] px-1 py-1.5 border-t border-[#2a2a2a] text-[11px] sticky top-16 z-30 shadow-md">
+      <div className="md:hidden flex items-center justify-between sm:justify-around bg-[#121212] px-1 py-1.5 border-t border-[#2a2a2a] text-[11px] sticky top-14 z-30 shadow-md overflow-x-auto no-scrollbar max-w-full">
         <button
           onClick={() => setActiveTab('analytics')}
           className={`flex flex-col items-center py-1.5 px-2.5 rounded-xl transition-all min-w-[56px] min-h-[44px] justify-center ${

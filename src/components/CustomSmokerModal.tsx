@@ -331,7 +331,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 animate-fade-in overflow-hidden">
-      <div className="relative w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-3xl bg-[#181818] border border-[#2a2a2a] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-3xl bg-[#181818] border border-[#2a2a2a] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-[#202020] border-b border-[#2a2a2a] shrink-0">
           <div className="flex items-center space-x-2.5">

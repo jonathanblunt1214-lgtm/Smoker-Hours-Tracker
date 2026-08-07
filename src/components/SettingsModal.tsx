@@ -5,10 +5,11 @@ import {
   saveToGoogleDrive,
   loadFromGoogleDrive,
 } from '../lib/driveSync';
-import { SmokerProfile, CookLog, FuelLog, FederatedLearningConfig, FederatedPoolStats, CustomSmokerSpec, ManufacturerSmokerSpec, LowPowerModeSettings } from '../types';
+import { SmokerProfile, CookLog, FuelLog, FederatedLearningConfig, FederatedPoolStats, CustomSmokerSpec, ManufacturerSmokerSpec, LowPowerModeSettings, LocalUserProfile, OneDriveAccount } from '../types';
 import { calculateUserAccount, getUserLevelThresholds } from '../utils/userLeveling';
 import { loadFederatedLearningConfig, saveFederatedLearningConfig, loadSavedCustomSmokers, saveSavedCustomSmokers, loadSavedManufacturerSmokers, saveSavedManufacturerSmokers, getStorageStats, compactAndOptimizeStorage, DEFAULT_GRANULAR_SHARING, getAutoClearInterval, setAutoClearInterval, executeCacheClear, getNextAutoClearDateFormatted, AutoClearIntervalOption } from '../utils/storage';
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
+import { isMasterAdmin, isAdminUser, getSubAdmins, addSubAdmin, removeSubAdmin } from '../utils/adminAuth';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { TermsOfServiceModal } from './TermsOfServiceModal';
 import { SmokerModManager } from './SmokerModManager';
@@ -63,6 +64,9 @@ import {
   Zap,
   Check,
   Info,
+  Crown,
+  Clock,
+  Cpu,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -96,27 +100,22 @@ interface SettingsModalProps {
     profile: SmokerProfile;
     cookLogs: CookLog[];
     fuelLogs: FuelLog[];
+    userAccount?: LocalUserProfile;
+    userProfile?: LocalUserProfile;
   };
-  onRestoreData?: (restored: { profile: SmokerProfile; cookLogs: CookLog[]; fuelLogs: FuelLog[] }) => void;
+  onRestoreData?: (restored: {
+    profile: SmokerProfile;
+    cookLogs: CookLog[];
+    fuelLogs: FuelLog[];
+    userAccount?: LocalUserProfile;
+    userProfile?: LocalUserProfile;
+  }) => void;
   onOpenCustomSmokerModal?: () => void;
   profile?: SmokerProfile;
   onUpdateProfile?: (updatedProfile: SmokerProfile) => void;
   lowPowerSettings?: LowPowerModeSettings;
   onToggleLowPowerMode?: (key?: keyof LowPowerModeSettings) => void;
-}
-
-interface LocalUserProfile {
-  name: string;
-  email: string;
-  title: string;
-  createdAt: string;
-}
-
-interface OneDriveAccount {
-  connected: boolean;
-  email: string;
-  lastSync: string | null;
-  autoSync: boolean;
+  onOpenMasterAdmin?: () => void;
 }
 
 const ToggleSwitch: React.FC<{
@@ -175,6 +174,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onUpdateProfile,
   lowPowerSettings,
   onToggleLowPowerMode,
+  onOpenMasterAdmin,
 }) => {
   const [activeTab, setActiveTab] = useState<'appearance' | 'alerts' | 'cloud' | 'data'>(
     initialTab === 'smokers' ? 'data' : initialTab || 'appearance'
@@ -200,15 +200,137 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [localAccount, setLocalAccount] = useState<LocalUserProfile>(() => {
     try {
       const saved = localStorage.getItem('pitmaster_local_user_account');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (!parsed.rigs || parsed.rigs.length === 0) {
+          parsed.rigs = [
+            profile || {
+              id: 'rig-pitboss-5series',
+              name: 'Pit Boss Copperhead 5-Series Vertical',
+              model: 'Copperhead 5-Series',
+              smokerType: 'Vertical Pellet Smoker',
+              fuelType: 'Pellets',
+              initialHours: 148.25,
+              currentHours: 148.25,
+              pelletHopperCapacityLbs: 60,
+              maintenanceTasks: [],
+              appliedModIds: [],
+              appliedMods: [],
+            },
+          ];
+          parsed.activeRigId = parsed.rigs[0].id;
+        }
+        return parsed;
+      }
     } catch (e) {}
+    const defaultRig = profile || {
+      id: 'rig-pitboss-5series',
+      name: 'Pit Boss Copperhead 5-Series Vertical',
+      model: 'Copperhead 5-Series',
+      smokerType: 'Vertical Pellet Smoker',
+      fuelType: 'Pellets',
+      initialHours: 148.25,
+      currentHours: 148.25,
+      pelletHopperCapacityLbs: 60,
+      maintenanceTasks: [],
+      appliedModIds: [],
+      appliedMods: [],
+    };
     return {
       name: 'Jonathan Blunt',
       email: 'jonathanblunt1214@gmail.com',
       title: 'Head Pitmaster',
       createdAt: new Date().toISOString().slice(0, 10),
+      rigs: [defaultRig],
+      activeRigId: defaultRig.id,
     };
   });
+
+  // Collapsible Accordion Sections in Account Settings
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    profile: false,      // 1. User Account Profile & Rank
+    multirig: false,     // 2. Multi-Rig Fleet Management
+    hours: true,         // 3. Initial Runtime Hours & Baseline
+    admin: true,         // 4. System Admin & Dev Controls
+    cloudSync: true,     // 5. Server Account Sync & Backups
+  });
+
+  const toggleSection = (key: string) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Multi-Rig Fleet Management State
+  const [isAddingRig, setIsAddingRig] = useState(false);
+  const [newRigName, setNewRigName] = useState('');
+  const [newRigModel, setNewRigModel] = useState('');
+  const [newRigType, setNewRigType] = useState('Vertical Pellet Smoker');
+  const [newRigFuel, setNewRigFuel] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Pellets');
+  const [newRigHours, setNewRigHours] = useState('0');
+  const [newRigHopper, setNewRigHopper] = useState('20');
+
+  const [editingRigId, setEditingRigId] = useState<string | null>(null);
+  const [editRigName, setEditRigName] = useState('');
+  const [editRigHours, setEditRigHours] = useState('0');
+  const [editRigHopper, setEditRigHopper] = useState('20');
+
+  const [serverSyncStatus, setServerSyncStatus] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [isServerSyncing, setIsServerSyncing] = useState(false);
+
+  const handleSyncWithServer = async () => {
+    setIsServerSyncing(true);
+    setServerSyncStatus({ type: 'info', text: 'Syncing user account & multi-rig fleet with server repository...' });
+    try {
+      const payload = {
+        userAccount: localAccount,
+        rigs: localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean),
+        activeRigId: localAccount.activeRigId || profile?.id || 'rig-1',
+        cookLogs: currentAppData?.cookLogs || [],
+        fuelLogs: currentAppData?.fuelLogs || [],
+      };
+      const res = await fetch('/api/account/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setServerSyncStatus({ type: 'success', text: '✅ Account & multi-rig fleet hosted & synced on server!' });
+        if (data.rigs && data.rigs.length > 0) {
+          setLocalAccount((prev) => ({
+            ...prev,
+            rigs: data.rigs,
+            activeRigId: data.activeRigId,
+          }));
+        }
+      } else {
+        setServerSyncStatus({ type: 'error', text: data.error || 'Server sync failed.' });
+      }
+    } catch (err: any) {
+      setServerSyncStatus({ type: 'error', text: 'Failed to connect to server account repository.' });
+    } finally {
+      setIsServerSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && dataSubTab === 'account') {
+      const email = currentUser?.email || localAccount.email || 'jonathanblunt1214@gmail.com';
+      fetch(`/api/account?email=${encodeURIComponent(email)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success && data.rigs && data.rigs.length > 0) {
+            setLocalAccount((prev) => ({
+              ...prev,
+              name: data.account?.name || prev.name,
+              title: data.account?.title || prev.title,
+              rigs: data.rigs,
+              activeRigId: data.activeRigId || data.rigs[0]?.id,
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, dataSubTab, currentUser]);
 
   const [isEditingAccount, setIsEditingAccount] = useState(false);
   const [editName, setEditName] = useState(localAccount.name);
@@ -274,6 +396,118 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeSpecThermalRating, setActiveSpecThermalRating] = useState(effectiveSpecs.thermalEfficiencyRating);
   const [activeSpecGauge, setActiveSpecGauge] = useState(effectiveSpecs.metalGaugeOrInsulation);
   const [activeSpecDraft, setActiveSpecDraft] = useState(effectiveSpecs.draftOrController);
+  const [activeSpecInitialHours, setActiveSpecInitialHours] = useState(activeProfile?.initialHours ?? 0);
+
+  // Account Settings: Initial Smoker Hours & Sub-Admin Controls State
+  const [subAdminsList, setSubAdminsList] = useState<string[]>(getSubAdmins());
+  const [newSubAdminInput, setNewSubAdminInput] = useState('');
+  const [subAdminMsg, setSubAdminMsg] = useState<string | null>(null);
+  const [accountInitialHours, setAccountInitialHours] = useState<number>(activeProfile?.initialHours ?? 0);
+  const [globalBulkBaselineInput, setGlobalBulkBaselineInput] = useState('100');
+
+  useEffect(() => {
+    if (activeProfile?.initialHours !== undefined) {
+      setAccountInitialHours(activeProfile.initialHours);
+    }
+  }, [activeProfile?.initialHours]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(localAccount));
+    } catch (e) {}
+  }, [localAccount]);
+
+  const handleUpdatePitBaseline = (rigId: string, newInitial: number) => {
+    const safeInitial = Math.max(0, newInitial);
+    const logs = currentAppData?.cookLogs || [];
+
+    const updatedRigs = (localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : (profile ? [profile] : [])).map((r) => {
+      if (r.id === rigId || (!r.id && rigId === 'default')) {
+        const pitLogs = logs.filter((c) => c.smokerId === r.id);
+        const pitLogged = pitLogs.length > 0
+          ? pitLogs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0)
+          : ((localAccount.rigs || []).length <= 1 ? logs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0) : 0);
+        const newCurrent = Number((safeInitial + pitLogged).toFixed(2));
+        return {
+          ...r,
+          initialHours: safeInitial,
+          currentHours: newCurrent,
+        };
+      }
+      return r;
+    });
+
+    setLocalAccount((prev) => ({
+      ...prev,
+      rigs: updatedRigs,
+    }));
+
+    const activeRigId = localAccount.activeRigId || profile?.id;
+    const activeRig = updatedRigs.find((r) => r.id === activeRigId) || updatedRigs[0];
+    if (activeRig && onUpdateProfile) {
+      onUpdateProfile(activeRig);
+      setAccountInitialHours(activeRig.initialHours || 0);
+    }
+    handleSyncWithServer();
+  };
+
+  const handleApplyGlobalBulkBaseline = (val: number) => {
+    const safeVal = Math.max(0, val);
+    const logs = currentAppData?.cookLogs || [];
+
+    const updatedRigs = (localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : (profile ? [profile] : [])).map((r) => {
+      const pitLogs = logs.filter((c) => c.smokerId === r.id);
+      const pitLogged = pitLogs.length > 0
+        ? pitLogs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0)
+        : ((localAccount.rigs || []).length <= 1 ? logs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0) : 0);
+      const newCurrent = Number((safeVal + pitLogged).toFixed(2));
+      return {
+        ...r,
+        initialHours: safeVal,
+        currentHours: newCurrent,
+      };
+    });
+
+    setLocalAccount((prev) => ({
+      ...prev,
+      rigs: updatedRigs,
+    }));
+
+    const activeRigId = localAccount.activeRigId || profile?.id;
+    const activeRig = updatedRigs.find((r) => r.id === activeRigId) || updatedRigs[0];
+    if (activeRig && onUpdateProfile) {
+      onUpdateProfile(activeRig);
+      setAccountInitialHours(safeVal);
+    }
+    handleSyncWithServer();
+  };
+
+  const handleSaveAccountInitialHours = (newInitial: number) => {
+    const activeRigId = localAccount.activeRigId || profile?.id || 'default';
+    handleUpdatePitBaseline(activeRigId, newInitial);
+  };
+
+  const handleAddSubAdmin = () => {
+    const masterEmail = currentUser?.email || localAccount.email;
+    if (addSubAdmin(masterEmail, newSubAdminInput)) {
+      setSubAdminsList(getSubAdmins());
+      setNewSubAdminInput('');
+      setSubAdminMsg('Sub-admin added successfully!');
+      setTimeout(() => setSubAdminMsg(null), 3000);
+    } else {
+      setSubAdminMsg('Failed to add sub-admin. Ensure email is valid.');
+      setTimeout(() => setSubAdminMsg(null), 3000);
+    }
+  };
+
+  const handleRemoveSubAdmin = (emailToRemove: string) => {
+    const masterEmail = currentUser?.email || localAccount.email;
+    if (removeSubAdmin(masterEmail, emailToRemove)) {
+      setSubAdminsList(getSubAdmins());
+      setSubAdminMsg('Sub-admin removed.');
+      setTimeout(() => setSubAdminMsg(null), 3000);
+    }
+  };
 
   const [smokerSpecSaveStatus, setSmokerSpecSaveStatus] = useState<string | null>(null);
 
@@ -292,6 +526,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setActiveSpecThermalRating(eff.thermalEfficiencyRating);
       setActiveSpecGauge(eff.metalGaugeOrInsulation);
       setActiveSpecDraft(eff.draftOrController);
+      setActiveSpecInitialHours(activeProfile.initialHours ?? 0);
     }
   }, [activeProfile]);
 
@@ -318,11 +553,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [savedManufacturerSmokersList, setSavedManufacturerSmokersList] = useState<ManufacturerSmokerSpec[]>(() => loadSavedManufacturerSmokers());
 
   // Collapsible state toggles for Smoker Specs in Settings
-  const [isSpecsFormExpanded, setIsSpecsFormExpanded] = useState<boolean>(true);
-  const [isSmokerSwitcherExpanded, setIsSmokerSwitcherExpanded] = useState<boolean>(true);
-  const [isSmokerCatalogBannerExpanded, setIsSmokerCatalogBannerExpanded] = useState<boolean>(true);
-  const [isSmokerModsExpanded, setIsSmokerModsExpanded] = useState<boolean>(true);
-  const [isGranularControlsExpanded, setIsGranularControlsExpanded] = useState<boolean>(true);
+  const [isSpecsFormExpanded, setIsSpecsFormExpanded] = useState<boolean>(false);
+  const [isSmokerSwitcherExpanded, setIsSmokerSwitcherExpanded] = useState<boolean>(false);
+  const [isSmokerCatalogBannerExpanded, setIsSmokerCatalogBannerExpanded] = useState<boolean>(false);
+  const [isSmokerModsExpanded, setIsSmokerModsExpanded] = useState<boolean>(false);
+  const [isGranularControlsExpanded, setIsGranularControlsExpanded] = useState<boolean>(false);
 
   const [federatedConfig, setFederatedConfig] = useState<FederatedLearningConfig>(() => loadFederatedLearningConfig());
   const [poolStats, setPoolStats] = useState<FederatedPoolStats | null>(null);
@@ -551,13 +786,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Save local account edits
   const handleSaveAccountEdits = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Restrict competition & master titles unless user has sufficient logged hours
+    const restrictedKeywords = ['competition', 'master', 'grand', 'champion', 'certified'];
+    const titleLower = editTitle.trim().toLowerCase();
+    const hasRestrictedKeyword = restrictedKeywords.some(keyword => titleLower.includes(keyword));
+    
+    if (hasRestrictedKeyword) {
+      // Assuming 1000 hours is the threshold for these titles, since we don't have a formal verification API.
+      const requiredHours = 1000;
+      if (!profile || (profile.currentHours || 0) < requiredHours) {
+        setLocalActionStatus({ type: 'error', text: `Restricted Title: Requires ${requiredHours}+ verified hours logged or official competition verification to use '${editTitle.trim()}'.` });
+        return;
+      }
+    }
+
     const updated = {
       ...localAccount,
       name: editName.trim() || 'Pitmaster',
       email: editEmail.trim() || 'pitmaster@local.app',
-      title: editTitle.trim() || 'Head Pitmaster',
+      title: editTitle.trim(),
     };
     setLocalAccount(updated);
+    localStorage.setItem('pitmaster_local_account', JSON.stringify(updated));
     setIsEditingAccount(false);
     setLocalActionStatus({ type: 'success', text: 'Pitmaster account profile updated!' });
   };
@@ -633,14 +884,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const data = await loadFromGoogleDrive(accessToken);
       if (data && onRestoreData) {
+        const restoredAccount = data.userAccount || data.userProfile;
+        if (restoredAccount) {
+          setLocalAccount(restoredAccount);
+          try {
+            localStorage.setItem('pitmaster_local_user_account', JSON.stringify(restoredAccount));
+          } catch (e) {}
+        }
         onRestoreData({
           profile: data.profile,
           cookLogs: data.cookLogs,
           fuelLogs: data.fuelLogs,
+          userAccount: restoredAccount,
+          userProfile: restoredAccount,
         });
         setDriveActionStatus({
           type: 'success',
-          text: `Restored ${data.cookLogs?.length || 0} cook logs from Google Drive!`,
+          text: `Restored ${data.cookLogs?.length || 0} cook logs & user account from Google Drive!`,
         });
       } else {
         setDriveActionStatus({ type: 'error', text: 'No Google Drive backup file found.' });
@@ -783,17 +1043,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           throw new Error('Invalid backup file format. Missing cookLogs or profile data.');
         }
 
+        const restoredAccount = parsed.userProfile || parsed.userAccount;
+        if (restoredAccount) {
+          setLocalAccount(restoredAccount);
+          try {
+            localStorage.setItem('pitmaster_local_user_account', JSON.stringify(restoredAccount));
+          } catch (e) {}
+        }
+
         const restored = {
           profile: parsed.profile || currentAppData?.profile,
           cookLogs: Array.isArray(parsed.cookLogs) ? parsed.cookLogs : currentAppData?.cookLogs || [],
           fuelLogs: Array.isArray(parsed.fuelLogs) ? parsed.fuelLogs : currentAppData?.fuelLogs || [],
+          userAccount: restoredAccount || localAccount,
+          userProfile: restoredAccount || localAccount,
         };
 
         if (onRestoreData) {
           onRestoreData(restored);
           setLocalActionStatus({
             type: 'success',
-            text: `Imported local backup successfully (${restored.cookLogs.length} cook logs restored)!`,
+            text: `Imported local backup successfully (${restored.cookLogs.length} cook logs & user account restored)!`,
           });
         }
       } catch (err: any) {
@@ -957,7 +1227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 animate-fade-in">
       <div 
-        className="modal-container bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-[96vw] sm:max-w-lg p-5 sm:p-6 shadow-2xl space-y-4 text-zinc-200 overflow-y-auto max-h-[92vh]"
+        className="modal-container bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-lg p-5 sm:p-6 shadow-2xl space-y-4 text-zinc-200 overflow-y-auto max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -1170,6 +1440,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onChange={() => onToggleLowPowerMode('disableGpuBlurEffects')}
                       label="Disable GPU Blur Effects"
                     />
+                  </div>
+                  
+                  {/* Dedicated Raspberry Pi Hardware Acceleration & Kiosk Section */}
+                  <div className="mt-3 pt-3 border-t border-[#333] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-1.5 text-rose-400 font-bold">
+                        <Cpu className="w-4 h-4 animate-pulse" />
+                        <span>Raspberry Pi Hardware Acceleration Mode</span>
+                      </div>
+                      <ToggleSwitch
+                        checked={!!lowPowerSettings.raspberryPiMode}
+                        onChange={() => onToggleLowPowerMode('raspberryPiMode')}
+                        label="Toggle Raspberry Pi Mode"
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-400 font-sans">
+                      Optimizes DOM updates, caps chart frame rates, and disables backdrop filters specifically for ARM processors (Pi Zero, 3, 4, 5).
+                    </p>
+
+                    {lowPowerSettings.raspberryPiMode && (
+                      <div className="pl-3 border-l-2 border-rose-500/50 space-y-2 pt-1 text-[11px]">
+                        <div className="flex items-center justify-between bg-[#141414] p-2 rounded-lg border border-[#2a2a2a]">
+                          <span>Enlarge Touchscreen Targets (Pi Kiosk Display)</span>
+                          <ToggleSwitch
+                            checked={!!lowPowerSettings.piKioskTouchTargets}
+                            onChange={() => onToggleLowPowerMode('piKioskTouchTargets')}
+                            label="Touchscreen Targets"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between bg-[#141414] p-2 rounded-lg border border-[#2a2a2a]">
+                          <span>Aggressive Memory Cache Purge</span>
+                          <ToggleSwitch
+                            checked={!!lowPowerSettings.piAggressiveGc}
+                            onChange={() => onToggleLowPowerMode('piAggressiveGc')}
+                            label="Aggressive Memory GC"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1413,326 +1722,1015 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            {/* SUB-TAB 1: USER ACCOUNTS & PITMASTER PROFILES */}
+            {/* SUB-TAB 1: USER ACCOUNTS, MULTI-RIG FLEET & COLLAPSIBLE SETTINGS */}
             {dataSubTab === 'account' && (
-              <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
-                  <div className="flex items-center space-x-2">
-                    <UserIcon className="w-4 h-4 text-orange-400" />
-                    <h4 className="text-xs sm:text-sm font-bold text-white">Pitmaster User Account</h4>
-                  </div>
-                  {currentUser ? (
-                    <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md flex items-center space-x-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                      <span>Google Cloud Account</span>
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-mono text-orange-300 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded-md">
-                      Local Pitmaster Profile
-                    </span>
-                  )}
-                </div>
-
-                {/* Account Smoker Shortcut Banner */}
-                <div className="p-3 bg-[#181818] border border-[#2a2a2a] rounded-xl flex items-center justify-between gap-3">
+              <div className="space-y-3">
+                {/* Header & Server Hosted Indicator */}
+                <div className="flex items-center justify-between p-3 bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl">
                   <div className="flex items-center space-x-2.5">
-                    <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 shrink-0">
-                      <Flame className="w-4 h-4" />
+                    <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400">
+                      <UserIcon className="w-5 h-5" />
                     </div>
                     <div>
-                      <div className="text-xs font-bold text-white">Active Smoker Specification</div>
-                      <div className="text-[11px] text-zinc-400">{effectiveSpecs.displayName} ({effectiveSpecs.category})</div>
+                      <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                        <span>Account Settings & Pitmaster Fleet</span>
+                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 font-bold">
+                          <Server className="w-3 h-3 text-emerald-400" />
+                          <span>Server Hosted</span>
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-zinc-400">
+                        {localAccount.name} ({localAccount.email}) • {localAccount.rigs?.length || 1} Rig(s) Linked
+                      </p>
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setDataSubTab('smokers')}
-                    className="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs rounded-lg transition-colors cursor-pointer shrink-0"
+                    onClick={handleSyncWithServer}
+                    disabled={isServerSyncing}
+                    className="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 font-bold text-xs rounded-lg flex items-center space-x-1.5 transition-colors cursor-pointer disabled:opacity-50"
                   >
-                    Manage Specs
+                    <RefreshCw className={`w-3.5 h-3.5 ${isServerSyncing ? 'animate-spin text-orange-400' : ''}`} />
+                    <span>{isServerSyncing ? 'Syncing...' : 'Sync Server'}</span>
                   </button>
                 </div>
 
-                {/* Active User Details & Pitmaster Mastery Level Card */}
-                {currentUser ? (
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
-                    <div className="flex items-center space-x-3 truncate">
-                      {currentUser.photoURL ? (
-                        <img
-                          src={currentUser.photoURL}
-                          alt="User"
-                          className="w-9 h-9 rounded-full border border-orange-500/50 object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="w-9 h-9 rounded-full bg-orange-500/20 border border-orange-500/40 text-orange-400 font-bold flex items-center justify-center text-sm">
-                          {(currentUser.displayName || currentUser.email || 'P')[0].toUpperCase()}
-                        </div>
-                      )}
-                      <div className="truncate">
-                        <p className="text-xs font-bold text-white truncate">
-                          {currentUser.displayName || 'Google Pitmaster'}
-                        </p>
-                        <p className="text-[11px] text-zinc-400 font-mono truncate">{currentUser.email}</p>
+                {serverSyncStatus && (
+                  <div className={`p-2.5 rounded-xl text-xs font-medium border flex items-center space-x-2 ${
+                    serverSyncStatus.type === 'success'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                      : serverSyncStatus.type === 'error'
+                      ? 'bg-red-500/10 border-red-500/30 text-red-300'
+                      : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                  }`}>
+                    <Info className="w-4 h-4 shrink-0" />
+                    <span>{serverSyncStatus.text}</span>
+                  </div>
+                )}
+
+                {/* ============================================================
+                    COLLAPSIBLE ACCORDION 1: USER ACCOUNT PROFILE & CREDENTIALS
+                ============================================================ */}
+                <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('profile')}
+                    className="w-full px-3.5 py-3 bg-[#242424] hover:bg-[#2a2a2a] flex items-center justify-between cursor-pointer border-b border-[#2a2a2a] transition-colors"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <UserIcon className="w-4 h-4 text-orange-400" />
+                      <div className="text-left">
+                        <span className="text-xs font-bold text-white block">1. User Account Profile & Pitmaster Credentials</span>
+                        <span className="text-[10px] text-zinc-400 font-mono">{localAccount.name} • {localAccount.title}</span>
                       </div>
                     </div>
+                    <div className="flex items-center space-x-2">
+                      {currentUser ? (
+                        <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                          Google Auth
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono text-orange-300 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
+                          Server Profile
+                        </span>
+                      )}
+                      {collapsedSections.profile ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronUp className="w-4 h-4 text-orange-400" />}
+                    </div>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={onLogout}
-                      className="ml-2 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
-                    >
-                      <LogOut className="w-3 h-3" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {!isEditingAccount ? (
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
-                        <div className="flex items-center space-x-3 truncate">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-zinc-950 font-black flex items-center justify-center text-sm shrink-0">
-                            {localAccount.name[0]?.toUpperCase() || 'P'}
-                          </div>
-                          <div className="truncate">
-                            <div className="flex items-center space-x-2">
-                              <p className="text-xs font-bold text-white truncate">{localAccount.name}</p>
-                              <span className="text-[9px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.2 rounded">
-                                {localAccount.title}
-                              </span>
+                  {!collapsedSections.profile && (
+                    <div className="p-3.5 space-y-3 bg-[#181818] animate-fade-in">
+                      {currentUser ? (
+                        <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
+                          <div className="flex items-center space-x-3 truncate">
+                            {currentUser.photoURL ? (
+                              <img src={currentUser.photoURL} alt="User" className="w-9 h-9 rounded-full border border-orange-500/50 object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="w-9 h-9 rounded-full bg-orange-500/20 border border-orange-500/40 text-orange-400 font-bold flex items-center justify-center text-sm">
+                                {(currentUser.displayName || currentUser.email || 'P')[0].toUpperCase()}
+                              </div>
+                            )}
+                            <div className="truncate">
+                              <p className="text-xs font-bold text-white truncate">{currentUser.displayName || 'Google Pitmaster'}</p>
+                              <p className="text-[11px] text-zinc-400 font-mono truncate">{currentUser.email}</p>
                             </div>
-                            <p className="text-[11px] text-zinc-400 font-mono truncate">{localAccount.email}</p>
                           </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingAccount(true)}
-                          className="px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] border border-[#3a3a3a] text-zinc-200 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
-                        >
-                          <Edit3 className="w-3 h-3 text-orange-400" />
-                          <span>Edit</span>
-                        </button>
-                      </div>
-                    ) : (
-                      <form onSubmit={handleSaveAccountEdits} className="bg-[#1a1a1a] border border-orange-500/30 rounded-xl p-3 space-y-2.5">
-                        <p className="text-xs font-bold text-orange-400 flex items-center space-x-1">
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>Edit Local Account Profile</span>
-                        </p>
-                        <div className="space-y-2 text-xs">
-                          <div>
-                            <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Pitmaster Name</label>
-                            <input
-                              type="text"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-medium"
-                              placeholder="e.g. Jonathan Blunt"
-                              required
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Email Address</label>
-                            <input
-                              type="email"
-                              value={editEmail}
-                              onChange={(e) => setEditEmail(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-mono"
-                              placeholder="e.g. jonathanblunt1214@gmail.com"
-                              required
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Pitmaster Rank / Title</label>
-                            <input
-                              type="text"
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-medium"
-                              placeholder="e.g. Master Pitmaster"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-end space-x-2 pt-1">
                           <button
                             type="button"
-                            onClick={() => setIsEditingAccount(false)}
-                            className="px-3 py-1.5 bg-[#282828] hover:bg-[#323232] text-zinc-300 font-bold text-[11px] rounded-lg"
+                            onClick={onLogout}
+                            className="ml-2 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
                           >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-[11px] rounded-lg flex items-center space-x-1"
-                          >
-                            <Save className="w-3 h-3" />
-                            <span>Save Account</span>
+                            <LogOut className="w-3 h-3" />
+                            <span>Sign Out</span>
                           </button>
                         </div>
-                      </form>
-                    )}
-
-                    {/* Terms of Service & Privacy Disclosure Notice */}
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-orange-400 flex items-center space-x-1.5 font-mono">
-                          <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
-                          <span>Terms of Service & Data Privacy</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setIsTermsModalOpen(true)}
-                          className="px-2 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 font-bold text-[10px] rounded-md flex items-center space-x-1 cursor-pointer transition-colors"
-                        >
-                          <FileText className="w-3 h-3" />
-                          <span>View Everything Access & Shared</span>
-                        </button>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">
-                        Learn how your smoker profile, meat cook logs, fuel inventory, Google Drive cloud backups, and opt-in AI Federated Learning contributions are accessed and protected.
-                      </p>
-                    </div>
-
-                    {/* USER PITMASTER ACCOUNT LEVEL & MASTERY CARD */}
-                    {(() => {
-                      const userAccountData = calculateUserAccount(
-                        currentAppData?.cookLogs || [],
-                        currentAppData?.fuelLogs || [],
-                        currentAppData?.profile
-                      );
-                      const { level, levelTitle, nextLevelXp, progressPercent } = getUserLevelThresholds(userAccountData.xp);
-
-                      return (
-                        <div className="bg-gradient-to-r from-orange-950/40 via-[#181818] to-amber-950/30 border border-orange-500/30 rounded-xl p-3.5 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 flex items-center space-x-1 font-mono">
-                                <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
-                                <span>User Pitmaster Account Mastery</span>
-                              </span>
-                            </div>
-                            <span className="text-xs font-black text-amber-300 font-mono bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md">
-                              Level {level}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-bold text-white">{levelTitle}</h4>
-                              <p className="text-[10px] text-zinc-400">Account XP calculated from cooks, fuel blends & maintenance</p>
-                            </div>
-                            <span className="text-xs font-bold text-orange-400 font-mono">{userAccountData.xp} XP</span>
-                          </div>
-
-                          {/* LINKED SMOKER PROFILE STATUS */}
-                          <div className="bg-[#121018] border border-orange-500/20 rounded-lg p-2.5 space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 font-mono flex items-center gap-1">
-                                🔥 Linked Active Smoker Profile
-                              </span>
-                              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono font-bold">
-                                AI Linked
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between text-xs text-zinc-200 pt-0.5">
-                              <span className="font-bold text-white">{userAccountData.linkedSmokerName}</span>
-                              <span className="text-zinc-400 text-[11px] font-mono">{userAccountData.linkedSmokerModel}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono pt-0.5 border-t border-[#222]">
-                              <span>Fuel: {userAccountData.linkedSmokerFuelType} ({userAccountData.linkedSmokerHopperCapacityLbs} lbs Hopper)</span>
-                              <span>{userAccountData.linkedSmokerTotalHours?.toFixed(1)} hrs logged</span>
-                            </div>
-                          </div>
-
-                          {/* CUSTOM & MANUFACTURER SMOKERS SECTION */}
-                          <div className="bg-gradient-to-r from-[#181818] via-[#222222] to-[#181818] border border-orange-500/30 rounded-xl p-3 space-y-2 shadow-md">
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                              <div className="space-y-0.5">
-                                <span className="text-[11px] font-extrabold uppercase tracking-wider text-orange-400 font-mono flex items-center gap-1.5">
-                                  <Wrench className="w-4 h-4 text-orange-400" />
-                                  <span>Smoker Specs & Custom Builds</span>
-                                </span>
-                                <p className="text-[10px] text-zinc-300 leading-normal">
-                                  Manage custom pit builds, metal gauge physics, and manufacturer smoker spec catalog linked to your account.
-                                </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {!isEditingAccount ? (
+                            <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
+                              <div className="flex items-center space-x-3 truncate">
+                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-zinc-950 font-black flex items-center justify-center text-sm shrink-0">
+                                  {localAccount.name[0]?.toUpperCase() || 'P'}
+                                </div>
+                                <div className="truncate">
+                                  <div className="flex items-center space-x-2">
+                                    <p className="text-xs font-bold text-white truncate">{localAccount.name}</p>
+                                    <span className="text-[9px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.2 rounded">
+                                      {localAccount.title}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-zinc-400 font-mono truncate">{localAccount.email}</p>
+                                </div>
                               </div>
-                              <div className="flex items-center space-x-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setIsEditingAccount(true)}
+                                className="px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] border border-[#3a3a3a] text-zinc-200 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
+                              >
+                                <Edit3 className="w-3 h-3 text-orange-400" />
+                                <span>Edit Profile</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <form onSubmit={handleSaveAccountEdits} className="bg-[#1e1e1e] border border-orange-500/30 rounded-xl p-3 space-y-2.5">
+                              <p className="text-xs font-bold text-orange-400 flex items-center space-x-1">
+                                <UserPlus className="w-3.5 h-3.5" />
+                                <span>Edit User Account Profile</span>
+                              </p>
+                              <div className="space-y-2 text-xs">
+                                <div>
+                                  <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Pitmaster Name</label>
+                                  <input
+                                    type="text"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-medium"
+                                    placeholder="e.g. Jonathan Blunt"
+                                    required
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Email Address (Server Account ID)</label>
+                                  <input
+                                    type="email"
+                                    value={editEmail}
+                                    onChange={(e) => setEditEmail(e.target.value)}
+                                    className={`w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-mono ${!!currentUser ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    placeholder="e.g. jonathanblunt1214@gmail.com"
+                                    required
+                                    disabled={!!currentUser}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Pitmaster Rank / Title</label>
+                                  <input
+                                    type="text"
+                                    value={editTitle}
+                                    onChange={(e) => setEditTitle(e.target.value)}
+                                    className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-medium"
+                                    placeholder="e.g. Head Pitmaster"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-end space-x-2 pt-1">
                                 <button
                                   type="button"
-                                  onClick={() => setDataSubTab('smokers')}
-                                  className="px-2.5 py-1.5 bg-[#2a2a2a] hover:bg-[#333333] border border-[#3a3a3a] text-zinc-200 font-bold text-[10px] rounded-lg cursor-pointer transition-all"
+                                  onClick={() => setIsEditingAccount(false)}
+                                  className="px-3 py-1.5 bg-[#282828] hover:bg-[#323232] text-zinc-300 font-bold text-[11px] rounded-lg"
                                 >
-                                  View Catalog
+                                  Cancel
                                 </button>
-                                {onOpenCustomSmokerModal && (
-                                  <button
-                                    type="button"
-                                    onClick={onOpenCustomSmokerModal}
-                                    className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-[11px] rounded-lg flex items-center space-x-1 cursor-pointer transition-all shadow-md active:scale-95"
-                                  >
-                                    <Wrench className="w-3.5 h-3.5 stroke-[2.5]" />
-                                    <span>+ Custom Built Smoker</span>
-                                  </button>
+                                <button
+                                  type="submit"
+                                  className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-[11px] rounded-lg flex items-center space-x-1"
+                                >
+                                  <Save className="w-3 h-3" />
+                                  <span>Save Account</span>
+                                </button>
+                              </div>
+                            </form>
+                          )}
+
+                          {/* USER PITMASTER ACCOUNT LEVEL & MASTERY CARD */}
+                          {(() => {
+                            const userAccountData = calculateUserAccount(
+                              currentAppData?.cookLogs || [],
+                              currentAppData?.fuelLogs || [],
+                              currentAppData?.profile
+                            );
+                            const { level, levelTitle, nextLevelXp, progressPercent } = getUserLevelThresholds(userAccountData.xp);
+
+                            return (
+                              <div className="bg-gradient-to-r from-orange-950/40 via-[#1e1e1e] to-amber-950/30 border border-orange-500/30 rounded-xl p-3 space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 flex items-center space-x-1 font-mono">
+                                      <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
+                                      <span>Pitmaster Account Mastery Level</span>
+                                    </span>
+                                  </div>
+                                  <span className="text-xs font-black text-amber-300 font-mono bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md">
+                                    Level {level}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <h4 className="text-xs font-bold text-white">{levelTitle}</h4>
+                                    <p className="text-[10px] text-zinc-400">Account XP calculated from cooks, fuel blends & maintenance</p>
+                                  </div>
+                                  <span className="text-xs font-bold text-orange-400 font-mono">{userAccountData.xp} XP</span>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="w-full bg-[#121212] h-2 rounded-full overflow-hidden border border-orange-500/20">
+                                    <div
+                                      className="bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 h-full transition-all duration-500"
+                                      style={{ width: `${progressPercent}%` }}
+                                    ></div>
+                                  </div>
+                                  <div className="flex justify-between text-[9px] font-mono text-zinc-400">
+                                    <span>{userAccountData.xp} XP</span>
+                                    <span>{nextLevelXp} XP Next Rank</span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ============================================================
+                    COLLAPSIBLE ACCORDION 2: LINKED SMOKER RIGS & FLEET (MULTI-RIG)
+                ============================================================ */}
+                <div className="bg-[#1e1e1e] border border-orange-500/30 rounded-xl overflow-hidden transition-all shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('multirig')}
+                    className="w-full px-3.5 py-3 bg-gradient-to-r from-[#242424] via-[#2a2118] to-[#242424] hover:bg-[#2a2a2a] flex items-center justify-between cursor-pointer border-b border-[#2a2a2a] transition-colors"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <Flame className="w-4 h-4 text-orange-400" />
+                      <div className="text-left">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>2. Linked Smoker Rigs & Fleet (Multi-Rig Management)</span>
+                          <span className="text-[10px] font-mono font-bold text-orange-400 bg-orange-500/10 border border-orange-500/30 px-2 py-0.5 rounded-full">
+                            {localAccount.rigs?.length || 1} Rig(s)
+                          </span>
+                        </span>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          Active Rig: {effectiveSpecs.displayName} ({effectiveSpecs.category})
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {collapsedSections.multirig ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronUp className="w-4 h-4 text-orange-400" />}
+                    </div>
+                  </button>
+
+                  {!collapsedSections.multirig && (
+                    <div className="p-3.5 space-y-3 bg-[#181818] animate-fade-in">
+                      {/* Active Smoker Overview Banner */}
+                      <div className="p-3 bg-[#121212] border border-orange-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-center space-x-2.5">
+                          <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-lg text-orange-400 shrink-0">
+                            <Flame className="w-5 h-5 text-orange-400" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-white flex items-center gap-2">
+                              <span>{effectiveSpecs.displayName}</span>
+                              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono font-bold">
+                                Active Rig
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-zinc-400 font-mono">
+                              {effectiveSpecs.category} • {effectiveSpecs.fuelType} • {effectiveSpecs.hopperCapacityLbs} lbs Hopper • {profile?.currentHours || 0} hrs logged
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingRig(true)}
+                          className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs rounded-lg flex items-center space-x-1 transition-all cursor-pointer shrink-0 shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                          <span>+ Add Smoker Rig</span>
+                        </button>
+                      </div>
+
+                      {/* List of Account Linked Smoker Rigs */}
+                      <div className="space-y-2">
+                        <h5 className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono flex items-center justify-between">
+                          <span>Account Smoker Fleet:</span>
+                          <span className="text-zinc-500">{localAccount.rigs?.length || 1} linked smoker profile(s)</span>
+                        </h5>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile]).map((rigItem) => {
+                            const isActive = (localAccount.activeRigId === rigItem.id) || (profile?.id === rigItem.id) || (effectiveSpecs.displayName === rigItem.name);
+                            const isEditingThis = editingRigId === rigItem.id;
+
+                            return (
+                              <div
+                                key={rigItem.id}
+                                className={`p-3 rounded-xl border transition-all ${
+                                  isActive
+                                    ? 'bg-gradient-to-r from-orange-950/30 via-[#1c1c1c] to-[#1a1a1a] border-orange-500/50 shadow-md'
+                                    : 'bg-[#1a1a1a] border-[#2a2a2a] hover:border-[#3a3a3a]'
+                                }`}
+                              >
+                                {!isEditingThis ? (
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center space-x-2">
+                                        <span className="text-xs font-bold text-white">{rigItem.name}</span>
+                                        {isActive ? (
+                                          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono font-bold">
+                                            Active Pit
+                                          </span>
+                                        ) : (
+                                          <span className="text-[9px] bg-zinc-800 text-zinc-400 border border-zinc-700 px-1.5 py-0.2 rounded font-mono">
+                                            Linked Rig
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-zinc-400 font-mono flex items-center space-x-3">
+                                        <span>{rigItem.smokerType}</span>
+                                        <span>•</span>
+                                        <span>{rigItem.fuelType}</span>
+                                        <span>•</span>
+                                        <span>{rigItem.pelletHopperCapacityLbs || 20} lbs Hopper</span>
+                                        <span>•</span>
+                                        <span className="text-orange-400 font-bold">{rigItem.currentHours || rigItem.initialHours || 0} hrs</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center space-x-1.5 shrink-0 self-end sm:self-center">
+                                      {!isActive && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setLocalAccount((prev) => ({ ...prev, activeRigId: rigItem.id }));
+                                            if (onUpdateProfile) onUpdateProfile(rigItem);
+                                            handleSyncWithServer();
+                                          }}
+                                          className="px-2.5 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-300 font-bold text-[11px] rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+                                        >
+                                          <Check className="w-3 h-3" />
+                                          <span>Set Active</span>
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingRigId(rigItem.id);
+                                          setEditRigName(rigItem.name);
+                                          setEditRigHours(String(rigItem.initialHours || 0));
+                                          setEditRigHopper(String(rigItem.pelletHopperCapacityLbs || 20));
+                                        }}
+                                        className="px-2 py-1.5 bg-[#2a2a2a] hover:bg-[#333] border border-[#3a3a3a] text-zinc-300 font-bold text-[11px] rounded-lg cursor-pointer"
+                                      >
+                                        <Edit3 className="w-3 h-3 text-orange-400" />
+                                      </button>
+                                      {(localAccount.rigs && localAccount.rigs.length > 1) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const updatedRigs = localAccount.rigs?.filter((r) => r.id !== rigItem.id) || [];
+                                            setLocalAccount((prev) => ({
+                                              ...prev,
+                                              rigs: updatedRigs,
+                                              activeRigId: prev.activeRigId === rigItem.id ? updatedRigs[0]?.id : prev.activeRigId,
+                                            }));
+                                            if (isActive && updatedRigs[0] && onUpdateProfile) {
+                                              onUpdateProfile(updatedRigs[0]);
+                                            }
+                                            handleSyncWithServer();
+                                          }}
+                                          className="px-2 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold text-[11px] rounded-lg cursor-pointer"
+                                          title="Delete Rig"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* Inline Rig Edit Form */
+                                  <div className="space-y-2 p-2 bg-[#121212] rounded-lg border border-orange-500/30 text-xs">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                      <div>
+                                        <label className="block text-[9px] text-zinc-400 font-bold uppercase mb-0.5">Rig Name</label>
+                                        <input
+                                          type="text"
+                                          value={editRigName}
+                                          onChange={(e) => setEditRigName(e.target.value)}
+                                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-medium text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] text-zinc-400 font-bold uppercase mb-0.5">Initial Hours</label>
+                                        <input
+                                          type="number"
+                                          step="0.5"
+                                          value={editRigHours}
+                                          onChange={(e) => setEditRigHours(e.target.value)}
+                                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] text-zinc-400 font-bold uppercase mb-0.5">Hopper Cap (lbs)</label>
+                                        <input
+                                          type="number"
+                                          value={editRigHopper}
+                                          onChange={(e) => setEditRigHopper(e.target.value)}
+                                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-xs"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-end space-x-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingRigId(null)}
+                                        className="px-2.5 py-1 bg-[#242424] text-zinc-300 font-bold text-[10px] rounded"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const updatedRigs = (localAccount.rigs || [profile]).map((r) => {
+                                            if (r.id === rigItem.id) {
+                                              return {
+                                                ...r,
+                                                name: editRigName.trim() || r.name,
+                                                initialHours: parseFloat(editRigHours) || 0,
+                                                pelletHopperCapacityLbs: parseFloat(editRigHopper) || 20,
+                                              };
+                                            }
+                                            return r;
+                                          });
+                                          setLocalAccount((prev) => ({ ...prev, rigs: updatedRigs }));
+                                          setEditingRigId(null);
+                                          const edited = updatedRigs.find((r) => r.id === rigItem.id);
+                                          if (isActive && edited && onUpdateProfile) {
+                                            onUpdateProfile(edited);
+                                          }
+                                          handleSyncWithServer();
+                                        }}
+                                        className="px-2.5 py-1 bg-orange-500 text-zinc-950 font-bold text-[10px] rounded"
+                                      >
+                                        Save Rig
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
                               </div>
-                            </div>
-                          </div>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                          {/* XP Progress Bar */}
-                          <div className="space-y-1">
-                            <div className="w-full bg-[#121212] h-2 rounded-full overflow-hidden border border-orange-500/20">
-                              <div
-                                className="bg-gradient-to-r from-orange-500 via-amber-400 to-yellow-300 h-full transition-all duration-500"
-                                style={{ width: `${progressPercent}%` }}
-                              ></div>
-                            </div>
-                            <div className="flex justify-between text-[9px] font-mono text-zinc-400">
-                              <span>{userAccountData.xp} XP</span>
-                              <span>{nextLevelXp} XP Next Rank</span>
-                            </div>
-                          </div>
-
-                          {/* Unlocked Badges / Achievements Grid */}
-                          <div className="pt-2 border-t border-[#2a2a2a] space-y-1.5">
-                            <span className="text-[10px] font-bold uppercase text-zinc-400 block font-mono">
-                              Account Badges & Achievements:
+                      {/* Add New Smoker Rig Modal / Inline Form */}
+                      {isAddingRig && (
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const newRig: SmokerProfile = {
+                              id: `rig-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                              name: newRigName.trim() || 'Custom Smoker Rig',
+                              model: newRigModel.trim() || 'Custom Rig Model',
+                              smokerType: newRigType,
+                              fuelType: newRigFuel,
+                              initialHours: parseFloat(newRigHours) || 0,
+                              currentHours: parseFloat(newRigHours) || 0,
+                              pelletHopperCapacityLbs: parseFloat(newRigHopper) || 20,
+                              maintenanceTasks: [],
+                              appliedModIds: [],
+                              appliedMods: [],
+                            };
+                            const updatedRigs = [newRig, ...(localAccount.rigs || [])];
+                            setLocalAccount((prev) => ({
+                              ...prev,
+                              rigs: updatedRigs,
+                              activeRigId: newRig.id,
+                            }));
+                            if (onUpdateProfile) onUpdateProfile(newRig);
+                            setIsAddingRig(false);
+                            setNewRigName('');
+                            setNewRigModel('');
+                            handleSyncWithServer();
+                          }}
+                          className="p-3 bg-[#121212] border border-orange-500/40 rounded-xl space-y-2.5 text-xs animate-fade-in"
+                        >
+                          <div className="flex items-center justify-between pb-1 border-b border-[#222]">
+                            <span className="font-bold text-orange-400 flex items-center gap-1">
+                              <Flame className="w-3.5 h-3.5" />
+                              <span>Add New Smoker Rig to Account Fleet</span>
                             </span>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                              {userAccountData.achievements.map((ach) => (
-                                <div
-                                  key={ach.id}
-                                  className={`p-2 rounded-lg border text-[10px] flex items-center space-x-1.5 ${
-                                    ach.unlocked
-                                      ? 'bg-orange-500/10 border-orange-500/30 text-orange-300 font-bold'
-                                      : 'bg-[#121212] border-[#222] text-zinc-500 opacity-60'
-                                  }`}
-                                  title={ach.description}
+                            <button
+                              type="button"
+                              onClick={() => setIsAddingRig(false)}
+                              className="text-zinc-400 hover:text-white"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Quick Preset Selector */}
+                          <div>
+                            <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-1">Select Preset Manufacturer Model</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                              {[
+                                { name: 'Pit Boss Copperhead 5', model: 'Copperhead 5-Series', type: 'Vertical Pellet Smoker', fuel: 'Pellets', hopper: 60 },
+                                { name: 'Traeger Timberline 1300', model: 'Timberline 1300', type: 'Pellet Grill / Smoker', fuel: 'Pellets', hopper: 24 },
+                                { name: 'Yoder YS640s Competition', model: 'YS640s', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 20 },
+                                { name: 'Camp Chef Woodwind 36', model: 'Woodwind WiFi 36', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 22 },
+                                { name: 'Recteq RT-700 Bull', model: 'RT-700', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 40 },
+                                { name: 'Kamado Joe Big Joe III', model: 'Big Joe III', type: 'Kamado Ceramic Cooker', fuel: 'Charcoal', hopper: 12 },
+                                { name: 'Weber Smokey Mountain 22"', model: 'WSM 22"', type: 'Water Smoker / Bullet', fuel: 'Charcoal', hopper: 15 },
+                                { name: 'Custom Offset Trailer', model: 'Custom Build', type: 'Custom Reverse Flow Offset', fuel: 'Wood Splits', hopper: 50 },
+                              ].map((preset) => (
+                                <button
+                                  key={preset.name}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewRigName(preset.name);
+                                    setNewRigModel(preset.model);
+                                    setNewRigType(preset.type);
+                                    setNewRigFuel(preset.fuel as any);
+                                    setNewRigHopper(String(preset.hopper));
+                                  }}
+                                  className="p-1.5 bg-[#1a1a1a] hover:bg-orange-500/20 border border-[#2a2a2a] hover:border-orange-500/40 rounded text-[10px] font-medium text-zinc-300 text-left truncate cursor-pointer"
                                 >
-                                  <span>{ach.title}</span>
-                                </div>
+                                  {preset.name}
+                                </button>
                               ))}
                             </div>
                           </div>
-                        </div>
-                      );
-                    })()}
 
-                    {/* Button to Link Google Account */}
-                    {!currentUser && (
-                      <button
-                        type="button"
-                        onClick={handleGoogleSignIn}
-                        disabled={isDriveOperating}
-                        className="w-full py-2 px-3 bg-gradient-to-r from-sky-600/20 to-blue-600/20 hover:from-sky-600/30 hover:to-blue-600/30 border border-sky-500/30 text-sky-300 font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
-                      >
-                        <Cloud className="w-4 h-4 text-sky-400" />
-                        <span>Link Google Account for Cloud Auth</span>
-                      </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Smoker Display Name</label>
+                              <input
+                                type="text"
+                                value={newRigName}
+                                onChange={(e) => setNewRigName(e.target.value)}
+                                placeholder="e.g. My Lone Star Offset"
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Model / Builder</label>
+                              <input
+                                type="text"
+                                value={newRigModel}
+                                onChange={(e) => setNewRigModel(e.target.value)}
+                                placeholder="e.g. Lone Star 500gal"
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Smoker Type / Category</label>
+                              <input
+                                type="text"
+                                value={newRigType}
+                                onChange={(e) => setNewRigType(e.target.value)}
+                                placeholder="e.g. Vertical Pellet Smoker"
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Fuel Type</label>
+                              <select
+                                value={newRigFuel}
+                                onChange={(e) => setNewRigFuel(e.target.value as any)}
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500"
+                              >
+                                <option value="Pellets">Pellets</option>
+                                <option value="Charcoal">Charcoal</option>
+                                <option value="Wood Splits">Wood Splits</option>
+                                <option value="Electric">Electric</option>
+                                <option value="Gas">Gas</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Initial Operating Hours</label>
+                              <input
+                                type="number"
+                                step="0.5"
+                                value={newRigHours}
+                                onChange={(e) => setNewRigHours(e.target.value)}
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Fuel Hopper Capacity (lbs)</label>
+                              <input
+                                type="number"
+                                value={newRigHopper}
+                                onChange={(e) => setNewRigHopper(e.target.value)}
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white font-mono"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end space-x-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setIsAddingRig(false)}
+                              className="px-3 py-1.5 bg-[#282828] hover:bg-[#323232] text-zinc-300 font-bold text-xs rounded-lg"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-lg flex items-center space-x-1"
+                            >
+                              <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                              <span>Link Rig to Account</span>
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* ============================================================
+                    COLLAPSIBLE ACCORDION 3: INITIAL RUNTIME HOURS & BASELINE (GLOBAL FLEET VIEW)
+                ============================================================ */}
+                <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('hours')}
+                    className="w-full px-3.5 py-3 bg-[#242424] hover:bg-[#2a2a2a] flex items-center justify-between cursor-pointer border-b border-[#2a2a2a] transition-colors"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <Clock className="w-4 h-4 text-orange-400" />
+                      <div className="text-left">
+                        <span className="text-xs font-bold text-white block">3. Initial Smoker Runtime Hours & Baseline (Global Fleet View)</span>
+                        <span className="text-[10px] text-zinc-400 font-mono">
+                          Fleet Baseline: {((localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).reduce((sum, r) => sum + (r.initialHours || 0), 0)).toFixed(1)} hrs • Combined Fleet Total: {(((localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).reduce((sum, r) => sum + (r.initialHours || 0), 0)) + ((currentAppData?.cookLogs || []).reduce((acc, c) => acc + (c.hoursLogged || 0), 0))).toFixed(1)} hrs ({(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).length} Pits)
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {collapsedSections.hours ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronUp className="w-4 h-4 text-orange-400" />}
+                    </div>
+                  </button>
+
+                  {!collapsedSections.hours && (
+                    <div className="p-3.5 space-y-3 bg-[#181818] animate-fade-in">
+                      <div className="flex items-start justify-between flex-wrap gap-2">
+                        <p className="text-[11px] text-zinc-300 leading-relaxed max-w-2xl">
+                          Manage baseline smoker runtime hours accrued prior to using Smoke Stack globally across your entire fleet of pits. Baseline hours are added to logged cook hours to track cumulative operating lifespan, maintenance intervals, and wear for every pit.
+                        </p>
+                        <span className="px-2.5 py-1 bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-mono font-bold rounded-full flex items-center gap-1.5">
+                          <Flame className="w-3.5 h-3.5" />
+                          <span>Global Multi-Pit Fleet Sync</span>
+                        </span>
+                      </div>
+
+                      {/* Fleet Global Summary Statistics Bar */}
+                      {(() => {
+                        const fleetRigs = localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : (profile ? [profile] : []);
+                        const totalBaseline = fleetRigs.reduce((acc, r) => acc + (r.initialHours || 0), 0);
+                        const totalLoggedCooks = (currentAppData?.cookLogs || []).reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
+                        const totalFleetOperatingHours = totalBaseline + totalLoggedCooks;
+
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                            <div className="bg-[#121212] border border-[#282828] rounded-xl p-2.5 flex flex-col justify-between">
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase font-mono flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-orange-400" />
+                                <span>Total Fleet Baseline</span>
+                              </span>
+                              <div className="text-base font-extrabold font-mono text-orange-400 mt-1">
+                                {totalBaseline.toFixed(2)} <span className="text-xs font-sans text-zinc-400">hrs</span>
+                              </div>
+                              <span className="text-[9px] text-zinc-500">Sum of prior baseline hours across all pits</span>
+                            </div>
+
+                            <div className="bg-[#121212] border border-[#282828] rounded-xl p-2.5 flex flex-col justify-between">
+                              <span className="text-[10px] font-bold text-zinc-400 uppercase font-mono flex items-center gap-1">
+                                <Flame className="w-3 h-3 text-amber-400" />
+                                <span>Total Cook Logs Logged</span>
+                              </span>
+                              <div className="text-base font-extrabold font-mono text-amber-400 mt-1">
+                                {totalLoggedCooks.toFixed(2)} <span className="text-xs font-sans text-zinc-400">hrs</span>
+                              </div>
+                              <span className="text-[9px] text-zinc-500">Active cook session logs recorded</span>
+                            </div>
+
+                            <div className="bg-[#121212] border border-orange-500/30 rounded-xl p-2.5 flex flex-col justify-between bg-gradient-to-br from-[#18120c] to-[#121212]">
+                              <span className="text-[10px] font-bold text-orange-300 uppercase font-mono flex items-center gap-1">
+                                <Sliders className="w-3 h-3 text-orange-400" />
+                                <span>Combined Fleet Operating Lifespan</span>
+                              </span>
+                              <div className="text-lg font-black font-mono text-orange-400 mt-1">
+                                {totalFleetOperatingHours.toFixed(2)} <span className="text-xs font-sans text-zinc-400">hrs</span>
+                              </div>
+                              <span className="text-[9px] text-zinc-400">Global fleet cumulative runtime</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Global Bulk Baseline Batch Action */}
+                      <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-zinc-300 uppercase font-mono flex items-center gap-1.5">
+                            <Sliders className="w-3.5 h-3.5 text-orange-400" />
+                            <span>Global Fleet Bulk Baseline Action</span>
+                          </label>
+                          <span className="text-[10px] text-zinc-400">Set uniform baseline across all pits</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <input
+                              type="number"
+                              step="1"
+                              min="0"
+                              max="10000"
+                              value={globalBulkBaselineInput}
+                              onChange={(e) => setGlobalBulkBaselineInput(e.target.value)}
+                              placeholder="e.g. 100"
+                              className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-orange-500"
+                            />
+                            <span className="absolute right-3 top-1.5 font-mono text-xs text-zinc-400 pointer-events-none">hrs</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = parseFloat(globalBulkBaselineInput) || 0;
+                              handleApplyGlobalBulkBaseline(val);
+                            }}
+                            className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-extrabold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                          >
+                            <span>Apply Baseline to All Pits</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Individual Pits Baseline Manager */}
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-extrabold uppercase font-mono text-zinc-300">
+                            Smoker Pit Fleet Baseline & Runtime Breakdowns
+                          </span>
+                          <span className="text-[10px] text-zinc-400 font-mono">
+                            {(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).length} Pits Configured
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).map((rigItem, idx) => {
+                            const isCurrentActive = rigItem.id === (localAccount.activeRigId || profile?.id);
+                            const pitLogs = (currentAppData?.cookLogs || []).filter((c) => c.smokerId === rigItem.id);
+                            const pitLoggedHours = pitLogs.length > 0
+                              ? pitLogs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0)
+                              : ((localAccount.rigs || []).length <= 1 ? (currentAppData?.cookLogs || []).reduce((acc, c) => acc + (c.hoursLogged || 0), 0) : 0);
+                            const pitInitial = rigItem.initialHours || 0;
+                            const pitTotal = pitInitial + pitLoggedHours;
+
+                            return (
+                              <div
+                                key={rigItem.id || `pit-${idx}`}
+                                className={`p-3 rounded-xl border transition-all ${
+                                  isCurrentActive
+                                    ? 'bg-[#1a1815] border-orange-500/50 shadow-sm'
+                                    : 'bg-[#141414] border-[#262626] hover:border-[#333]'
+                                }`}
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#222]">
+                                  <div className="flex items-center space-x-2">
+                                    <div className={`p-1.5 rounded-lg ${isCurrentActive ? 'bg-orange-500/20 text-orange-400' : 'bg-[#222] text-zinc-400'}`}>
+                                      <Flame className="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center space-x-2">
+                                        <span className="font-bold text-xs text-white">{rigItem.name || 'Smoker Rig'}</span>
+                                        {isCurrentActive && (
+                                          <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 border border-orange-500/40 text-[9px] font-mono font-bold rounded">
+                                            ACTIVE PIT
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[10px] text-zinc-400 font-mono">
+                                        {rigItem.model || 'Model N/A'} • {rigItem.smokerType || 'Smoker'} ({rigItem.fuelType || 'Pellets'})
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center space-x-3 text-right">
+                                    <div className="text-right">
+                                      <span className="block text-[9px] text-zinc-400 font-mono uppercase">Logged Cooks</span>
+                                      <span className="font-mono text-xs text-amber-400 font-bold">{pitLoggedHours.toFixed(1)} hrs</span>
+                                    </div>
+                                    <div className="text-right pl-2 border-l border-[#2a2a2a]">
+                                      <span className="block text-[9px] text-orange-400 font-mono uppercase font-bold">Total Operating Lifespan</span>
+                                      <span className="font-mono text-sm text-orange-400 font-extrabold">{pitTotal.toFixed(1)} hrs</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div className="flex items-center space-x-2 flex-1">
+                                    <label className="text-[10px] font-bold uppercase text-zinc-400 font-mono whitespace-nowrap">
+                                      Initial Baseline Hours:
+                                    </label>
+                                    <div className="relative flex-1 max-w-[140px]">
+                                      <input
+                                        type="number"
+                                        step="0.5"
+                                        min="0"
+                                        max="10000"
+                                        value={rigItem.initialHours ?? 0}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          handleUpdatePitBaseline(rigItem.id, val);
+                                        }}
+                                        className="w-full bg-[#101010] border border-[#2a2a2a] focus:border-orange-500 text-white font-mono font-bold text-xs rounded-lg px-2.5 py-1 focus:outline-none"
+                                      />
+                                      <span className="absolute right-2 top-1 font-mono text-xs text-orange-400 pointer-events-none">hrs</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Quick Fine-Tuning Step Buttons */}
+                                  <div className="flex items-center space-x-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePitBaseline(rigItem.id, Math.max(0, (rigItem.initialHours || 0) - 10))}
+                                      className="px-2 py-1 bg-[#222] hover:bg-[#2a2a2a] border border-[#333] text-zinc-300 font-mono text-[10px] rounded hover:text-white cursor-pointer"
+                                      title="Subtract 10 baseline hours"
+                                    >
+                                      -10h
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePitBaseline(rigItem.id, Math.max(0, (rigItem.initialHours || 0) - 1))}
+                                      className="px-2 py-1 bg-[#222] hover:bg-[#2a2a2a] border border-[#333] text-zinc-300 font-mono text-[10px] rounded hover:text-white cursor-pointer"
+                                      title="Subtract 1 baseline hour"
+                                    >
+                                      -1h
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePitBaseline(rigItem.id, (rigItem.initialHours || 0) + 1)}
+                                      className="px-2 py-1 bg-[#222] hover:bg-[#2a2a2a] border border-[#333] text-zinc-300 font-mono text-[10px] rounded hover:text-white cursor-pointer"
+                                      title="Add 1 baseline hour"
+                                    >
+                                      +1h
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePitBaseline(rigItem.id, (rigItem.initialHours || 0) + 10)}
+                                      className="px-2 py-1 bg-[#222] hover:bg-[#2a2a2a] border border-[#333] text-zinc-300 font-mono text-[10px] rounded hover:text-white cursor-pointer"
+                                      title="Add 10 baseline hours"
+                                    >
+                                      +10h
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ============================================================
+                    COLLAPSIBLE ACCORDION 4: MASTER ADMIN & DEV CONTROLS
+                ============================================================ */}
+                {isAdminUser(currentUser?.email || localAccount.email) && (
+                  <div className="bg-[#1e1e1e] border border-purple-500/30 rounded-xl overflow-hidden transition-all shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => toggleSection('admin')}
+                      className="w-full px-3.5 py-3 bg-gradient-to-r from-purple-950/40 via-[#1a1824] to-amber-950/30 hover:bg-[#2a2a2a] flex items-center justify-between cursor-pointer border-b border-[#2a2a2a] transition-colors"
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <ShieldCheck className="w-4 h-4 text-purple-400" />
+                        <div className="text-left">
+                          <span className="text-xs font-bold text-purple-300 block font-mono uppercase tracking-wider">
+                            4. System Admin & Developer Overrides
+                          </span>
+                          <span className="text-[10px] text-purple-400/80 font-mono">
+                            {isMasterAdmin(currentUser?.email || localAccount.email) ? 'Master Admin' : 'Sub-Admin'} Controls
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {collapsedSections.admin ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronUp className="w-4 h-4 text-purple-400" />}
+                      </div>
+                    </button>
+
+                    {!collapsedSections.admin && (
+                      <div className="p-3.5 space-y-3 bg-[#181818] animate-fade-in">
+                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                          Authorized pitmaster accounts have access to system-wide telemetry, custom manufacturer database seeding, CharGPT prompt overrides, and sub-admin access control.
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onOpenMasterAdmin) {
+                              onClose();
+                              onOpenMasterAdmin();
+                            }
+                          }}
+                          className="w-full py-2 px-3 bg-gradient-to-r from-purple-600/30 to-amber-600/30 hover:from-purple-600/40 hover:to-amber-600/40 border border-purple-500/40 text-amber-300 font-extrabold text-xs rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
+                        >
+                          <Crown className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Open Master Admin Dashboard</span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
+
+                {/* ============================================================
+                    COLLAPSIBLE ACCORDION 5: SERVER ACCOUNT SYNC & BACKUPS
+                ============================================================ */}
+                <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl overflow-hidden transition-all">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('cloudSync')}
+                    className="w-full px-3.5 py-3 bg-[#242424] hover:bg-[#2a2a2a] flex items-center justify-between cursor-pointer border-b border-[#2a2a2a] transition-colors"
+                  >
+                    <div className="flex items-center space-x-2.5">
+                      <Cloud className="w-4 h-4 text-orange-400" />
+                      <div className="text-left">
+                        <span className="text-xs font-bold text-white block">5. Server Account Sync & Data Backups</span>
+                        <span className="text-[10px] text-zinc-400 font-mono">Server Hosted • Google Drive & Local Backups</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {collapsedSections.cloudSync ? <ChevronDown className="w-4 h-4 text-zinc-400" /> : <ChevronUp className="w-4 h-4 text-orange-400" />}
+                    </div>
+                  </button>
+
+                  {!collapsedSections.cloudSync && (
+                    <div className="p-3.5 space-y-3 bg-[#181818] animate-fade-in">
+                      <div className="p-3 bg-[#121212] border border-[#2a2a2a] rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <Server className="w-4 h-4 text-emerald-400" />
+                            <span>Server Account Sync Repository</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleSyncWithServer}
+                            disabled={isServerSyncing}
+                            className="px-3 py-1 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded cursor-pointer disabled:opacity-50"
+                          >
+                            {isServerSyncing ? 'Syncing...' : 'Sync Now'}
+                          </button>
+                        </div>
+                        <p className="text-[11px] text-zinc-400">
+                          Your account, multi-rig fleet, and cook logs are persisted server-side at <code className="text-orange-400 font-mono">/api/account/sync</code>.
+                        </p>
+                      </div>
+
+                      {!currentUser && (
+                        <button
+                          type="button"
+                          onClick={handleGoogleSignIn}
+                          disabled={isDriveOperating}
+                          className="w-full py-2 px-3 bg-gradient-to-r from-sky-600/20 to-blue-600/20 hover:from-sky-600/30 hover:to-blue-600/30 border border-sky-500/30 text-sky-300 font-bold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50"
+                        >
+                          <Cloud className="w-4 h-4 text-sky-400" />
+                          <span>Connect Google Account for Cloud Backup</span>
+                        </button>
+                      )}
+
+                      <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-orange-400 flex items-center space-x-1.5 font-mono">
+                            <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
+                            <span>Terms of Service & Data Privacy</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setIsTermsModalOpen(true)}
+                            className="px-2 py-1 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-300 font-bold text-[10px] rounded-md flex items-center space-x-1 cursor-pointer transition-colors"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>View Full Disclosures</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1844,6 +2842,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             metalGauge: activeSpecGauge,
                             draftType: activeSpecDraft,
                           };
+                          const newInitial = Number(activeSpecInitialHours) || 0;
+                          const logs = currentAppData?.cookLogs || [];
+                          const totalLogged = logs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
                           onUpdateProfile({
                             ...activeProfile,
                             name: activeSpecName,
@@ -1851,6 +2852,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
                             pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            initialHours: newInitial,
+                            currentHours: Number((newInitial + totalLogged).toFixed(2)),
                             customSpecs: updatedCustom,
                           });
                         } else if (activeProfile.manufacturerSpecs) {
@@ -1868,6 +2871,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             insulationType: activeSpecGauge,
                             controllerType: activeSpecDraft,
                           };
+                          const newInitial = Number(activeSpecInitialHours) || 0;
+                          const logs = currentAppData?.cookLogs || [];
+                          const totalLogged = logs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
                           onUpdateProfile({
                             ...activeProfile,
                             name: activeSpecBrand,
@@ -1875,9 +2881,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
                             pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            initialHours: newInitial,
+                            currentHours: Number((newInitial + totalLogged).toFixed(2)),
                             manufacturerSpecs: updatedMfg,
                           });
                         } else {
+                          const newInitial = Number(activeSpecInitialHours) || 0;
+                          const logs = currentAppData?.cookLogs || [];
+                          const totalLogged = logs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
                           onUpdateProfile({
                             ...activeProfile,
                             name: activeSpecName,
@@ -1885,6 +2896,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
                             pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            initialHours: newInitial,
+                            currentHours: Number((newInitial + totalLogged).toFixed(2)),
                           });
                         }
 
@@ -1954,6 +2967,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <option value="Electric">Electric Element</option>
                               <option value="Gas">Propane / Natural Gas</option>
                             </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                              Initial Smoker Runtime Hours (Prior Experience)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              max="10000"
+                              value={activeSpecInitialHours}
+                              onChange={(e) => setActiveSpecInitialHours(parseFloat(e.target.value) || 0)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              placeholder="0.0 (Enter previous hours)"
+                            />
                           </div>
 
                           <div>
@@ -3108,29 +4137,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 {/* RESET SAMPLE DATA */}
-                <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2.5">
-                      <RefreshCw className="w-4 h-4 text-zinc-400 shrink-0" />
-                      <div>
-                        <h4 className="text-xs sm:text-sm font-bold text-white">Reset Logbook Data</h4>
-                        <p className="text-[11px] text-zinc-400">Revert logs & runtime hours to initial defaults</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onResetData();
-                    }}
-                    className="w-full py-2 px-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-semibold text-xs rounded-xl flex items-center justify-center space-x-2 transition-all cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Reset Sample Data</span>
-                  </button>
-                </div>
               </div>
             )}
           </div>

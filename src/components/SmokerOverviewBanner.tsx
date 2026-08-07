@@ -70,8 +70,8 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
   };
 
   return (
-    <div className="bg-[#1a1a1a] border-b border-[#2a2a2a] text-[#e0e0e0] py-3.5 sm:py-5 px-3 sm:px-6 md:px-8 shadow-md flex flex-col justify-center w-full overflow-x-hidden">
-      <div className="w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto my-auto flex flex-col justify-center space-y-3.5 sm:space-y-5">
+    <div className="bg-[#1a1a1a] border-b border-[#2a2a2a] text-[#e0e0e0] py-3.5 sm:py-5 shadow-md flex flex-col justify-center w-full overflow-x-hidden">
+      <div className="w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 my-auto flex flex-col justify-center space-y-3.5 sm:space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 w-full my-auto">
           
           {/* Main Title & Equipment tag */}
@@ -122,7 +122,7 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
           {/* Metric 1: Hours to Date */}
           <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl sm:rounded-2xl p-2.5 sm:p-4 shadow-sm hover:border-orange-500/40 transition-all flex flex-col justify-between min-h-[95px] sm:min-h-[110px]">
             <div>
-              <div className="flex items-center justify-between text-zinc-400 mb-1 sm:mb-2">
+              <div className="flex items-center justify-between text-zinc-400 mb-1">
                 <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-zinc-400 truncate">Hours to Date</span>
                 <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-orange-400 shrink-0 ml-1" />
               </div>
@@ -133,10 +133,10 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
                 <span className="text-[10px] sm:text-xs text-zinc-400 font-sans">hrs</span>
               </div>
             </div>
-            <div className="mt-1 sm:mt-2 flex flex-wrap items-center text-[10px] sm:text-[11px] text-zinc-400">
-              <span className="text-emerald-400 font-medium">+{totalHoursLogged.toFixed(1)} hrs</span>
-              <span className="hidden xs:inline mx-1">•</span>
-              <span className="truncate">Base {profile.initialHours}h</span>
+
+            <div className="mt-1.5 pt-1.5 border-t border-[#333] flex items-center justify-between text-[10px] sm:text-[11px] text-zinc-400 font-mono">
+              <span className="text-emerald-400 font-medium">+{totalHoursLogged.toFixed(1)}h logged</span>
+              <span className="text-zinc-300 font-semibold">Initial {profile.initialHours || 0}h</span>
             </div>
           </div>
 

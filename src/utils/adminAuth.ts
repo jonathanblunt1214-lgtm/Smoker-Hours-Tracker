@@ -19,6 +19,55 @@ export function isMasterAdmin(email?: string | null): boolean {
 }
 
 /**
+ * Gets the list of authorized sub-admin emails.
+ */
+export function getSubAdmins(): string[] {
+  try {
+    const saved = localStorage.getItem('chargpt_sub_admins');
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    console.warn('Failed to parse sub admins:', e);
+  }
+  return [];
+}
+
+/**
+ * Adds a new sub-admin (Master Admin only).
+ */
+export function addSubAdmin(masterEmail: string | null | undefined, newAdminEmail: string): boolean {
+  if (!isMasterAdmin(masterEmail) || !newAdminEmail) return false;
+  const current = getSubAdmins();
+  const normalized = newAdminEmail.trim().toLowerCase();
+  if (!current.includes(normalized) && normalized !== MASTER_ADMIN_EMAIL.toLowerCase()) {
+    current.push(normalized);
+    localStorage.setItem('chargpt_sub_admins', JSON.stringify(current));
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Removes a sub-admin (Master Admin only).
+ */
+export function removeSubAdmin(masterEmail: string | null | undefined, removeAdminEmail: string): boolean {
+  if (!isMasterAdmin(masterEmail) || !removeAdminEmail) return false;
+  const current = getSubAdmins();
+  const normalized = removeAdminEmail.trim().toLowerCase();
+  const filtered = current.filter(email => email !== normalized);
+  localStorage.setItem('chargpt_sub_admins', JSON.stringify(filtered));
+  return true;
+}
+
+/**
+ * Checks if a user is either a Master Admin or a granted Sub Admin.
+ */
+export function isAdminUser(email?: string | null): boolean {
+  if (!email) return false;
+  if (isMasterAdmin(email)) return true;
+  return getSubAdmins().includes(email.trim().toLowerCase());
+}
+
+/**
  * Gets the remaining seconds before the developer override automatically relocks.
  * Returns 0 if locked or expired.
  */

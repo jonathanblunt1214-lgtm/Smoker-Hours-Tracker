@@ -28,6 +28,10 @@ import {
 import {
   MASTER_ADMIN_EMAIL,
   isMasterAdmin,
+  isAdminUser,
+  getSubAdmins,
+  addSubAdmin,
+  removeSubAdmin,
   getCharGPTDeveloperOverride,
   setCharGPTDeveloperOverride,
 } from '../utils/adminAuth';
@@ -63,11 +67,14 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
   showToast,
 }) => {
   const isAdmin = isMasterAdmin(currentUserEmail);
+  const isSubAdmin = isAdminUser(currentUserEmail) && !isAdmin;
   const [devOverride, setDevOverride] = useState(() => getCharGPTDeveloperOverride(currentUserEmail));
   const [logsStream, setLogsStream] = useState<string[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [activeTab, setActiveTab] = useState<'security' | 'optimizations' | 'telemetry' | 'data'>('security');
   const [storageUsage, setStorageUsage] = useState(() => getStorageStats());
+  const [subAdminList, setSubAdminList] = useState<string[]>([]);
+  const [newSubAdminEmail, setNewSubAdminEmail] = useState('');
 
   // Interval timer for live auto-relock countdown updates
   useEffect(() => {
@@ -77,8 +84,10 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
     const initialOverride = getCharGPTDeveloperOverride(currentUserEmail);
     setDevOverride(initialOverride);
     setStorageUsage(getStorageStats());
+    if (isAdmin) setSubAdminList(getSubAdmins());
+    
     addLog(`Master Admin Dashboard loaded for account: ${currentUserEmail || MASTER_ADMIN_EMAIL}`);
-    addLog(`Security Check: ${isAdmin ? 'VERIFIED MASTER DEVELOPER' : 'ACCESS DENIED'}`);
+    addLog(`Security Check: ${isAdmin ? 'VERIFIED MASTER DEVELOPER' : (isSubAdmin ? 'VERIFIED SUB-ADMIN' : 'ACCESS DENIED')}`);
 
     const interval = setInterval(() => {
       const updated = getCharGPTDeveloperOverride(currentUserEmail);
@@ -462,6 +471,70 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
                         4. <strong>Boundary Interception</strong>: Prompt injections attempting to instruct CharGPT to "ignore rules" are intercepted at both client and server boundaries.
                       </p>
                     </div>
+                    
+                    {/* Sub-Admins Management */}
+                    {isAdmin && (
+                      <div className="pt-3 border-t border-[#2a2a2e]">
+                        <h4 className="text-xs font-bold text-white mb-2">Sub-Admin Accounts</h4>
+                        <p className="text-[10px] text-zinc-400 mb-3">
+                          Grant other users access to this dashboard. They can optimize data but CANNOT override CharGPT BBQ guardrails.
+                        </p>
+                        
+                        <div className="flex space-x-2 mb-3">
+                          <input
+                            type="email"
+                            value={newSubAdminEmail}
+                            onChange={(e) => setNewSubAdminEmail(e.target.value)}
+                            placeholder="Enter email to grant admin access"
+                            className="flex-1 bg-[#121212] border border-[#2a2a2e] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (addSubAdmin(currentUserEmail, newSubAdminEmail)) {
+                                setSubAdminList(getSubAdmins());
+                                setNewSubAdminEmail('');
+                                showToast(`Granted admin access to ${newSubAdminEmail}`);
+                                addLog(`Added Sub-Admin: ${newSubAdminEmail}`);
+                              } else {
+                                showToast(`Failed to add ${newSubAdminEmail} (invalid or already exists)`);
+                              }
+                            }}
+                            disabled={!newSubAdminEmail.trim()}
+                            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 text-xs font-bold disabled:opacity-50"
+                          >
+                            Grant
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                          {subAdminList.length === 0 ? (
+                            <div className="text-[10px] text-zinc-500 italic p-2 bg-[#121212] rounded-lg border border-[#2a2a2e]">
+                              No sub-admins configured.
+                            </div>
+                          ) : (
+                            subAdminList.map(email => (
+                              <div key={email} className="flex items-center justify-between p-2 bg-[#121212] rounded-lg border border-[#2a2a2e]">
+                                <span className="text-[11px] text-zinc-300 font-mono truncate">{email}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (removeSubAdmin(currentUserEmail, email)) {
+                                      setSubAdminList(getSubAdmins());
+                                      showToast(`Revoked admin access from ${email}`);
+                                      addLog(`Removed Sub-Admin: ${email}`);
+                                    }
+                                  }}
+                                  className="text-[10px] text-red-400 hover:text-red-300 px-2 py-0.5 border border-red-500/20 rounded hover:bg-red-500/10"
+                                >
+                                  Revoke
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

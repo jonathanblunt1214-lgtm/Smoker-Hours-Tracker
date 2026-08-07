@@ -51,7 +51,7 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
   onAskAIPitmaster,
   isCollapsible = true,
 }) => {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedProtein, setSelectedProtein] = useState<string>('ALL');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('ALL');
@@ -926,7 +926,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
       {/* Recipe Full Modal View */}
       {activeModalRecipe && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 overflow-y-auto">
-          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-2xl p-4 sm:p-6 shadow-2xl relative space-y-5 my-8 max-h-[90vh] overflow-y-auto">
+          <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-2xl p-4 sm:p-6 shadow-2xl relative space-y-5 my-8 max-h-[90vh] overflow-y-auto">
             
             {/* Modal Header */}
             <div className="flex items-start justify-between pb-4 border-b border-[#2a2a2a]">

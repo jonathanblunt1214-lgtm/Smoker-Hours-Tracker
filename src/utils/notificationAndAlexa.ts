@@ -105,7 +105,7 @@ export async function requestBrowserNotificationPermission(): Promise<'granted' 
   }
 }
 
-export function playAudioChime(): void {
+export function playAudioChime(soundType: 'default' | 'probe1' | 'probe2' | 'probe3' | 'probe4' | 'alert' = 'default'): void {
   if (typeof window === 'undefined') return;
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -114,32 +114,79 @@ export function playAudioChime(): void {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     
-    osc.type = 'sine';
-    // Arpeggio chime
-    osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-    osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.15); // E5
-    osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.30); // G5
-    osc.frequency.setValueAtTime(1046.5, ctx.currentTime + 0.45); // C6
+    let sequence: {freq: number, time: number}[] = [];
+    
+    if (soundType === 'default') {
+      osc.type = 'sine';
+      sequence = [
+        {freq: 523.25, time: 0},
+        {freq: 659.25, time: 0.15},
+        {freq: 783.99, time: 0.3},
+        {freq: 1046.5, time: 0.45}
+      ];
+    } else if (soundType === 'alert') {
+      osc.type = 'triangle';
+      sequence = [
+        {freq: 800, time: 0},
+        {freq: 1000, time: 0.15},
+        {freq: 800, time: 0.3},
+        {freq: 1000, time: 0.45},
+      ];
+    } else if (soundType === 'probe1') {
+      osc.type = 'sine';
+      sequence = [
+        {freq: 440, time: 0},
+        {freq: 554.37, time: 0.2},
+        {freq: 659.25, time: 0.4},
+      ];
+    } else if (soundType === 'probe2') {
+      osc.type = 'triangle';
+      sequence = [
+        {freq: 329.63, time: 0},
+        {freq: 392.00, time: 0.2},
+        {freq: 493.88, time: 0.4},
+      ];
+    } else if (soundType === 'probe3') {
+      osc.type = 'sine';
+      sequence = [
+        {freq: 587.33, time: 0},
+        {freq: 739.99, time: 0.15},
+        {freq: 880.00, time: 0.3},
+      ];
+    } else if (soundType === 'probe4') {
+      osc.type = 'sine';
+      sequence = [
+        {freq: 349.23, time: 0},
+        {freq: 440.00, time: 0.2},
+        {freq: 523.25, time: 0.4},
+        {freq: 698.46, time: 0.6},
+      ];
+    }
 
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
-
+    sequence.forEach((s) => {
+      osc.frequency.setValueAtTime(s.freq, ctx.currentTime + s.time);
+    });
+    
+    gain.gain.setValueAtTime(osc.type === 'triangle' ? 0.15 : 0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (sequence[sequence.length-1].time + 0.3));
+    
     osc.connect(gain);
     gain.connect(ctx.destination);
+    
     osc.start();
-    osc.stop(ctx.currentTime + 0.8);
+    osc.stop(ctx.currentTime + (sequence[sequence.length-1].time + 0.4));
   } catch (e) {
     console.warn('AudioContext chime play prevented or unsupported', e);
   }
 }
 
-export function sendCharGPTPushNotification(title: string, body: string, tag: string = 'chargpt-alert'): boolean {
+export function sendCharGPTPushNotification(title: string, body: string, tag: string = 'chargpt-alert', soundType: 'default' | 'probe1' | 'probe2' | 'probe3' | 'probe4' | 'alert' = 'default'): boolean {
   let sent = false;
   const pushCfg = loadPushConfig();
 
   // 1. Audio chime if enabled
   if (pushCfg.soundEnabled) {
-    playAudioChime();
+    playAudioChime(soundType);
   }
 
   // 2. Native Web Browser Push Notification

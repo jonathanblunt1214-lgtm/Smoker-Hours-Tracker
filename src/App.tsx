@@ -33,6 +33,7 @@ import { BluetoothManagerModal } from './components/BluetoothManagerModal';
 import { SettingsModal } from './components/SettingsModal';
 import { CustomSmokerModal } from './components/CustomSmokerModal';
 import { MasterAdminDashboardModal } from './components/MasterAdminDashboardModal';
+import { AppDownloadStoreModal } from './components/AppDownloadStoreModal';
 
 export default function App() {
   const [profile, setProfile] = useState<SmokerProfile>(loadSmokerProfile);
@@ -171,15 +172,30 @@ export default function App() {
     };
   }, []);
 
-  // Settings, Bluetooth, Custom Smokers, Master Admin & Google Drive Modal States
+  // Settings, Bluetooth, Custom Smokers, Master Admin, Google Drive & Download App Modal States
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'appearance' | 'alerts' | 'cloud' | 'data'>('appearance');
   const [isBluetoothModalOpen, setIsBluetoothModalOpen] = useState(false);
   const [isCustomSmokerModalOpen, setIsCustomSmokerModalOpen] = useState(false);
   const [isMasterAdminModalOpen, setIsMasterAdminModalOpen] = useState(false);
+  const [isDownloadStoreModalOpen, setIsDownloadStoreModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+
+  // Synchronize Raspberry Pi Low-Power Mode DOM optimizations
+  useEffect(() => {
+    if (lowPowerSettings.raspberryPiMode) {
+      document.documentElement.classList.add('raspberry-pi-mode');
+    } else {
+      document.documentElement.classList.remove('raspberry-pi-mode');
+    }
+    if (lowPowerSettings.piKioskTouchTargets) {
+      document.documentElement.classList.add('pi-touch-kiosk');
+    } else {
+      document.documentElement.classList.remove('pi-touch-kiosk');
+    }
+  }, [lowPowerSettings.raspberryPiMode, lowPowerSettings.piKioskTouchTargets]);
 
   useEffect(() => {
     const unsubscribe = initAuth(
@@ -195,30 +211,22 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Automatically synchronize profile hours with cook logs to ensure total hours match everywhere
+  // Automatically synchronize profile hours with initial hours & cook logs
   useEffect(() => {
-    if (cookLogs && cookLogs.length > 0) {
-      const minStartingHours = Math.min(...cookLogs.map((c) => c.startingSmokerHours || 0));
-      const maxEndingHours = Math.max(...cookLogs.map((c) => c.endingSmokerHours || 0));
+    const totalLogged = (cookLogs || []).reduce((acc, curr) => acc + (curr.hoursLogged || 0), 0);
+    const initial = profile.initialHours || 0;
+    const maxEndingHours = cookLogs && cookLogs.length > 0
+      ? Math.max(...cookLogs.map((c) => c.endingSmokerHours || 0))
+      : 0;
+    const expectedCurrent = Number(Math.max(initial + totalLogged, maxEndingHours).toFixed(2));
 
-      setProfile((prev) => {
-        let updated = false;
-        const newProfile = { ...prev };
-
-        if (minStartingHours > 0 && prev.initialHours !== minStartingHours) {
-          newProfile.initialHours = minStartingHours;
-          updated = true;
-        }
-        const effectiveCurrentHours = Math.max(prev.currentHours || 0, maxEndingHours);
-        if (effectiveCurrentHours !== prev.currentHours) {
-          newProfile.currentHours = effectiveCurrentHours;
-          updated = true;
-        }
-
-        return updated ? newProfile : prev;
-      });
+    if (Math.abs((profile.currentHours || 0) - expectedCurrent) > 0.01) {
+      setProfile((prev) => ({
+        ...prev,
+        currentHours: expectedCurrent,
+      }));
     }
-  }, [cookLogs]);
+  }, [cookLogs, profile.initialHours]);
 
   // Sync profile changes
   useEffect(() => {
@@ -263,12 +271,27 @@ export default function App() {
 
       // Run daily backup if it hasn't run today
       if (lastBackupDateStr !== todayStr) {
+        const localAccountData = (() => {
+          try {
+            const saved = localStorage.getItem('pitmaster_local_user_account');
+            if (saved) return JSON.parse(saved);
+          } catch (e) {}
+          return {
+            name: 'Jonathan Blunt',
+            email: currentUser?.email || 'jonathanblunt1214@gmail.com',
+            title: 'Head Pitmaster',
+            createdAt: new Date().toISOString().slice(0, 10),
+          };
+        })();
+
         const backupPayload = {
           app: 'Pitmaster Log & Smoker Monitor',
           timestamp: new Date().toISOString(),
           profile,
           cookLogs,
           fuelLogs,
+          userAccount: localAccountData,
+          userProfile: localAccountData,
         };
 
         // Store daily backup snapshot
@@ -276,7 +299,7 @@ export default function App() {
 
         // Sync with Google Drive if access token available
         if (accessToken) {
-          saveToGoogleDrive(accessToken, { profile, cookLogs, fuelLogs }).catch(console.warn);
+          saveToGoogleDrive(accessToken, { profile, cookLogs, fuelLogs, userAccount: localAccountData }).catch(console.warn);
         }
 
         const nowIso = new Date().toISOString();
@@ -417,11 +440,27 @@ export default function App() {
     }
   };
 
-  const handleRestoreFromDrive = (restored: { profile: SmokerProfile; cookLogs: CookLog[]; fuelLogs: FuelLog[] }) => {
+  const handleRestoreFromDrive = (restored: {
+    profile: SmokerProfile;
+    cookLogs: CookLog[];
+    fuelLogs: FuelLog[];
+    userAccount?: any;
+    userProfile?: any;
+  }) => {
     setProfile(restored.profile);
     setCookLogs(restored.cookLogs);
     setFuelLogs(restored.fuelLogs);
-    showToast('App data successfully restored from Google Drive backup!');
+
+    const accountToRestore = restored.userAccount || restored.userProfile;
+    if (accountToRestore) {
+      try {
+        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(accountToRestore));
+      } catch (e) {
+        console.warn('Failed to restore local user account', e);
+      }
+    }
+
+    showToast('App data and user account successfully restored!');
   };
 
   const maxPageNumber = cookLogs.reduce((max, c) => Math.max(max, c.pageNumber || 48), 48);
@@ -456,6 +495,7 @@ export default function App() {
         isOnline={isOnline}
         currentUserEmail={currentUser?.email || 'jonathanblunt1214@gmail.com'}
         onOpenMasterAdmin={() => setIsMasterAdminModalOpen(true)}
+        onOpenDownloadStore={() => setIsDownloadStoreModalOpen(true)}
       />
 
       {/* Smoker Overview Metric Banner */}
@@ -477,7 +517,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-[92vw] xl:max-w-7xl mx-auto px-1.5 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-12 overflow-x-hidden">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-12 overflow-x-hidden">
         {activeTab === 'analytics' && (
           <AnalyticsDashboard
             cookLogs={cookLogs}
@@ -503,6 +543,11 @@ export default function App() {
             }}
             onStartCookFromRecipe={handleStartCookFromRecipe}
             onAskAIPitmaster={handleAskAIPitmasterAboutRecipe}
+            onLogsImported={(newLogs) => {
+              const updated = [...cookLogs, ...newLogs.map(l => ({...l, id: crypto.randomUUID()}))];
+              setCookLogs(updated);
+              saveCookLogs(updated);
+            }}
           />
         )}
 
@@ -611,6 +656,18 @@ export default function App() {
           profile,
           cookLogs,
           fuelLogs,
+          userAccount: (() => {
+            try {
+              const saved = localStorage.getItem('pitmaster_local_user_account');
+              if (saved) return JSON.parse(saved);
+            } catch (e) {}
+            return {
+              name: 'Jonathan Blunt',
+              email: currentUser?.email || 'jonathanblunt1214@gmail.com',
+              title: 'Head Pitmaster',
+              createdAt: new Date().toISOString().slice(0, 10),
+            };
+          })(),
         }}
         onRestoreData={handleRestoreFromDrive}
       />
@@ -658,6 +715,18 @@ export default function App() {
           profile,
           cookLogs,
           fuelLogs,
+          userAccount: (() => {
+            try {
+              const saved = localStorage.getItem('pitmaster_local_user_account');
+              if (saved) return JSON.parse(saved);
+            } catch (e) {}
+            return {
+              name: 'Jonathan Blunt',
+              email: currentUser?.email || 'jonathanblunt1214@gmail.com',
+              title: 'Head Pitmaster',
+              createdAt: new Date().toISOString().slice(0, 10),
+            };
+          })(),
         }}
         onRestoreData={handleRestoreFromDrive}
         onOpenCustomSmokerModal={() => setIsCustomSmokerModalOpen(true)}
@@ -690,6 +759,16 @@ export default function App() {
           setFuelLogs(loadFuelLogs());
         }}
         showToast={showToast}
+      />
+
+      {/* Download App & Play Store Hub Modal */}
+      <AppDownloadStoreModal
+        isOpen={isDownloadStoreModalOpen}
+        onClose={() => setIsDownloadStoreModalOpen(false)}
+        onOpenRaspberryPiSettings={() => {
+          setSettingsInitialTab('appearance');
+          setIsSettingsModalOpen(true);
+        }}
       />
 
       {/* Footer */}

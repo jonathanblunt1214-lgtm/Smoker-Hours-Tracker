@@ -115,7 +115,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
   const [selectedProteinCategory, setSelectedProteinCategory] = useState<string>('Beef');
   const [proteinSearchQuery, setProteinSearchQuery] = useState<string>('');
-  const [isSafetyGuideOpen, setIsSafetyGuideOpen] = useState<boolean>(true);
+  const [isSafetyGuideOpen, setIsSafetyGuideOpen] = useState<boolean>(false);
 
   // Universal view mode navigation state
   const [mobileTab, setMobileTab] = useState<'all' | 'thermal' | 'consumption' | 'benchmarks' | 'guide'>('thermal');
@@ -129,8 +129,10 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
     target: true,
     ambient: true,
   });
+  const [isThermalSectionOpen, setIsThermalSectionOpen] = useState<boolean>(true);
+  const [isConsumptionSectionOpen, setIsConsumptionSectionOpen] = useState<boolean>(true);
   const [isBreakdownOpen, setIsBreakdownOpen] = useState<boolean>(false);
-  const [isBenchmarksOpen, setIsBenchmarksOpen] = useState<boolean>(true);
+  const [isBenchmarksOpen, setIsBenchmarksOpen] = useState<boolean>(false);
   const [benchmarkProteinFilter, setBenchmarkProteinFilter] = useState<string>('ALL');
 
   // 4 Meats & Probes Alert Configuration State
@@ -570,20 +572,42 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
       {/* SECTION 1: Thermal Curve Analytics & Cook Temperature Plot */}
       {(mobileTab === 'all' || mobileTab === 'thermal') && (
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-3.5 sm:p-6 shadow-xl">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#2a2a2a]">
-          <div>
-            <div className="flex items-center space-x-2">
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-3.5 sm:p-6 shadow-xl w-full min-w-0 max-w-full">
+        <div 
+          onClick={() => setIsThermalSectionOpen((prev) => !prev)}
+          className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 sm:pb-4 border-b border-[#2a2a2a] cursor-pointer group"
+        >
+          <div className="flex items-start sm:items-center justify-between w-full md:w-auto">
+            <div className="flex items-center space-x-2.5">
               <Thermometer className="w-5 h-5 text-orange-400 shrink-0" />
-              <h2 className="text-base sm:text-lg font-bold text-white leading-tight">Live Thermal Curve & Temperature Analytics</h2>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-base sm:text-lg font-bold text-white leading-tight group-hover:text-orange-400 transition-colors">Live Thermal Curve & Temperature Analytics</h2>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Select any cook log to inspect Target Pit Temp vs Cooking Temp vs Internal Meat Temp over time.
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Select any cook log to inspect Target Pit Temp vs Cooking Temp vs Internal Meat Temp over time.
-            </p>
+
+            <button
+              type="button"
+              className="p-2 rounded-xl bg-[#121212] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-orange-500/40 transition-all cursor-pointer shrink-0 ml-2"
+              title={isThermalSectionOpen ? 'Collapse Section' : 'Expand Section'}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsThermalSectionOpen((prev) => !prev);
+              }}
+            >
+              {isThermalSectionOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+            </button>
           </div>
 
           {/* Cook Log Selector & Bluetooth Button */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto pt-2 md:pt-0 border-t border-[#2a2a2a] md:border-t-0"
+          >
             {onOpenBluetoothModal && (
               <button
                 type="button"
@@ -612,32 +636,32 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
           </div>
         </div>
 
-        {activeCook && (
-          <div className="mt-4 sm:mt-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {isThermalSectionOpen && activeCook && (
+          <div className="mt-4 sm:mt-6 grid grid-cols-1 lg:grid-cols-4 gap-6 w-full min-w-0">
             
             {/* Thermal Line Chart Container */}
-            <div className="lg:col-span-3 bg-[#121212] p-3 sm:p-5 rounded-xl border border-[#2a2a2a] flex flex-col justify-between space-y-4">
+            <div className="lg:col-span-3 bg-[#121212] p-3 sm:p-5 rounded-xl border border-[#2a2a2a] flex flex-col justify-between space-y-4 w-full min-w-0 max-w-full overflow-hidden">
               {/* Thermal Summary Metrics & Interactive Line Curve Toggles */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#2a2a2a] pb-3">
+              <div className="flex flex-col gap-2.5 border-b border-[#2a2a2a] pb-3">
                 {/* Metric Summary Chips */}
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs font-mono">
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                <div className="flex items-center gap-1.5 sm:gap-2 text-xs font-mono overflow-x-auto no-scrollbar max-w-full pb-0.5">
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1 shrink-0">
                     <span className="text-zinc-400 text-[11px]">Rise:</span>
                     <span className="text-red-400 font-bold text-[11px] sm:text-xs">{startMeatTemp}°F → {finalMeatTemp}°F</span>
                     <span className="text-emerald-400 font-bold text-[10px]">(+{meatTempRise}°F)</span>
                   </div>
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1 shrink-0">
                     <span className="text-zinc-400 text-[11px]">Avg Pit:</span>
                     <span className="text-orange-400 font-bold text-[11px] sm:text-xs">{avgPitTemp}°F</span>
                   </div>
-                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1">
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] px-2 sm:px-2.5 py-1 rounded-lg flex items-center space-x-1 shrink-0">
                     <span className="text-zinc-400 text-[11px]">Peak Pit:</span>
                     <span className="text-amber-400 font-bold text-[11px] sm:text-xs">{maxPitTemp}°F</span>
                   </div>
                 </div>
 
                 {/* Mobile Preset & Line Curve Toggle Buttons */}
-                <div className="flex items-center gap-1.5 text-[11px] font-sans overflow-x-auto pb-1 no-scrollbar max-w-full">
+                <div className="flex items-center gap-1.5 text-[11px] font-sans overflow-x-auto no-scrollbar max-w-full pb-0.5">
                   <button
                     type="button"
                     onClick={() => setVisibleCurves({ pit: true, meat1: true, meat2: false, meat3: false, meat4: false, target: true, ambient: false })}
@@ -725,7 +749,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
               </div>
 
               {/* Main Refined Line Chart */}
-              <div className="h-64 sm:h-80 w-full">
+              <div className="h-[340px] sm:h-[380px] w-full min-w-0">
                 {(() => {
                   const chartReadings = (activeCook.temperatureReadings || []).map((r) => {
                     const m2 = r.meatTemp2 ?? Math.max(32, r.meatTemp - 5);
@@ -754,7 +778,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
                   return (
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartReadings} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                      <ComposedChart data={chartReadings} margin={{ top: 10, right: 10, left: -10, bottom: 10 }}>
                         <defs>
                           <linearGradient id="pitAreaGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#f97316" stopOpacity={0.25} />
@@ -773,17 +797,27 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                           fontSize={10}
                           tickLine={false}
                           minTickGap={20}
+                          dy={4}
                         />
                         <YAxis
                           stroke="#a0a0a0"
                           fontSize={10}
-                          domain={[0, (dataMax: number) => Math.max(activeUnit === 'C' ? 140 : 275, dataMax + 20)]}
+                          domain={[0, (dataMax: number) => Math.max(activeUnit === 'C' ? 150 : 280, dataMax + 20)]}
                           unit={`°${activeUnit}`}
                           tickLine={false}
-                          width={36}
+                          width={42}
                         />
                         <Tooltip content={<CustomThermalTooltip tempUnit={activeUnit} />} />
-                        <Legend verticalAlign="top" height={32} wrapperStyle={{ fontSize: '11px', color: '#a0a0a0' }} />
+                        <Legend
+                          verticalAlign="top"
+                          align="center"
+                          wrapperStyle={{
+                            fontSize: '11px',
+                            color: '#a0a0a0',
+                            paddingBottom: '8px',
+                            lineHeight: '16px',
+                          }}
+                        />
 
                         {/* Reference Line for Target Meat Finish Goal */}
                         <ReferenceLine
@@ -800,8 +834,8 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                         />
 
                     {/* Shaded Areas */}
-                    {visibleCurves.pit && <Area type="monotone" dataKey="cookingTemp" fill="url(#pitAreaGrad)" stroke="none" />}
-                    {visibleCurves.meat1 && <Area type="monotone" dataKey="meatTemp" fill="url(#meatAreaGrad)" stroke="none" />}
+                    {visibleCurves.pit && <Area type="monotone" dataKey="cookingTemp" fill="url(#pitAreaGrad)" stroke="none" legendType="none" />}
+                    {visibleCurves.meat1 && <Area type="monotone" dataKey="meatTemp" fill="url(#meatAreaGrad)" stroke="none" legendType="none" />}
 
                     {/* Lines */}
                     {visibleCurves.target && (
@@ -1573,97 +1607,126 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
       {/* SECTION 2: Daily Smoker Hours & Consumption Trends Chart */}
       {(mobileTab === 'all' || mobileTab === 'consumption') && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-3.5 sm:p-6 shadow-xl w-full min-w-0 max-w-full">
         
-        {/* Consumption Bar & Line Chart (2 Cols) */}
-        <div className="lg:col-span-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 shadow-xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#2a2a2a]">
-            <div>
-              <div className="flex items-center space-x-2">
-                <BarChart3 className="w-5 h-5 text-orange-400" />
-                <h3 className="text-base font-bold text-white">Daily Consumption & Runtime Hours</h3>
-                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1">
-                  <Zap className="w-3 h-3" />
-                  <span>Fuel Sync Active</span>
-                </span>
-              </div>
-              <p className="text-xs text-zinc-400 mt-1">
-                Comparing Smoker Operating Hours (hrs) vs Synced Pellet Consumption (lbs) derived from manufacturer specs ({mfrSpec.factoryBaselineBurnRateLbsHr} lbs/hr).
-              </p>
-            </div>
-
-            <div className="bg-[#121212] px-3 py-1.5 rounded-xl border border-[#2a2a2a] text-xs font-mono text-zinc-300 shrink-0">
-              <span className="text-[10px] text-zinc-400 block font-sans">Mfr Burn Rate:</span>
-              <span className="text-orange-400 font-bold">{mfrSpec.factoryBaselineBurnRateLbsHr} lbs/hr</span>
-            </div>
-          </div>
-
-          <div className="mt-6 h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={consumptionChartData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" opacity={0.6} />
-                <XAxis dataKey="name" stroke="#a0a0a0" fontSize={11} tickLine={false} />
-                <YAxis yAxisId="left" stroke="#f97316" fontSize={11} unit=" hrs" tickLine={false} />
-                <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={11} unit=" lbs" tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a', borderRadius: '8px', color: '#e0e0e0', fontSize: '12px' }}
-                  formatter={(value: any, name: any) => [`${value} ${name.includes('Hours') ? 'hrs' : 'lbs'}`, name]}
-                />
-                <Legend verticalAlign="top" height={30} wrapperStyle={{ fontSize: '12px' }} />
-                <Bar yAxisId="left" dataKey="hours" name="Smoker Hours (hrs)" fill="#f97316" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="right" type="monotone" dataKey="syncedFuelLbs" name="Synced Pellet Usage (lbs)" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} />
-                <Line yAxisId="right" type="monotone" dataKey="actualFuelLbs" name="Actual Logged (lbs)" stroke="#71717a" strokeDasharray="3 3" strokeWidth={2} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Protein Hours Breakdown (1 Col) */}
-        <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-6 shadow-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center space-x-2 pb-3 border-b border-[#2a2a2a]">
-              <Flame className="w-5 h-5 text-orange-400" />
-              <h3 className="text-base font-bold text-white">Protein Distribution</h3>
-            </div>
-            <p className="text-xs text-zinc-400 mt-1">Share of total smoking hours by meat type.</p>
-
-            {/* Donut Chart */}
-            <div className="h-48 mt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={proteinPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={45}
-                    outerRadius={70}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {proteinPieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a', borderRadius: '8px', color: '#e0e0e0', fontSize: '12px' }}
-                    formatter={(val: any) => [`${val} hrs`, 'Smoking Hours']}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Legend breakdown list */}
-            <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-              {proteinPieData.map((item) => (
-                <div key={item.name} className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                  <span className="text-zinc-300 font-medium">{item.name}:</span>
-                  <span className="text-orange-400 font-mono font-bold">{item.value}h</span>
+        {/* Section Header */}
+        <div 
+          onClick={() => setIsConsumptionSectionOpen((prev) => !prev)}
+          className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group select-none transition-colors ${
+            isConsumptionSectionOpen ? 'pb-3 sm:pb-4 border-b border-[#2a2a2a]' : ''
+          }`}
+        >
+          <div className="flex items-center justify-between w-full sm:w-auto">
+            <div className="flex items-center space-x-2.5">
+              <BarChart3 className="w-5 h-5 text-orange-400 shrink-0" />
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-base font-bold text-white group-hover:text-orange-400 transition-colors">Daily Consumption & Runtime Hours</h3>
+                  <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1 shrink-0">
+                    <Zap className="w-3 h-3" />
+                    <span>Fuel Sync Active</span>
+                  </span>
                 </div>
-              ))}
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Comparing Smoker Operating Hours (hrs) vs Synced Pellet Consumption (lbs) derived from manufacturer specs.
+                </p>
+              </div>
             </div>
+
+            <button
+              type="button"
+              className="p-2 rounded-xl bg-[#121212] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-orange-500/40 transition-all cursor-pointer shrink-0 ml-2"
+              title={isConsumptionSectionOpen ? 'Collapse Section' : 'Expand Section'}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsConsumptionSectionOpen((prev) => !prev);
+              }}
+            >
+              {isConsumptionSectionOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+            </button>
+          </div>
+
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[#121212] px-3 py-1.5 rounded-xl border border-[#2a2a2a] text-xs font-mono text-zinc-300 shrink-0 self-start sm:self-auto"
+          >
+            <span className="text-[10px] text-zinc-400 block font-sans">Mfr Burn Rate:</span>
+            <span className="text-orange-400 font-bold">{mfrSpec.factoryBaselineBurnRateLbsHr} lbs/hr</span>
           </div>
         </div>
+
+        {isConsumptionSectionOpen && (
+          <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+            {/* Consumption Bar & Line Chart (2 Cols) */}
+            <div className="lg:col-span-2 bg-[#121212] border border-[#2a2a2a] p-4 sm:p-5 rounded-xl flex flex-col justify-between">
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={consumptionChartData} margin={{ top: 20, right: 10, left: 0, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" opacity={0.6} />
+                    <XAxis dataKey="name" stroke="#a0a0a0" fontSize={11} tickLine={false} />
+                    <YAxis yAxisId="left" stroke="#f97316" fontSize={11} unit=" hrs" tickLine={false} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={11} unit=" lbs" tickLine={false} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a', borderRadius: '8px', color: '#e0e0e0', fontSize: '12px' }}
+                      formatter={(value: any, name: any) => [`${value} ${name.includes('Hours') ? 'hrs' : 'lbs'}`, name]}
+                    />
+                    <Legend verticalAlign="top" height={36} wrapperStyle={{ fontSize: '11px', paddingBottom: '10px' }} />
+                    <Bar yAxisId="left" dataKey="hours" name="Smoker Hours (hrs)" fill="#f97316" radius={[4, 4, 0, 0]} />
+                    <Line yAxisId="right" type="monotone" dataKey="syncedFuelLbs" name="Synced Pellet Usage (lbs)" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} />
+                    <Line yAxisId="right" type="monotone" dataKey="actualFuelLbs" name="Actual Logged (lbs)" stroke="#71717a" strokeDasharray="3 3" strokeWidth={2} dot={{ r: 3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Protein Hours Breakdown (1 Col) */}
+            <div className="bg-[#121212] border border-[#2a2a2a] p-4 sm:p-5 rounded-xl flex flex-col justify-between">
+              <div>
+                <div className="flex items-center space-x-2 pb-3 border-b border-[#2a2a2a]">
+                  <Flame className="w-5 h-5 text-orange-400" />
+                  <h3 className="text-base font-bold text-white">Protein Distribution</h3>
+                </div>
+                <p className="text-xs text-zinc-400 mt-1">Share of total smoking hours by meat type.</p>
+
+                {/* Donut Chart */}
+                <div className="h-48 mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={proteinPieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={70}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {proteinPieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#2a2a2a', borderRadius: '8px', color: '#e0e0e0', fontSize: '12px' }}
+                        formatter={(val: any) => [`${val} hrs`, 'Smoking Hours']}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Legend breakdown list */}
+                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                  {proteinPieData.map((item) => (
+                    <div key={item.name} className="flex items-center space-x-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                      <span className="text-zinc-300 font-medium">{item.name}:</span>
+                      <span className="text-orange-400 font-mono font-bold">{item.value}h</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
       )}

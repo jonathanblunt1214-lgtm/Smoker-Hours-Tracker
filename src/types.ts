@@ -127,6 +127,10 @@ export interface LowPowerModeSettings {
   slowTelemetryPolling: boolean;
   disableGpuBlurEffects: boolean;
   dimBrightnessOnBattery?: boolean;
+  raspberryPiMode?: boolean;
+  piKioskTouchTargets?: boolean;
+  piAggressiveGc?: boolean;
+  piFpsLimit?: 30 | 60 | 15;
 }
 
 export interface RetailerFuelItem {
@@ -245,6 +249,25 @@ export interface CookLog {
   photoUrl?: string;
   photoUrls?: string[];
   status: 'In Progress' | 'Completed' | 'Draft';
+  pitmasterAlias?: string;
+  userEmail?: string;
+}
+
+export interface LocalUserProfile {
+  id?: string;
+  name: string;
+  email: string;
+  title: string;
+  createdAt: string;
+  rigs?: SmokerProfile[];
+  activeRigId?: string;
+}
+
+export interface OneDriveAccount {
+  connected: boolean;
+  email: string;
+  lastSync: string | null;
+  autoSync: boolean;
 }
 
 export interface DailyConsumptionSummary {

@@ -44,7 +44,7 @@ export const CookCertificateModal: React.FC<CookCertificateModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-zinc-900 border border-zinc-700/60 rounded-2xl w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-4xl p-4 sm:p-6 shadow-2xl relative text-white font-sans my-4 space-y-4">
+      <div className="bg-zinc-900 border border-zinc-700/60 rounded-2xl w-full max-w-4xl p-4 sm:p-6 shadow-2xl relative text-white font-sans my-4 space-y-4">
         
         {/* Top Control Header */}
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
@@ -97,8 +97,8 @@ export const CookCertificateModal: React.FC<CookCertificateModalProps> = ({
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-black/60"></div>
 
             {/* TOP LEFT OVERLAY: Cook Title & Live Temp/Time */}
-            <div className="absolute top-4 sm:top-6 left-4 sm:left-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] space-y-0.5">
-              <h2 className="text-2xl sm:text-4xl font-extrabold tracking-tight italic font-serif text-amber-100 capitalize">
+            <div className="absolute top-4 sm:top-6 left-4 sm:left-6 text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] space-y-0.5 max-w-[55%] sm:max-w-[65%]">
+              <h2 className="text-xl sm:text-4xl font-extrabold tracking-tight italic font-serif text-amber-100 capitalize truncate">
                 {cook.title || 'Smoker Steak'}
               </h2>
               <div className="text-xl sm:text-2xl font-bold font-mono text-zinc-200">

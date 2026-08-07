@@ -8,7 +8,7 @@ import {
   User,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { SmokerProfile, CookLog, FuelLog } from '../types';
+import { SmokerProfile, CookLog, FuelLog, LocalUserProfile } from '../types';
 
 // Initialize Firebase App
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
@@ -73,6 +73,8 @@ export interface AppDriveData {
   profile: SmokerProfile;
   cookLogs: CookLog[];
   fuelLogs: FuelLog[];
+  userAccount?: LocalUserProfile;
+  userProfile?: LocalUserProfile;
 }
 
 const DRIVE_FILE_NAME = 'pitmaster_smoker_data.json';
@@ -99,7 +101,13 @@ export const findDriveFile = async (accessToken: string): Promise<string | null>
 // Save application data to Google Drive
 export const saveToGoogleDrive = async (
   accessToken: string,
-  appData: { profile: SmokerProfile; cookLogs: CookLog[]; fuelLogs: FuelLog[] }
+  appData: {
+    profile: SmokerProfile;
+    cookLogs: CookLog[];
+    fuelLogs: FuelLog[];
+    userAccount?: LocalUserProfile;
+    userProfile?: LocalUserProfile;
+  }
 ): Promise<{ fileId: string; createdNew: boolean }> => {
   const existingFileId = await findDriveFile(accessToken);
 
@@ -109,6 +117,8 @@ export const saveToGoogleDrive = async (
     profile: appData.profile,
     cookLogs: appData.cookLogs,
     fuelLogs: appData.fuelLogs,
+    userAccount: appData.userAccount || appData.userProfile,
+    userProfile: appData.userProfile || appData.userAccount,
   };
 
   const jsonContent = JSON.stringify(payload, null, 2);

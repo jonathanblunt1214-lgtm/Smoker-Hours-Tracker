@@ -279,7 +279,17 @@ export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPT
 export function loadSmokerProfile(): SmokerProfile {
   try {
     const raw = localStorage.getItem(KEYS.PROFILE);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const profile: SmokerProfile = JSON.parse(raw);
+      if (profile.initialHours === 129.75 || profile.currentHours === 160.75) {
+        profile.initialHours = 0;
+        const cookLogs = loadCookLogs();
+        const totalLogged = cookLogs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
+        profile.currentHours = Number((0 + totalLogged).toFixed(2));
+        saveSmokerProfile(profile);
+      }
+      return profile;
+    }
   } catch (e) {
     console.error('Failed to load smoker profile', e);
   }
@@ -293,7 +303,28 @@ export function saveSmokerProfile(profile: SmokerProfile): void {
 export function loadCookLogs(): CookLog[] {
   try {
     const raw = localStorage.getItem(KEYS.COOK_LOGS);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const logs: CookLog[] = JSON.parse(raw);
+      let needsMigration = false;
+      if (logs.length > 0) {
+        const minStart = Math.min(...logs.map((c) => c.startingSmokerHours || 0));
+        if (minStart >= 129.75) {
+          needsMigration = true;
+        }
+      }
+      if (needsMigration) {
+        // Reverse so oldest cook is first
+        const sorted = [...logs].reverse();
+        let current = 0;
+        sorted.forEach((c) => {
+          c.startingSmokerHours = current;
+          c.endingSmokerHours = Number((current + (c.hoursLogged || 0)).toFixed(2));
+          current = c.endingSmokerHours;
+        });
+        saveCookLogs(logs);
+      }
+      return logs;
+    }
   } catch (e) {
     console.error('Failed to load cook logs', e);
   }

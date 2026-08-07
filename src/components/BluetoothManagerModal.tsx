@@ -64,9 +64,9 @@ export const BluetoothManagerModal: React.FC<BluetoothManagerModalProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
 
   // Collapsible Section Menus State
-  const [isSpotlightOpen, setIsSpotlightOpen] = useState<boolean>(true);
-  const [isTelemetryOpen, setIsTelemetryOpen] = useState<boolean>(true);
-  const [isDevicesListOpen, setIsDevicesListOpen] = useState<boolean>(true);
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState<boolean>(false);
+  const [isTelemetryOpen, setIsTelemetryOpen] = useState<boolean>(false);
+  const [isDevicesListOpen, setIsDevicesListOpen] = useState<boolean>(false);
   const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState<boolean>(false);
 
   // Live Probe Temperatures
@@ -304,7 +304,7 @@ export const BluetoothManagerModal: React.FC<BluetoothManagerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 animate-fadeIn">
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh]">
         
         {/* Header Bar */}
         <div className="bg-[#121212] border-b border-[#2a2a2a] px-3 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

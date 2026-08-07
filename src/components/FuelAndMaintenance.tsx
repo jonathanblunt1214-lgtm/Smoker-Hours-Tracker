@@ -274,23 +274,23 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   // Collapsible Section & Sub-Tab Navigation State
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend'>('blend');
   const [expandedSections, setExpandedSections] = useState({
-    hardware: true,
-    maintenance: true,
-    fuel: true,
-    mods: true,
-    blend: true,
+    hardware: false,
+    maintenance: false,
+    fuel: false,
+    mods: false,
+    blend: false,
   });
 
   // Inner Sub-Section Collapsible States
-  const [isBurnSyncExpanded, setIsBurnSyncExpanded] = useState(true);
-  const [isHopperSyncExpanded, setIsHopperSyncExpanded] = useState(true);
-  const [isInventorySummaryExpanded, setIsInventorySummaryExpanded] = useState(true);
+  const [isBurnSyncExpanded, setIsBurnSyncExpanded] = useState(false);
+  const [isHopperSyncExpanded, setIsHopperSyncExpanded] = useState(false);
+  const [isInventorySummaryExpanded, setIsInventorySummaryExpanded] = useState(false);
 
   // Inner Custom Fuel Blend Lab Collapsible Container States
-  const [isBlendMixExpanded, setIsBlendMixExpanded] = useState(true);
-  const [isBlendPhysicsExpanded, setIsBlendPhysicsExpanded] = useState(true);
-  const [isBlendCostExpanded, setIsBlendCostExpanded] = useState(true);
-  const [isBlendPresetsExpanded, setIsBlendPresetsExpanded] = useState(true);
+  const [isBlendMixExpanded, setIsBlendMixExpanded] = useState(false);
+  const [isBlendPhysicsExpanded, setIsBlendPhysicsExpanded] = useState(false);
+  const [isBlendCostExpanded, setIsBlendCostExpanded] = useState(false);
+  const [isBlendPresetsExpanded, setIsBlendPresetsExpanded] = useState(false);
 
   const toggleSection = (section: 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend') => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -355,7 +355,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   // Live Retailer Price Index & Amazon Sales Comparison State
   const [retailerSearch, setRetailerSearch] = useState('');
   const [selectedRetailerFilter, setSelectedRetailerFilter] = useState<string>('ALL');
-  const [isRetailerPriceExpanded, setIsRetailerPriceExpanded] = useState(true);
+  const [isRetailerPriceExpanded, setIsRetailerPriceExpanded] = useState(false);
 
   const handleAddBlendComponent = () => {
     if (blendComponents.length >= 5) return;

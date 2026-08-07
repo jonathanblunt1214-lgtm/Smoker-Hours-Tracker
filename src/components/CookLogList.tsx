@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { CookLog, ProteinType, SmokerProfile } from '../types';
 import { RecipeSuggestion } from '../data/recipeSuggestions';
 import { RecipeSuggestions } from './RecipeSuggestions';
-import { Search, Filter, Calendar, Clock, Flame, FileText, Trash2, PlusCircle, Star, CheckCircle2, ChevronDown, ChevronUp, Award } from 'lucide-react';
+import { Search, Filter, Calendar, Clock, Flame, FileText, Trash2, PlusCircle, Star, CheckCircle2, ChevronDown, ChevronUp, Award, Upload, Loader2 } from 'lucide-react';
 
 interface CookLogListProps {
   cookLogs: CookLog[];
@@ -13,6 +13,7 @@ interface CookLogListProps {
   onNewCookClick: () => void;
   onStartCookFromRecipe?: (recipe: RecipeSuggestion) => void;
   onAskAIPitmaster?: (recipe: RecipeSuggestion, promptText?: string) => void;
+  onLogsImported?: (logs: CookLog[]) => void;
 }
 
 export const CookLogList: React.FC<CookLogListProps> = ({
@@ -24,8 +25,10 @@ export const CookLogList: React.FC<CookLogListProps> = ({
   onNewCookClick,
   onStartCookFromRecipe,
   onAskAIPitmaster,
+  onLogsImported,
 }) => {
-  const [isLogsOpen, setIsLogsOpen] = useState(true);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedProtein, setSelectedProtein] = useState<string>('ALL');
   const [collapsedLogs, setCollapsedLogs] = useState<Record<string, boolean>>({});
@@ -89,7 +92,37 @@ export const CookLogList: React.FC<CookLogListProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 self-end md:self-auto">
+          <div className="flex items-center space-x-3 self-end md:self-auto flex-wrap sm:flex-nowrap gap-2">
+            
+            <label
+              className="inline-flex items-center px-3 py-2 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 font-bold text-[11px] rounded-xl transition-all shadow-sm cursor-pointer"
+              title="Upload PDF cook log for AI parsing"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isUploadingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 mr-1.5" />}
+              <span>{isUploadingPdf ? 'Parsing...' : 'Upload PDF'}</span>
+              <input type="file" accept="application/pdf" className="hidden" onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                  setIsUploadingPdf(true);
+                  const formData = new FormData();
+                  formData.append('pdf', file);
+                  const res = await fetch('/api/chargpt/parse-pdf-logs', {
+                    method: 'POST',
+                    body: formData
+                  });
+                  const data = await res.json();
+                  if (data.logs && data.logs.length > 0) {
+                    if (onLogsImported) onLogsImported(data.logs);
+                  }
+                } catch (err) {
+                  console.error(err);
+                } finally {
+                  setIsUploadingPdf(false);
+                }
+              }} />
+            </label>
             <button
               type="button"
               onClick={(e) => {
@@ -99,8 +132,9 @@ export const CookLogList: React.FC<CookLogListProps> = ({
               className="inline-flex items-center px-4 py-2 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer"
             >
               <PlusCircle className="w-4 h-4 mr-1.5" />
-              + New Smoke Log
+              <span>+ New Smoke Log</span>
             </button>
+
 
             <button
               type="button"
@@ -189,6 +223,11 @@ export const CookLogList: React.FC<CookLogListProps> = ({
                             <span className="text-[11px] px-2 py-0.5 rounded-md font-medium bg-[#1a1a1a] text-zinc-300 border border-[#2a2a2a]">
                               {log.smokerType}
                             </span>
+                            {log.pitmasterAlias && (
+                              <span className="text-[11px] px-2 py-0.5 rounded-md font-medium bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                                👤 {log.pitmasterAlias}
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center space-x-2 text-xs text-zinc-400">

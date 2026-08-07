@@ -8,7 +8,7 @@ import {
   findDriveFile,
   AppDriveData,
 } from '../lib/driveSync';
-import { SmokerProfile, CookLog, FuelLog } from '../types';
+import { SmokerProfile, CookLog, FuelLog, LocalUserProfile } from '../types';
 import { Cloud, CloudUpload, CloudDownload, LogOut, CheckCircle, AlertTriangle, X, RefreshCw, ShieldCheck, FileText } from 'lucide-react';
 import { TermsOfServiceModal } from './TermsOfServiceModal';
 
@@ -23,8 +23,16 @@ interface GoogleDriveSyncModalProps {
     profile: SmokerProfile;
     cookLogs: CookLog[];
     fuelLogs: FuelLog[];
+    userAccount?: LocalUserProfile;
+    userProfile?: LocalUserProfile;
   };
-  onRestoreData: (restored: { profile: SmokerProfile; cookLogs: CookLog[]; fuelLogs: FuelLog[] }) => void;
+  onRestoreData: (restored: {
+    profile: SmokerProfile;
+    cookLogs: CookLog[];
+    fuelLogs: FuelLog[];
+    userAccount?: LocalUserProfile;
+    userProfile?: LocalUserProfile;
+  }) => void;
 }
 
 export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
@@ -143,6 +151,8 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
       profile: confirmRestoreData.profile,
       cookLogs: confirmRestoreData.cookLogs,
       fuelLogs: confirmRestoreData.fuelLogs,
+      userAccount: confirmRestoreData.userAccount || confirmRestoreData.userProfile,
+      userProfile: confirmRestoreData.userProfile || confirmRestoreData.userAccount,
     });
     setStatusMsg({
       type: 'success',
@@ -160,7 +170,7 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 animate-fade-in">
-      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-[96vw] sm:max-w-md p-4 sm:p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl w-full max-w-md p-4 sm:p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
         <button
           onClick={onClose}
           className="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-[#242424] transition-colors cursor-pointer"

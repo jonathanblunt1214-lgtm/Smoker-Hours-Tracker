@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   ChevronRight,
+  ChevronUp,
+  ChevronDown,
   Info,
   Loader2,
   Download,
@@ -217,6 +219,10 @@ export const CookPlanner: React.FC<CookPlannerProps> = ({
   // AI Audit state
   const [isAuditingPlan, setIsAuditingPlan] = useState(false);
   const [aiAuditOutput, setAiAuditOutput] = useState<string | null>(null);
+
+  // Section Collapsible States
+  const [isCutParametersOpen, setIsCutParametersOpen] = useState<boolean>(true);
+  const [isCalculatedScheduleOpen, setIsCalculatedScheduleOpen] = useState<boolean>(true);
 
   // Handle Start Date Time change
   const handleStartDateTimeChange = (newStartStr: string) => {
@@ -447,247 +453,282 @@ END:VCALENDAR`;
       {/* Main Grid: Configurator vs Timeline */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left Column: Cook Parameters */}
-        <div className="lg:col-span-5 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
-          <div className="pb-2 border-b border-[#2a2a2a]">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center space-x-2">
-              <UtensilsCrossed className="w-4 h-4 text-orange-400" />
-              <span>1. Cut Parameters & Target Timing</span>
-            </h3>
-          </div>
-
-          {/* Quick Cut Selector */}
+        <div className="lg:col-span-5 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col justify-between">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1.5">
-              Select Meat / Cut Preset
-            </label>
-            <select
-              value={selectedPresetId}
-              onChange={(e) => handlePresetChange(e.target.value)}
-              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer min-h-[42px]"
+            <div 
+              onClick={() => setIsCutParametersOpen((prev) => !prev)}
+              className={`flex items-center justify-between cursor-pointer group select-none transition-colors ${
+                isCutParametersOpen ? 'pb-3 border-b border-[#2a2a2a]' : 'pb-0'
+              }`}
             >
-              {PRESET_CUTS.map((cut) => (
-                <option key={cut.id} value={cut.id}>
-                  {cut.name} ({cut.proteinType} - {cut.cut})
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="flex items-center space-x-2">
+                <UtensilsCrossed className="w-4 h-4 text-orange-400 shrink-0" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-orange-400 group-hover:text-orange-300 transition-colors">
+                  1. Cut Parameters & Target Timing
+                </h3>
+              </div>
 
-          {/* Weight & Pit Temp Inputs */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-1">
-                Meat Weight (lbs)
-              </label>
-              <input
-                type="number"
-                step="0.5"
-                min="0.5"
-                max="40"
-                value={weightLbs}
-                onChange={(e) => setWeightLbs(Math.max(0.5, parseFloat(e.target.value) || 1))}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[40px]"
-              />
+              <div className="flex items-center space-x-2">
+                {!isCutParametersOpen && (
+                  <span className="text-[10px] font-mono text-zinc-400 bg-[#121212] px-2 py-0.5 rounded-md border border-[#2a2a2a] truncate max-w-[140px] sm:max-w-[200px]">
+                    {selectedPreset.name} ({weightLbs}lbs • {targetPitTemp}°F)
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="p-1.5 rounded-lg bg-[#121212] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-orange-500/40 transition-all cursor-pointer shrink-0"
+                  title={isCutParametersOpen ? 'Collapse Section' : 'Expand Section'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsCutParametersOpen((prev) => !prev);
+                  }}
+                >
+                  {isCutParametersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-1">
-                Pit Temp Target (°F)
-              </label>
-              <input
-                type="number"
-                step="5"
-                min="180"
-                max="400"
-                value={targetPitTemp}
-                onChange={(e) => setTargetPitTemp(parseInt(e.target.value) || 225)}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[40px]"
-              />
-            </div>
-          </div>
+            {isCutParametersOpen && (
+              <div className="mt-4 space-y-4 animate-fade-in">
+                {/* Quick Cut Selector */}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1.5">
+                    Select Meat / Cut Preset
+                  </label>
+                  <select
+                    value={selectedPresetId}
+                    onChange={(e) => handlePresetChange(e.target.value)}
+                    className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer min-h-[42px]"
+                  >
+                    {PRESET_CUTS.map((cut) => (
+                      <option key={cut.id} value={cut.id}>
+                        {cut.name} ({cut.proteinType} - {cut.cut})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          {/* Planned Start Cook Date & Time */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-orange-400">
-                Planned Start Cook Date & Time
-              </label>
-              <span className="text-[10px] text-zinc-400 font-mono">Smoker Ignition</span>
-            </div>
-            <input
-              type="datetime-local"
-              value={startDateTime}
-              onChange={(e) => handleStartDateTimeChange(e.target.value)}
-              className="w-full bg-[#121212] border border-orange-500/40 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer font-mono min-h-[40px]"
-            />
+                {/* Weight & Pit Temp Inputs */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-1">
+                      Meat Weight (lbs)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0.5"
+                      max="40"
+                      value={weightLbs}
+                      onChange={(e) => setWeightLbs(Math.max(0.5, parseFloat(e.target.value) || 1))}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[40px]"
+                    />
+                  </div>
 
-            {/* Quick Start Presets */}
-            <div className="flex items-center gap-1 mt-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
-              <span className="text-zinc-500 uppercase font-bold shrink-0">Quick Start:</span>
-              <button
-                type="button"
-                onClick={() => setQuickStartTime(0, 7)}
-                className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
-              >
-                Today 7 AM
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuickStartTime(1, 6)}
-                className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
-              >
-                Tomorrow 6 AM
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const d = new Date();
-                  const day = d.getDay();
-                  const diff = d.getDate() + (6 - day + 7) % 7;
-                  d.setDate(diff);
-                  d.setHours(6, 0, 0, 0);
-                  handleStartDateTimeChange(d.toISOString().slice(0, 16));
-                }}
-                className="px-2 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-md border border-orange-500/20 whitespace-nowrap cursor-pointer font-bold"
-              >
-                Sat Game Day 6 AM
-              </button>
-            </div>
-          </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300 mb-1">
+                      Pit Temp Target (°F)
+                    </label>
+                    <input
+                      type="number"
+                      step="5"
+                      min="180"
+                      max="400"
+                      value={targetPitTemp}
+                      onChange={(e) => setTargetPitTemp(parseInt(e.target.value) || 225)}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[40px]"
+                    />
+                  </div>
+                </div>
 
-          {/* Target Serving Date & Time */}
-          <div className="space-y-1 pt-1 border-t border-[#2a2a2a]">
-            <div className="flex items-center justify-between">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                Target Serving Date & Time
-              </label>
-              <span className="text-[10px] text-zinc-400 font-mono">Dinner Served</span>
-            </div>
-            <input
-              type="datetime-local"
-              value={serveDateTime}
-              onChange={(e) => handleServeDateTimeChange(e.target.value)}
-              className="w-full bg-[#121212] border border-amber-500/40 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer font-mono min-h-[40px]"
-            />
+                {/* Planned Start Cook Date & Time */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-orange-400">
+                      Planned Start Cook Date & Time
+                    </label>
+                    <span className="text-[10px] text-zinc-400 font-mono">Smoker Ignition</span>
+                  </div>
+                  <input
+                    type="datetime-local"
+                    value={startDateTime}
+                    onChange={(e) => handleStartDateTimeChange(e.target.value)}
+                    className="w-full bg-[#121212] border border-orange-500/40 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer font-mono min-h-[40px]"
+                  />
 
-            {/* Quick Serve Presets */}
-            <div className="flex items-center gap-1 mt-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
-              <span className="text-zinc-500 uppercase font-bold shrink-0">Quick Serve:</span>
-              <button
-                type="button"
-                onClick={() => setQuickServeTime(0, 18)}
-                className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
-              >
-                Today 6 PM
-              </button>
-              <button
-                type="button"
-                onClick={() => setQuickServeTime(1, 17)}
-                className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
-              >
-                Tomorrow 5 PM
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const d = new Date();
-                  const day = d.getDay();
-                  const diff = d.getDate() + (6 - day + 7) % 7;
-                  d.setDate(diff);
-                  d.setHours(17, 0, 0, 0);
-                  handleServeDateTimeChange(d.toISOString().slice(0, 16));
-                }}
-                className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-md border border-amber-500/20 whitespace-nowrap cursor-pointer font-bold"
-              >
-                Sat Game Day 5 PM
-              </button>
-            </div>
-          </div>
+                  {/* Quick Start Presets */}
+                  <div className="flex items-center gap-1 mt-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
+                    <span className="text-zinc-500 uppercase font-bold shrink-0">Quick Start:</span>
+                    <button
+                      type="button"
+                      onClick={() => setQuickStartTime(0, 7)}
+                      className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
+                    >
+                      Today 7 AM
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickStartTime(1, 6)}
+                      className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
+                    >
+                      Tomorrow 6 AM
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        const day = d.getDay();
+                        const diff = d.getDate() + (6 - day + 7) % 7;
+                        d.setDate(diff);
+                        d.setHours(6, 0, 0, 0);
+                        handleStartDateTimeChange(d.toISOString().slice(0, 16));
+                      }}
+                      className="px-2 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-md border border-orange-500/20 whitespace-nowrap cursor-pointer font-bold"
+                    >
+                      Sat Game Day 6 AM
+                    </button>
+                  </div>
+                </div>
 
-          {/* Resting & Buffer Windows */}
+                {/* Target Serving Date & Time */}
+                <div className="space-y-1 pt-1 border-t border-[#2a2a2a]">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                      Target Serving Date & Time
+                    </label>
+                    <span className="text-[10px] text-zinc-400 font-mono">Dinner Served</span>
+                  </div>
+                  <input
+                    type="datetime-local"
+                    value={serveDateTime}
+                    onChange={(e) => handleServeDateTimeChange(e.target.value)}
+                    className="w-full bg-[#121212] border border-amber-500/40 text-white rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer font-mono min-h-[40px]"
+                  />
 
-          {/* Resting & Buffer Windows */}
-          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#2a2a2a]">
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                Rest (hrs)
-              </label>
-              <input
-                type="number"
-                step="0.25"
-                min="0.25"
-                max="6"
-                value={restHours}
-                onChange={(e) => setRestHours(parseFloat(e.target.value) || 0.5)}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
-              />
-            </div>
+                  {/* Quick Serve Presets */}
+                  <div className="flex items-center gap-1 mt-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
+                    <span className="text-zinc-500 uppercase font-bold shrink-0">Quick Serve:</span>
+                    <button
+                      type="button"
+                      onClick={() => setQuickServeTime(0, 18)}
+                      className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
+                    >
+                      Today 6 PM
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickServeTime(1, 17)}
+                      className="px-2 py-1 bg-[#222222] hover:bg-[#2e2e2e] text-zinc-300 rounded-md border border-[#2a2a2a] whitespace-nowrap cursor-pointer font-medium"
+                    >
+                      Tomorrow 5 PM
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        const day = d.getDay();
+                        const diff = d.getDate() + (6 - day + 7) % 7;
+                        d.setDate(diff);
+                        d.setHours(17, 0, 0, 0);
+                        handleServeDateTimeChange(d.toISOString().slice(0, 16));
+                      }}
+                      className="px-2 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-md border border-amber-500/20 whitespace-nowrap cursor-pointer font-bold"
+                    >
+                      Sat Game Day 5 PM
+                    </button>
+                  </div>
+                </div>
 
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                Stall (hrs)
-              </label>
-              <input
-                type="number"
-                step="0.5"
-                min="0"
-                max="4"
-                value={bufferHours}
-                onChange={(e) => setBufferHours(parseFloat(e.target.value) || 0)}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
-              />
-            </div>
+                {/* Resting & Buffer Windows */}
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#2a2a2a]">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Rest (hrs)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0.25"
+                      max="6"
+                      value={restHours}
+                      onChange={(e) => setRestHours(parseFloat(e.target.value) || 0.5)}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
+                    />
+                  </div>
 
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                Preheat (m)
-              </label>
-              <input
-                type="number"
-                step="5"
-                min="15"
-                max="90"
-                value={preheatMins}
-                onChange={(e) => setPreheatMins(parseInt(e.target.value) || 30)}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
-              />
-            </div>
-          </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Stall (hrs)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="4"
+                      value={bufferHours}
+                      onChange={(e) => setBufferHours(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
+                    />
+                  </div>
 
-          {/* Fuel Estimate Card */}
-          <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 space-y-1.5 text-xs">
-            <div className="flex items-center justify-between text-zinc-300">
-              <span className="font-bold flex items-center space-x-1.5 text-amber-400 text-xs">
-                <Fuel className="w-3.5 h-3.5 text-amber-400" />
-                <span>Fuel Calculation</span>
-              </span>
-              <span className="font-mono font-bold text-white text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md">
-                ~{estimatedPelletsLbs} lbs needed
-              </span>
-            </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
+                      Preheat (m)
+                    </label>
+                    <input
+                      type="number"
+                      step="5"
+                      min="15"
+                      max="90"
+                      value={preheatMins}
+                      onChange={(e) => setPreheatMins(parseInt(e.target.value) || 30)}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-2 py-1.5 text-xs text-center font-mono focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[36px]"
+                    />
+                  </div>
+                </div>
 
-            <p className="text-[10px] text-zinc-400 leading-normal">
-              Based on {totalProcessHours.toFixed(1)} total runtime hours at {targetPitTemp}°F. Hopper capacity is {smokerProfile.pelletHopperCapacityLbs || 18} lbs.
-            </p>
+                {/* Fuel Estimate Card */}
+                <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-zinc-300">
+                    <span className="font-bold flex items-center space-x-1.5 text-amber-400 text-xs">
+                      <Fuel className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Fuel Calculation</span>
+                    </span>
+                    <span className="font-mono font-bold text-white text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md">
+                      ~{estimatedPelletsLbs} lbs needed
+                    </span>
+                  </div>
 
-            {estimatedPelletsLbs > (smokerProfile.pelletHopperCapacityLbs || 18) && (
-              <div className="flex items-center space-x-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                <span>Refill required (~{(estimatedPelletsLbs - (smokerProfile.pelletHopperCapacityLbs || 18)).toFixed(1)} lbs extra).</span>
+                  <p className="text-[10px] text-zinc-400 leading-normal">
+                    Based on {totalProcessHours.toFixed(1)} total runtime hours at {targetPitTemp}°F. Hopper capacity is {smokerProfile.pelletHopperCapacityLbs || 18} lbs.
+                  </p>
+
+                  {estimatedPelletsLbs > (smokerProfile.pelletHopperCapacityLbs || 18) && (
+                    <div className="flex items-center space-x-1.5 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                      <span>Refill required (~{(estimatedPelletsLbs - (smokerProfile.pelletHopperCapacityLbs || 18)).toFixed(1)} lbs extra).</span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
         </div>
 
         {/* Right Column: Interactive Backwards Timeline */}
-        <div className="lg:col-span-7 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-5 space-y-5 shadow-lg">
-          <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center space-x-2">
-              <Clock className="w-4 h-4 text-orange-400" />
+        <div className="lg:col-span-7 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
+          <div 
+            onClick={() => setIsCalculatedScheduleOpen((prev) => !prev)}
+            className={`flex items-center justify-between cursor-pointer group select-none transition-colors ${
+              isCalculatedScheduleOpen ? 'pb-2 border-b border-[#2a2a2a]' : 'pb-0'
+            }`}
+          >
+            <h3 className="text-xs font-bold uppercase tracking-wider text-orange-400 flex items-center space-x-2 group-hover:text-orange-300 transition-colors">
+              <Clock className="w-4 h-4 text-orange-400 shrink-0" />
               <span>2. Calculated Cook Schedule</span>
             </h3>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
                 onClick={handleExportICS}
@@ -695,10 +736,25 @@ END:VCALENDAR`;
                 title="Download .ICS calendar event file"
               >
                 <Download className="w-3.5 h-3.5 text-orange-400" />
-                <span>Calendar File</span>
+                <span className="hidden sm:inline">Calendar File</span>
+                <span className="sm:hidden">ICS</span>
+              </button>
+              <button
+                type="button"
+                className="p-1.5 rounded-lg bg-[#121212] border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-orange-500/40 transition-all cursor-pointer shrink-0"
+                title={isCalculatedScheduleOpen ? 'Collapse Section' : 'Expand Section'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsCalculatedScheduleOpen((prev) => !prev);
+                }}
+              >
+                {isCalculatedScheduleOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
             </div>
           </div>
+
+          {isCalculatedScheduleOpen && (
+            <div className="space-y-4 animate-fade-in">
 
           {/* Timeline Step Cards */}
           <div className="relative space-y-3 before:absolute before:left-5 before:top-3 before:bottom-3 before:w-0.5 before:bg-[#2a2a2a] pl-2">
@@ -844,6 +900,8 @@ Please give me a complete game plan including wood pellet choice, rub recipe, sp
               <span>Consult {AI_NAME}</span>
             </button>
           </div>
+          </div>
+        )}
         </div>
       </div>
     </div>

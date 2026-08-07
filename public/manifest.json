@@ -1,0 +1,42 @@
+{
+  "name": "Smoke Stack • Pitmaster Cook & Fuel Log",
+  "short_name": "Smoke Stack",
+  "description": "Cross-platform pitmaster BBQ smoke logger, fuel calculator, CharGPT AI advisor, and multi-pit fleet manager optimized for Web, Mobile Play Stores, and Raspberry Pi.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "orientation": "any",
+  "categories": ["food", "utilities", "productivity", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "related_applications": [
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=com.smokestack.pitmaster",
+      "id": "com.smokestack.pitmaster"
+    },
+    {
+      "platform": "itunes",
+      "url": "https://apps.apple.com/app/smoke-stack-pitmaster/id1680000000"
+    },
+    {
+      "platform": "windows",
+      "url": "https://www.microsoft.com/store/apps/9N9SMOKESTACK"
+    }
+  ],
+  "prefer_related_applications": false
+}

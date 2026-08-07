@@ -56,6 +56,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [timerSeconds, setTimerSeconds] = useState<number>(8.0 * 3600);
   const [isAutoFuel, setIsAutoFuel] = useState<boolean>(true);
+  const [formTab, setFormTab] = useState<'basics' | 'environment' | 'temps' | 'notes'>('basics');
 
   // Live Stopwatch / Timer Effect
   useEffect(() => {
@@ -917,13 +918,27 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       nextTimeNotes,
       photoUrl: photoUrl || undefined,
       status: 'Completed',
+      pitmasterAlias: (() => {
+        try {
+          const saved = localStorage.getItem('pitmaster_local_user_account');
+          if (saved) return JSON.parse(saved)?.name || 'Head Pitmaster';
+        } catch (e) {}
+        return 'Head Pitmaster';
+      })(),
+      userEmail: (() => {
+        try {
+          const saved = localStorage.getItem('pitmaster_local_user_account');
+          if (saved) return JSON.parse(saved)?.email || 'jonathanblunt1214@gmail.com';
+        } catch (e) {}
+        return 'jonathanblunt1214@gmail.com';
+      })(),
     };
 
     onSaveCook(newCookLog);
   };
 
   return (
-    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-8 shadow-2xl w-full max-w-[96vw] sm:max-w-[94vw] lg:max-w-5xl mx-auto mb-12">
+    <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-8 shadow-2xl w-full max-w-5xl mx-auto mb-12">
       
       {/* Header */}
       <div className="flex items-center justify-between pb-6 border-b border-[#2a2a2a]">
@@ -970,8 +985,58 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-8">
+      <form onSubmit={handleSubmit} className="mt-6 space-y-6">
         
+        {/* Form Tab Navigation */}
+        <div className="flex overflow-x-auto no-scrollbar space-x-1.5 sm:space-x-2 pb-2 -mx-1 px-1 touch-pan-x">
+          <button
+            type="button"
+            onClick={() => setFormTab('basics')}
+            className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
+              formTab === 'basics' 
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+                : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-orange-950/40"></span>
+            <span>1. Basic Details</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFormTab('environment')}
+            className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
+              formTab === 'environment' 
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+                : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
+            }`}
+          >
+            <span>2. Fuel & Weather</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFormTab('temps')}
+            className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
+              formTab === 'temps' 
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+                : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
+            }`}
+          >
+            <span>3. Temp Log</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFormTab('notes')}
+            className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
+              formTab === 'notes' 
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+                : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
+            }`}
+          >
+            <span>4. Wrap Up & Rating</span>
+          </button>
+        </div>
+
+        <div className={formTab === 'basics' ? 'block space-y-8 animate-fade-in' : 'hidden'}>
         {/* TOP ACCESSIBLE PHOTO ATTACHMENT BANNER */}
         <div className="bg-[#121212] border border-[#2a2a2a] rounded-2xl p-3.5 sm:p-4 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1341,6 +1406,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
         </div>
 
+        </div>
+        <div className={formTab === 'environment' ? 'block space-y-8 animate-fade-in' : 'hidden'}>
         {/* ROW 3: SMOKER HOURS & FUEL CALCULATOR CARD */}
         <div className="bg-[#242424] border border-[#2a2a2a] rounded-2xl p-5 space-y-4">
           <div className="flex items-center space-x-2 text-orange-400 font-bold text-xs">
@@ -1683,6 +1750,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
           )}
         </div>
 
+        </div>
+        <div className={formTab === 'temps' ? 'block space-y-8 animate-fade-in' : 'hidden'}>
         {/* ROW 4: TEMPERATURE READINGS TABLE */}
         <div className="space-y-3">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#121212] border border-[#2a2a2a] p-4 rounded-2xl">
@@ -1853,6 +1922,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
           </div>
         </div>
 
+        </div>
+        <div className={formTab === 'notes' ? 'block space-y-8 animate-fade-in' : 'hidden'}>
         {/* ROW 5: SEASONING & SERVING */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
@@ -1984,6 +2055,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
           </div>
         </div>
 
+        </div>
         {/* SUBMIT BUTTON */}
         <div className="pt-4 border-t border-[#2a2a2a] flex items-center justify-end space-x-3">
           <button

@@ -7,37 +7,37 @@ export const INITIAL_SMOKER_PROFILE: SmokerProfile = {
   smokerType: 'Vertical Pellet Smoker',
   fuelType: 'Pellets',
   fuelOnHand: '120 lbs',
-  initialHours: 129.75, // Baseline starting hours before Cook 45
-  currentHours: 160.75, // Cumulative after Cook 48 (129.75 + 31.0 = 160.75)
+  initialHours: 0, // Baseline starting hours (typed input available for experienced users with prior hours)
+  currentHours: 31.0, // Cumulative runtime hours after sample cooks (0 initial + 31.0 logged = 31.0)
   pelletHopperCapacityLbs: 60,
-  lastRefillHours: 152.0, // 8.75 hrs ago (160.75 - 152.0 = 8.75 hrs since refill)
+  lastRefillHours: 22.25,
   maintenanceTasks: [
     {
       id: 'task-1',
       title: 'Clean Firepot Ash & Burn Pot',
       intervalHours: 12,
-      lastPerformedHours: 152.0,
+      lastPerformedHours: 22.25,
       description: 'Vacuum out ash buildup from burn pot to ensure smooth ignition.',
     },
     {
       id: 'task-2',
       title: 'Scrape Heat Shield & Grease Tray',
       intervalHours: 25,
-      lastPerformedHours: 145.0,
+      lastPerformedHours: 18.5,
       description: 'Remove grease residue and foil liner from heat deflector.',
     },
     {
       id: 'task-3',
       title: 'Calibrate RTD Temperature Probe',
       intervalHours: 50,
-      lastPerformedHours: 120.0,
+      lastPerformedHours: 0,
       description: 'Test RTD probe accuracy using ice water & boiling water tests.',
     },
     {
       id: 'task-4',
       title: 'Deep Chamber Clean & Door Seal Check',
       intervalHours: 100,
-      lastPerformedHours: 100.0,
+      lastPerformedHours: 0,
       description: 'Scrape interior walls, clean glass door, inspect gasket seal.',
     },
   ],
@@ -74,9 +74,9 @@ export const INITIAL_COOK_LOGS: CookLog[] = [
     smokerType: 'Pit Boss Copperhead',
     proteinType: 'Beef',
     proteinCut: '14 lb Full Packer Brisket (Prime Choice)',
-    startingSmokerHours: 148.25,
+    startingSmokerHours: 18.5,
     hoursLogged: 12.5,
-    endingSmokerHours: 160.75,
+    endingSmokerHours: 31.0,
     fuelLbsConsumed: 16.0,
     fuelType: 'Pit Boss Competition Blend (Hickory/Maple/Cherry)',
     temperatureReadings: [
@@ -194,9 +194,9 @@ export const INITIAL_COOK_LOGS: CookLog[] = [
     smokerType: 'Pit Boss Copperhead',
     proteinType: 'Pork',
     proteinCut: '9 lb Bone-In Boston Butt',
-    startingSmokerHours: 138.75,
+    startingSmokerHours: 9.0,
     hoursLogged: 9.5,
-    endingSmokerHours: 148.25,
+    endingSmokerHours: 18.5,
     fuelLbsConsumed: 11.5,
     fuelType: 'Bear Mountain Apple Wood',
     temperatureReadings: [
@@ -263,9 +263,9 @@ export const INITIAL_COOK_LOGS: CookLog[] = [
     smokerType: 'Pit Boss Copperhead',
     proteinType: 'Pork',
     proteinCut: '2 Racks St. Louis Cut Pork Ribs',
-    startingSmokerHours: 132.75,
+    startingSmokerHours: 3.0,
     hoursLogged: 6.0,
-    endingSmokerHours: 138.75,
+    endingSmokerHours: 9.0,
     fuelLbsConsumed: 7.2,
     fuelType: 'Apple / Cherry Blend',
     temperatureReadings: [
@@ -332,9 +332,9 @@ export const INITIAL_COOK_LOGS: CookLog[] = [
     smokerType: 'Pit Boss Copperhead',
     proteinType: 'Chicken',
     proteinCut: '5.5 lb Whole Free-Range Chicken',
-    startingSmokerHours: 129.75,
+    startingSmokerHours: 0.0,
     hoursLogged: 3.0,
-    endingSmokerHours: 132.75,
+    endingSmokerHours: 3.0,
     fuelLbsConsumed: 4.8,
     fuelType: 'Hickory Pellets',
     temperatureReadings: [

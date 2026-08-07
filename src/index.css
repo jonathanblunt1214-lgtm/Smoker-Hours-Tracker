@@ -173,3 +173,37 @@
     height: 0px !important;
   }
 }
+
+/* ==========================================================================
+   Raspberry Pi Low-Power Hardware Acceleration & Touchscreen Kiosk CSS Rules
+   ========================================================================== */
+
+.raspberry-pi-mode * {
+  /* Flatten heavy backdrop filters and CSS blurs for ARM GPUs (Pi 3/4/5/Zero) */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  /* Disable heavy box shadows to preserve GPU rendering frames */
+  box-shadow: none !important;
+  /* Disable smooth CSS transitions on low-spec hardware */
+  transition-duration: 0.05s !important;
+}
+
+.raspberry-pi-mode .backdrop-blur-md,
+.raspberry-pi-mode .backdrop-blur-lg,
+.raspberry-pi-mode .backdrop-blur-xl {
+  background-color: rgba(18, 18, 18, 0.98) !important;
+}
+
+/* Raspberry Pi Touchscreen Kiosk Large Touch Targets */
+.pi-touch-kiosk button,
+.pi-touch-kiosk input,
+.pi-touch-kiosk select,
+.pi-touch-kiosk a {
+  min-height: 48px !important;
+  font-size: 14px !important;
+}
+
+.pi-touch-kiosk nav button {
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}

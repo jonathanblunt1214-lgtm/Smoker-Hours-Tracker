@@ -27,7 +27,7 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl w-full max-w-[96vw] sm:max-w-[92vw] lg:max-w-4xl p-4 sm:p-8 shadow-2xl relative font-sans my-8">
+      <div className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl w-full max-w-4xl p-4 sm:p-8 shadow-2xl relative font-sans my-8">
         
         {/* Top Actions bar (Non-printable) */}
         <div className="flex items-center justify-between pb-4 border-b border-amber-900/20 print:hidden">

@@ -2,11 +2,13 @@ import express from 'express';
 import path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import multer from 'multer';
 import { getEffectiveSmokerSpecs } from './src/utils/smokerCalculations';
 
 dotenv.config();
 
 const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
 const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
@@ -605,6 +607,313 @@ app.post('/api/manufacturer-smokers/contribute', (req, res) => {
   }
 });
 
+// ==========================================
+// SERVER-HOSTED USER ACCOUNTS & MULTI-RIG FLEET REPOSITORY
+// ==========================================
+interface ServerAccountStoreRecord {
+  email: string;
+  name: string;
+  title: string;
+  createdAt: string;
+  activeRigId: string;
+  rigs: any[]; // SmokerProfile[]
+  cookLogs: any[]; // CookLog[]
+  fuelLogs: any[]; // FuelLog[]
+  updatedAt: string;
+}
+
+const serverUserAccounts: Record<string, ServerAccountStoreRecord> = {
+  'jonathanblunt1214@gmail.com': {
+    email: 'jonathanblunt1214@gmail.com',
+    name: 'Jonathan Blunt',
+    title: 'Head Pitmaster',
+    createdAt: '2026-01-01',
+    activeRigId: 'rig-pitboss-5series',
+    rigs: [
+      {
+        id: 'rig-pitboss-5series',
+        name: 'Pit Boss Copperhead 5-Series Vertical',
+        model: 'Copperhead 5-Series',
+        smokerType: 'Vertical Pellet Smoker',
+        fuelType: 'Pellets',
+        initialHours: 148.25,
+        currentHours: 148.25,
+        pelletHopperCapacityLbs: 60,
+        maintenanceTasks: [],
+        appliedModIds: [],
+        appliedMods: [],
+      },
+      {
+        id: 'rig-traeger-timberline',
+        name: 'Traeger Timberline 1300',
+        model: 'Timberline 1300',
+        smokerType: 'Pellet Grill / Smoker',
+        fuelType: 'Pellets',
+        initialHours: 42.0,
+        currentHours: 42.0,
+        pelletHopperCapacityLbs: 24,
+        maintenanceTasks: [],
+        appliedModIds: [],
+        appliedMods: [],
+      },
+      {
+        id: 'rig-lonestar-offset',
+        name: 'Lone Star 500gal Custom Offset Trailer',
+        model: 'Custom 500gal Offset',
+        smokerType: 'Custom Reverse Flow Offset',
+        fuelType: 'Wood Splits',
+        initialHours: 85.5,
+        currentHours: 85.5,
+        pelletHopperCapacityLbs: 50,
+        isCustomBuilt: true,
+        maintenanceTasks: [],
+        appliedModIds: [],
+        appliedMods: [],
+      },
+    ],
+    cookLogs: [],
+    fuelLogs: [],
+    updatedAt: new Date().toISOString(),
+  },
+};
+
+// GET Server Hosted Account
+app.get('/api/account', (req, res) => {
+  try {
+    const rawEmail = ((req.query.email as string) || '').trim().toLowerCase();
+    const rawAlias = ((req.query.pitmasterAlias as string) || '').trim();
+    const lookupKey = rawEmail || rawAlias || 'jonathanblunt1214@gmail.com';
+
+    let account = serverUserAccounts[lookupKey];
+
+    if (!account && (rawEmail || rawAlias)) {
+      // Initialize new server account profile
+      account = {
+        email: rawEmail || `${rawAlias.toLowerCase().replace(/\s+/g, '_')}@pitmaster.app`,
+        name: rawAlias || (rawEmail ? rawEmail.split('@')[0] : 'Pitmaster'),
+        title: 'Head Pitmaster',
+        createdAt: new Date().toISOString().slice(0, 10),
+        activeRigId: 'rig-default-1',
+        rigs: [
+          {
+            id: 'rig-default-1',
+            name: 'Pit Boss Copperhead 5-Series Vertical',
+            model: 'Copperhead 5-Series',
+            smokerType: 'Vertical Pellet Smoker',
+            fuelType: 'Pellets',
+            initialHours: 148.25,
+            currentHours: 148.25,
+            pelletHopperCapacityLbs: 60,
+            maintenanceTasks: [],
+            appliedModIds: [],
+            appliedMods: [],
+          },
+        ],
+        cookLogs: [],
+        fuelLogs: [],
+        updatedAt: new Date().toISOString(),
+      };
+      serverUserAccounts[lookupKey] = account;
+    }
+
+    if (!account) {
+      account = serverUserAccounts['jonathanblunt1214@gmail.com'];
+    }
+
+    return res.json({
+      success: true,
+      account: {
+        name: account.name,
+        email: account.email,
+        title: account.title,
+        createdAt: account.createdAt,
+        activeRigId: account.activeRigId,
+        rigs: account.rigs,
+      },
+      rigs: account.rigs,
+      activeRigId: account.activeRigId,
+      cookLogs: account.cookLogs,
+      fuelLogs: account.fuelLogs,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Error fetching server account:', err);
+    return res.status(500).json({ success: false, error: 'Failed to retrieve server-hosted account.' });
+  }
+});
+
+// POST Sync Account & Multi-Rig Fleet on Server
+app.post('/api/account/sync', (req, res) => {
+  try {
+    const { userAccount, rigs, activeRigId, cookLogs, fuelLogs } = req.body;
+
+    if (!userAccount || !userAccount.email) {
+      return res.status(400).json({ success: false, error: 'Valid user account with email required.' });
+    }
+
+    const emailKey = userAccount.email.trim().toLowerCase();
+    const existing = serverUserAccounts[emailKey] || {
+      email: userAccount.email,
+      name: userAccount.name || 'Pitmaster',
+      title: userAccount.title || 'Head Pitmaster',
+      createdAt: userAccount.createdAt || new Date().toISOString().slice(0, 10),
+      activeRigId: activeRigId || 'rig-1',
+      rigs: rigs || [],
+      cookLogs: cookLogs || [],
+      fuelLogs: fuelLogs || [],
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedRigs = rigs && Array.isArray(rigs) && rigs.length > 0 ? rigs : existing.rigs;
+    const updatedActiveRigId = activeRigId || userAccount.activeRigId || existing.activeRigId || updatedRigs[0]?.id;
+
+    serverUserAccounts[emailKey] = {
+      ...existing,
+      name: userAccount.name || existing.name,
+      email: userAccount.email || existing.email,
+      title: userAccount.title || existing.title,
+      activeRigId: updatedActiveRigId,
+      rigs: updatedRigs,
+      cookLogs: Array.isArray(cookLogs) ? cookLogs : existing.cookLogs,
+      fuelLogs: Array.isArray(fuelLogs) ? fuelLogs : existing.fuelLogs,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return res.json({
+      success: true,
+      message: 'Account profile, multi-rig smoker fleet, and cook logs successfully saved to server!',
+      account: {
+        name: serverUserAccounts[emailKey].name,
+        email: serverUserAccounts[emailKey].email,
+        title: serverUserAccounts[emailKey].title,
+        createdAt: serverUserAccounts[emailKey].createdAt,
+        activeRigId: serverUserAccounts[emailKey].activeRigId,
+        rigs: serverUserAccounts[emailKey].rigs,
+      },
+      rigs: serverUserAccounts[emailKey].rigs,
+      activeRigId: serverUserAccounts[emailKey].activeRigId,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Error syncing server account:', err);
+    return res.status(500).json({ success: false, error: 'Failed to sync account with server.' });
+  }
+});
+
+// POST Multi-Rig Fleet Management (Add, Edit, Delete, Select active)
+app.post('/api/account/rigs', (req, res) => {
+  try {
+    const { email, action, rig, rigId } = req.body;
+    const emailKey = (email || 'jonathanblunt1214@gmail.com').trim().toLowerCase();
+
+    let record = serverUserAccounts[emailKey];
+    if (!record) {
+      record = {
+        email: emailKey,
+        name: 'Pitmaster',
+        title: 'Head Pitmaster',
+        createdAt: new Date().toISOString().slice(0, 10),
+        activeRigId: 'rig-1',
+        rigs: [],
+        cookLogs: [],
+        fuelLogs: [],
+        updatedAt: new Date().toISOString(),
+      };
+      serverUserAccounts[emailKey] = record;
+    }
+
+    let rigs = record.rigs || [];
+
+    if (action === 'add' && rig) {
+      const newRig = {
+        ...rig,
+        id: rig.id || `rig-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      };
+      rigs.unshift(newRig);
+      record.activeRigId = newRig.id;
+    } else if (action === 'update' && rig) {
+      rigs = rigs.map((r) => (r.id === rig.id ? { ...r, ...rig } : r));
+    } else if (action === 'delete' && rigId) {
+      rigs = rigs.filter((r) => r.id !== rigId);
+      if (record.activeRigId === rigId) {
+        record.activeRigId = rigs[0]?.id || '';
+      }
+    } else if (action === 'select' && rigId) {
+      record.activeRigId = rigId;
+    }
+
+    record.rigs = rigs;
+    record.updatedAt = new Date().toISOString();
+
+    const activeRig = rigs.find((r) => r.id === record.activeRigId) || rigs[0] || null;
+
+    return res.json({
+      success: true,
+      message: `Multi-rig fleet updated (${action}).`,
+      rigs: record.rigs,
+      activeRigId: record.activeRigId,
+      activeRig,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Error managing smoker rigs on server:', err);
+    return res.status(500).json({ success: false, error: 'Failed to manage smoker rigs on server.' });
+  }
+});
+
+// GET Server Cook Logs
+app.get('/api/cook-logs', (req, res) => {
+  try {
+    const rawEmail = ((req.query.email as string) || '').trim().toLowerCase();
+    const lookupKey = rawEmail || 'jonathanblunt1214@gmail.com';
+    const account = serverUserAccounts[lookupKey];
+
+    return res.json({
+      success: true,
+      email: lookupKey,
+      cookLogs: account?.cookLogs || [],
+      count: account?.cookLogs?.length || 0,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: 'Failed to fetch server cook logs.' });
+  }
+});
+
+// POST Sync Cook Logs to Server
+app.post('/api/cook-logs/sync', (req, res) => {
+  try {
+    const { email, cookLogs } = req.body;
+    const lookupKey = (email || 'jonathanblunt1214@gmail.com').trim().toLowerCase();
+
+    if (!serverUserAccounts[lookupKey]) {
+      serverUserAccounts[lookupKey] = {
+        email: lookupKey,
+        name: 'Pitmaster',
+        title: 'Head Pitmaster',
+        createdAt: new Date().toISOString().slice(0, 10),
+        activeRigId: 'rig-1',
+        rigs: [],
+        cookLogs: cookLogs || [],
+        fuelLogs: [],
+        updatedAt: new Date().toISOString(),
+      };
+    } else {
+      serverUserAccounts[lookupKey].cookLogs = cookLogs || [];
+      serverUserAccounts[lookupKey].updatedAt = new Date().toISOString();
+    }
+
+    return res.json({
+      success: true,
+      message: `Successfully synchronized ${cookLogs?.length || 0} cook log(s) with the server!`,
+      count: cookLogs?.length || 0,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: 'Failed to sync cook logs to server.' });
+  }
+});
+
 // Lazy init for Gemini AI client
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -900,7 +1209,7 @@ User Question: ${userMessage}`;
     if (ai) {
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-2.0-flash',
           contents: contentsParam,
           config: {
             systemInstruction,
@@ -911,7 +1220,7 @@ User Question: ${userMessage}`;
         console.warn('Google search tool or primary AI request failed, trying standard call:', searchError?.message || searchError);
         try {
           response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: 'gemini-2.0-flash',
             contents: contentsParam,
             config: {
               systemInstruction,
@@ -1027,7 +1336,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [imagePart, { text: promptText }],
         },
@@ -1038,7 +1347,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e: any) {
       console.warn('Primary JSON generation failed for meat photo, retrying standard call:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [imagePart, { text: promptText }],
         },
@@ -1076,6 +1385,53 @@ Output MUST be strictly valid JSON matching this schema:
 });
 
 // Endpoint: Identify Unknown Cut from Name, Picture, or Local Meat ID Database
+
+// PDF Log Parsing Endpoint
+app.post('/api/chargpt/parse-pdf-logs', upload.single('pdf'), async (req: any, res: any) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No PDF file uploaded' });
+  }
+  
+  try {
+    const fileBase64 = req.file.buffer.toString('base64');
+    const ai = getGeminiClient();
+    
+    // Process with Gemini to extract logs
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: {
+        parts: [
+          { inlineData: { data: fileBase64, mimeType: 'application/pdf' } },
+          { text: "Extract all cooking logs from this PDF. If multiple logs are present, extract them as an array. Return a JSON array of CookLog objects. Include title, date (YYYY-MM-DD), proteinType (Beef, Pork, Poultry, Seafood, Game, Other), proteinCut, meatWeightLbs, totalCookTimeHrs, smokerType, fuelType, fuelLbsConsumed, notes, wouldMakeAgain (boolean), and weatherData (if location/date is mentioned, use google search tool to find weather for that day and location, output tempF and conditions). The JSON array must be the only output, with no markdown." }
+        ]
+      },
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json"
+      }
+    });
+
+    let rawJson = response.text || '[]';
+    rawJson = rawJson.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '');
+    
+    let parsedLogs = JSON.parse(rawJson);
+    
+    // Sometimes Gemini wraps it in { "logs": [...] }
+    if (parsedLogs && !Array.isArray(parsedLogs) && Array.isArray(parsedLogs.logs)) {
+      parsedLogs = parsedLogs.logs;
+    }
+    
+    if (!Array.isArray(parsedLogs)) {
+      parsedLogs = [parsedLogs];
+    }
+    
+    res.json({ logs: parsedLogs });
+  } catch (err: any) {
+    console.error('PDF parsing error', err);
+    res.status(500).json({ error: err.message || 'Failed to parse PDF' });
+  }
+});
+
 app.post('/api/chargpt/identify-unknown-cut', async (req, res) => {
   try {
     const { cutNameQuery, image, localDatabaseCuts } = req.body;
@@ -1138,7 +1494,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: { parts },
         config: {
           tools: [{ googleSearch: {} }],
@@ -1147,7 +1503,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e) {
       console.warn('Identify unknown cut with search grounding failed, falling back:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: { parts },
       });
     }
@@ -1231,7 +1587,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: textPrompt,
         config: {
           tools: [{ googleSearch: {} }],
@@ -1240,7 +1596,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e) {
       console.warn('Online verification search grounding failed, retrying standard:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.0-flash',
         contents: textPrompt,
       });
     }
@@ -1475,7 +1831,7 @@ IMPORTANT: Return ONLY the JSON object. Do not include markdown or extra text un
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-2.0-flash',
           contents: `Generate an optimized wood/pellet blend for ${targetProtein || 'general smoking'} focusing on ${optimizationGoal || 'balanced performance'}. User prompt: ${userPrompt || 'Optimize blend'}`,
           config: {
             systemInstruction,
