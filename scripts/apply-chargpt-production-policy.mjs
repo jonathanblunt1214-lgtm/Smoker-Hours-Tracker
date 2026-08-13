@@ -46,5 +46,121 @@ route = route.replace(
 );
 source = source.slice(0, routeStart) + route + source.slice(routeEnd);
 
+
+// SmokeStack CharGPT production grounding firewall.
+// Until verified knowledge pipelines publish provenance-bearing equipment data,
+// legacy/default smoker specifications must not be treated as user truth.
+const groundingFirewall = `
+app.use('/api/chargpt', (req, res, next) => {
+  const body = req.body ?? {};
+
+  const hasTrustedProvenance = (value: any): boolean => {
+    if (!value || typeof value !== 'object') return false;
+
+    if (
+      value.userEntered === true ||
+      value.isVerified === true ||
+      value.verified === true
+    ) {
+      return true;
+    }
+
+    const provenance =
+      value.provenance ||
+      value.sourceProvenance ||
+      value.sourceMetadata;
+
+    if (!provenance || typeof provenance !== 'object') {
+      return false;
+    }
+
+    const status = String(
+      provenance.status || provenance.verificationStatus || ''
+    ).toLowerCase();
+
+    const type = String(
+      provenance.type || provenance.kind || provenance.origin || ''
+    ).toLowerCase();
+
+    return (
+      status === 'verified' ||
+      type === 'user' ||
+      type === 'user_data' ||
+      type === 'verified_manufacturer'
+    );
+  };
+
+  const trustedSmokerProfile = hasTrustedProvenance(body.smokerProfile);
+  const trustedEffectiveSpecs = hasTrustedProvenance(body.effectiveSpecs);
+
+  if (!trustedSmokerProfile) {
+    delete body.smokerProfile;
+  }
+
+  if (!trustedEffectiveSpecs) {
+    delete body.effectiveSpecs;
+  }
+
+  const memoryApproved =
+    body.charGPTMemory?.approved === true ||
+    body.charGPTMemory?.approvalStatus === 'approved';
+
+  if (!memoryApproved) {
+    delete body.charGPTMemory;
+  }
+
+  req.body = body;
+
+  const hasTrustedEquipment =
+    trustedSmokerProfile || trustedEffectiveSpecs;
+
+  const originalJson = res.json.bind(res);
+
+  res.json = ((payload: any) => {
+    const text =
+      payload && typeof payload.text === 'string'
+        ? payload.text
+        : '';
+
+    const forbiddenEvidenceLabel =
+      /\\[(KNOWN|MFR SPECS)\\]/i.test(text);
+
+    const unsupportedPreferenceClaim =
+      /based on your saved preferences/i.test(text);
+
+    const unsupportedEquipmentPersonalization =
+      !hasTrustedEquipment &&
+      (
+        /(?:customized|tuned) to your .*smoker/i.test(text) ||
+        /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(text)
+      );
+
+    if (
+      forbiddenEvidenceLabel ||
+      unsupportedPreferenceClaim ||
+      unsupportedEquipmentPersonalization
+    ) {
+      res.statusCode = 503;
+
+      return originalJson({
+        error:
+          'CharGPT grounding check rejected an answer containing unsupported equipment-specific claims. No unverified answer was shown.',
+        availability: 'grounding_rejected',
+        groundingStatus: 'rejected'
+      });
+    }
+
+    return originalJson(payload);
+  }) as any;
+
+  next();
+});
+`;
+
+source = source.replace(
+  '// CharGPT API Route Handler',
+  groundingFirewall + '\n// CharGPT API Route Handler'
+);
+
 fs.writeFileSync(targetPath, source, 'utf8');
 console.log('[chargpt-production] Applied Cloud Run PORT, Vertex AI auth, and strict CharGPT evidence policy.');
