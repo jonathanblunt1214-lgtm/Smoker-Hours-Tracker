@@ -1,8 +1,13 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+import App from './App.trusted.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { installAuthenticatedAdminFetch } from './utils/installAuthenticatedAdminFetch.ts';
 import './index.css';
+
+// Transitional bridge for privileged calls. Authorization is enforced by
+// verified Firebase claims on the server.
+installAuthenticatedAdminFetch();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

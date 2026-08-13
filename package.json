@@ -4,11 +4,17 @@
   "version": "0.02A",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "generate:secure-server": "node scripts/build-secure-server.mjs",
+    "generate:trusted-client": "node scripts/build-trusted-client.mjs",
+    "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
+    "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
+    "dev": "npm run generate:trusted-runtime && tsx server.secure.generated.ts",
+    "build": "npm run generate:trusted-runtime && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/utils/storage.trusted.ts server.js",
+    "lint": "npm run generate:trusted-runtime && tsc --noEmit",
+    "verify:owner-security": "npm run generate:trusted-runtime",
+    "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -18,6 +24,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.17.0",
+    "firebase-admin": "^13.4.0",
     "jsqr": "^1.4.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.546.0",
