@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "generate:secure-server": "node scripts/build-secure-server.mjs",
-    "dev": "npm run generate:secure-server && tsx .generated/server.secure.ts",
-    "build": "npm run generate:secure-server && vite build && esbuild .generated/server.secure.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "dev": "npm run generate:secure-server && tsx server.secure.generated.ts",
+    "build": "npm run generate:secure-server && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "clean": "rm -rf dist .generated server.js",
+    "clean": "rm -rf dist .generated server.secure.generated.ts server.js",
     "lint": "tsc --noEmit",
     "verify:owner-security": "node scripts/build-secure-server.mjs"
   },
