@@ -13,14 +13,14 @@ function replaceRequired(input, needle, replacement, label) {
 source = replaceRequired(
   source,
   "import { adminRolesRouter } from './server/adminRoles';",
-  "import { adminRolesRouter } from './server/adminRoles';\nimport { verifiedKnowledgeRouter, getPublishedKnowledgeForPrompt } from './server/verifiedKnowledge';",
+  "import { adminRolesRouter } from './server/adminRoles';\nimport { verifiedKnowledgeRouter, getPublishedKnowledgeForPrompt } from './server/verifiedKnowledge';\nimport { meatKnowledgeRouter } from './server/meatKnowledgeRoutes';",
   'verified knowledge imports',
 );
 
 source = replaceRequired(
   source,
   "app.use('/api/admin', adminRolesRouter);",
-  "app.use('/api/admin', adminRolesRouter);\napp.use('/api/knowledge', verifiedKnowledgeRouter);",
+  "app.use('/api/admin', adminRolesRouter);\napp.use('/api/knowledge', verifiedKnowledgeRouter);\napp.use('/api/knowledge', meatKnowledgeRouter);",
   'verified knowledge router',
 );
 
@@ -47,4 +47,4 @@ source = replaceRequired(
 );
 
 fs.writeFileSync(targetPath, source, 'utf8');
-console.log('[verified-knowledge] Mounted provenance API and published-only CharGPT retrieval.');
+console.log('[verified-knowledge] Mounted provenance API, meat harvester review path, and published-only CharGPT retrieval.');
