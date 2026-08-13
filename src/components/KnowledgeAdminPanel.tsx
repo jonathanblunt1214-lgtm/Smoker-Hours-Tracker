@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, RefreshCw, XCircle } from 'lucide-react';
+import { CheckCircle2, ExternalLink, RefreshCw, Search, XCircle } from 'lucide-react';
 
 type RecordItem = {
   id: string;
@@ -7,7 +7,7 @@ type RecordItem = {
   title: string;
   claims: string[];
   status: string;
-  source?: { url?: string; publisher?: string | null; type?: string };
+  source?: { url?: string; publisher?: string | null; type?: string; harvested?: boolean; harvestQuery?: { mode?: string; value?: string } };
   reviewedAt?: string | null;
 };
 
@@ -21,6 +21,7 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ type: 'fuel', sourceType: 'manufacturer', title: '', publisher: '', sourceUrl: '', claimsText: '' });
+  const [harvest, setHarvest] = useState({ mode: 'url', value: '' });
 
   const load = async () => {
     try {
@@ -32,6 +33,23 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
   };
 
   useEffect(() => { void load(); }, []);
+
+  const runHarvest = async () => {
+    if (!harvest.value.trim()) return showToast('Enter a source URL, smoker model/name, fuel name, or modification name.');
+    setBusy('harvest');
+    try {
+      const res = await request('/api/knowledge/harvest', {
+        method: 'POST',
+        body: JSON.stringify({ mode: harvest.mode, value: harvest.value.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Source harvest failed.');
+      setHarvest({ ...harvest, value: '' });
+      showToast('Source harvested into Pending Review. Nothing was published automatically.');
+      await load(); await onChanged?.();
+    } catch (error: any) { showToast(error?.message || 'Source harvest failed. Nothing was saved.'); }
+    finally { setBusy(null); }
+  };
 
   const submit = async () => {
     const claims = form.claimsText.split('\n').map((value) => value.trim()).filter(Boolean);
@@ -62,11 +80,34 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
 
   const pending = records.filter((record) => record.status === 'pending_review');
   const reviewed = records.filter((record) => record.status !== 'pending_review').slice(0, 12);
+  const harvestPlaceholder = harvest.mode === 'url'
+    ? 'https://manufacturer.com/product-page'
+    : harvest.mode === 'smoker'
+      ? 'Smoker model or name, e.g. PBV5PW1'
+      : harvest.mode === 'fuel'
+        ? 'Fuel name, e.g. Pit Boss Classic Blend Hardwood Pellets'
+        : 'Modification / accessory name';
 
   return <div className="space-y-5">
+    <section className="rounded-2xl border border-orange-900/50 bg-orange-500/5 p-4 sm:p-5">
+      <h3 className="font-semibold text-white">Source Harvester</h3>
+      <p className="mt-1 text-xs leading-5 text-zinc-400">Manually enter an approved manufacturer URL, smoker model/name, fuel name, or modification/accessory name. Extracted claims are saved only to Pending Review and are never automatically trusted.</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto]">
+        <select value={harvest.mode} onChange={(e) => setHarvest({ mode: e.target.value, value: '' })} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white">
+          <option value="url">Manual URL</option>
+          <option value="smoker">Smoker model / name</option>
+          <option value="fuel">Fuel name</option>
+          <option value="mod">Modification / accessory</option>
+        </select>
+        <input value={harvest.value} onChange={(e) => setHarvest({ ...harvest, value: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && busy === null) void runHarvest(); }} placeholder={harvestPlaceholder} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none focus:border-orange-500" />
+        <button disabled={busy !== null || !harvest.value.trim()} onClick={() => void runHarvest()} className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50"><Search className="mr-1.5 inline h-4 w-4" />Find verified-source info</button>
+      </div>
+      <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-500">For model/fuel/mod searches, SmokeStack uses manufacturer URLs already known to the verified catalog. If it does not yet know an approved manufacturer source, enter the official product URL first.</div>
+    </section>
+
     <section className="rounded-2xl border border-zinc-800 bg-[#141414] p-4 sm:p-5">
       <h3 className="font-semibold text-white">Submit source-backed candidate</h3>
-      <p className="mt-1 text-xs text-zinc-500">Every submission starts as pending review. One exact source-supported claim per line.</p>
+      <p className="mt-1 text-xs text-zinc-500">Manual fallback. Every submission starts as pending review. One exact source-supported claim per line.</p>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white"><option value="smoker">Smoker</option><option value="fuel">Fuel</option><option value="meat">Meat & cut</option><option value="mod">Modification / compatibility</option></select>
         <select value={form.sourceType} onChange={(e) => setForm({ ...form, sourceType: e.target.value })} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white"><option value="manufacturer">Manufacturer</option><option value="government">Government</option><option value="standards_body">Standards body</option><option value="verified_publisher">Verified publisher</option></select>
@@ -80,7 +121,7 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
 
     <section className="rounded-2xl border border-zinc-800 bg-[#141414] p-4 sm:p-5">
       <div className="flex items-center justify-between"><div><h3 className="font-semibold text-white">Pending review</h3><p className="mt-1 text-xs text-zinc-500">Open the source and verify every claim before publishing.</p></div><button onClick={() => void load()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300"><RefreshCw className="mr-1 inline h-3.5 w-3.5" />Refresh</button></div>
-      <div className="mt-4 space-y-3">{pending.length === 0 ? <p className="text-sm text-zinc-500">No candidates awaiting review.</p> : pending.map((record) => <div key={record.id} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4"><div className="text-sm font-semibold text-white">{record.title}</div><div className="mt-1 text-xs text-zinc-500">{record.type} · {record.source?.publisher || record.source?.type || 'source'}</div>{record.source?.url && <a href={record.source.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs text-orange-300">Open source <ExternalLink className="ml-1 h-3 w-3" /></a>}<ul className="mt-3 space-y-1">{record.claims.map((claim) => <li key={claim} className="rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300">{claim}</li>)}</ul><div className="mt-3 flex gap-2"><button disabled={busy !== null} onClick={() => void review(record.id, 'publish')} className="rounded-lg border border-emerald-800/60 px-3 py-2 text-xs text-emerald-300"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />Approve & publish</button><button disabled={busy !== null} onClick={() => void review(record.id, 'reject')} className="rounded-lg border border-red-800/60 px-3 py-2 text-xs text-red-300"><XCircle className="mr-1 inline h-3.5 w-3.5" />Reject</button></div></div>)}</div>
+      <div className="mt-4 space-y-3">{pending.length === 0 ? <p className="text-sm text-zinc-500">No candidates awaiting review.</p> : pending.map((record) => <div key={record.id} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4"><div className="flex flex-wrap items-center gap-2"><div className="text-sm font-semibold text-white">{record.title}</div>{record.source?.harvested && <span className="rounded-full border border-orange-900/60 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300">Harvested</span>}</div><div className="mt-1 text-xs text-zinc-500">{record.type} · {record.source?.publisher || record.source?.type || 'source'}</div>{record.source?.harvestQuery?.value && <div className="mt-1 text-[11px] text-zinc-600">Search: {record.source.harvestQuery.mode} · {record.source.harvestQuery.value}</div>}{record.source?.url && <a href={record.source.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs text-orange-300">Open source <ExternalLink className="ml-1 h-3 w-3" /></a>}<ul className="mt-3 space-y-1">{record.claims.map((claim) => <li key={claim} className="rounded-lg border border-zinc-800 px-3 py-2 text-sm text-zinc-300">{claim}</li>)}</ul><div className="mt-3 flex gap-2"><button disabled={busy !== null} onClick={() => void review(record.id, 'publish')} className="rounded-lg border border-emerald-800/60 px-3 py-2 text-xs text-emerald-300"><CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />Approve & publish</button><button disabled={busy !== null} onClick={() => void review(record.id, 'reject')} className="rounded-lg border border-red-800/60 px-3 py-2 text-xs text-red-300"><XCircle className="mr-1 inline h-3.5 w-3.5" />Reject</button></div></div>)}</div>
     </section>
 
     <section className="rounded-2xl border border-zinc-800 bg-[#141414] p-4 sm:p-5"><h3 className="font-semibold text-white">Recent reviewed records</h3><div className="mt-3 divide-y divide-zinc-800">{reviewed.length === 0 ? <p className="text-sm text-zinc-500">No reviewed records.</p> : reviewed.map((record) => <div key={record.id} className="flex justify-between gap-3 py-3"><div><div className="text-sm text-zinc-200">{record.title}</div><div className="mt-1 text-xs text-zinc-500">{record.type}</div></div><span className="text-xs text-zinc-400">{record.status.replaceAll('_', ' ')}</span></div>)}</div></section>
