@@ -36,6 +36,12 @@ app = app.replace("import { initMasterLiveUpdateRunner } from './services/master
 app = app.replace("import { MASTER_SYNC_DATA_MERGED_EVENT, triggerMasterVersionSync, masterVersionSyncService } from './services/masterVersionSyncService';\n", '');
 app = app.replace('  autoEvolveCharGPTMemory,\n', '');
 app = app.replace("import { Navbar } from './components/Navbar';", "import { Navbar } from './components/Navbar.trusted';");
+app = requiredReplace(
+  app,
+  '  loadDeletedCookLogIds,\n  addDeletedCookLogId,',
+  '  loadDeletedCookLogIds,\n  saveDeletedCookLogIds,\n  addDeletedCookLogId,\n  INITIAL_CHARGPT_MEMORY,',
+  'trusted storage imports',
+);
 
 app = requiredReplace(
   app,
@@ -89,6 +95,82 @@ app = requiredReplace(
   'firebase role hydration',
 );
 
+app = requiredReplace(
+  app,
+  `        // Load authoritative data bundle from Firestore
+        loadUserBundleFromFirestore(user.uid).then((bundle) => {
+          if (bundle) {
+            if (Array.isArray(bundle.cookLogs)) setCookLogs(bundle.cookLogs);
+            if (bundle.profile) setProfile(bundle.profile);
+            if (Array.isArray(bundle.fuelLogs)) setFuelLogs(bundle.fuelLogs);
+            if (bundle.charGPTMemory) saveCharGPTMemory(bundle.charGPTMemory);
+            setSyncStatus('synced');
+          } else {
+            // Save initial user bundle to Firestore for new user
+            saveUserBundleToFirestore(user.uid, {
+              profile,
+              cookLogs,
+              fuelLogs,
+              charGPTMemory: loadCharGPTMemory(),
+            }).then(() => setSyncStatus('synced'));
+          }
+        }).catch((err) => {
+          console.warn('Error loading user bundle from Firestore:', err);
+          setSyncStatus('error');
+        });`,
+  `        // Account isolation: never seed a newly authenticated account from an
+        // unscoped browser cache that may belong to a previous user.
+        const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE };
+        setProfile(cleanProfile);
+        setCookLogs([]);
+        setFuelLogs([]);
+        saveDeletedCookLogIds([]);
+
+        loadUserBundleFromFirestore(user.uid).then((bundle) => {
+          if (bundle) {
+            setProfile(bundle.profile || cleanProfile);
+            setCookLogs(Array.isArray(bundle.cookLogs) ? bundle.cookLogs : []);
+            setFuelLogs(Array.isArray(bundle.fuelLogs) ? bundle.fuelLogs : []);
+            saveDeletedCookLogIds(Array.isArray(bundle.deletedCookLogIds) ? bundle.deletedCookLogIds : []);
+            if (bundle.charGPTMemory) saveCharGPTMemory(bundle.charGPTMemory);
+            else saveCharGPTMemory({ ...INITIAL_CHARGPT_MEMORY, lastEvolvedAt: new Date().toISOString() });
+            setSyncStatus('synced');
+            return;
+          }
+
+          const cleanMemory = { ...INITIAL_CHARGPT_MEMORY, lastEvolvedAt: new Date().toISOString() };
+          saveCharGPTMemory(cleanMemory);
+          saveUserBundleToFirestore(user.uid, {
+            profile: cleanProfile,
+            cookLogs: [],
+            fuelLogs: [],
+            charGPTMemory: cleanMemory,
+            deletedCookLogIds: [],
+          }).then((success) => setSyncStatus(success ? 'synced' : 'error'));
+        }).catch((err) => {
+          console.warn('Error loading user bundle from Firestore:', err);
+          setSyncStatus('error');
+        });`,
+  'isolated Firestore account hydration',
+);
+
+app = requiredReplace(
+  app,
+  `    clearActiveUserSession();
+    setUserSession(null);
+    setCurrentUser(null);
+    setAccessToken(null);`,
+  `    clearActiveUserSession();
+    saveDeletedCookLogIds([]);
+    setUserSession(null);
+    setCurrentUser(null);
+    setAccessToken(null);
+    setProfile({ ...INITIAL_SMOKER_PROFILE });
+    setCookLogs([]);
+    setFuelLogs([]);`,
+  'logout account isolation',
+);
+
 app = replaceRange(
   app,
   '  // Initialize SmokerSyncEngine and SmokerHoursSyncService for 30-minute automated auto-syncing',
@@ -109,7 +191,7 @@ app = replaceRange(
   app,
   '  // Sync cook log changes & run automatic live cloud ML training & trigger Master Version sync',
   '  // Sync fuel log changes',
-  `  // Save the local cache and verified Firestore bundle without auto-writing AI memories.
+  `  // Save local cache and the verified Firestore bundle without auto-writing AI memories.
   useEffect(() => {
     saveCookLogs(cookLogs);
     if (!currentUser?.uid) return;
@@ -119,6 +201,7 @@ app = replaceRange(
       cookLogs,
       fuelLogs,
       charGPTMemory: loadCharGPTMemory(),
+      deletedCookLogIds: loadDeletedCookLogIds(),
     }).then((success) => setSyncStatus(success ? 'synced' : 'error'))
       .catch(() => setSyncStatus('error'));
   }, [cookLogs, currentUser?.uid]);`,
@@ -129,8 +212,13 @@ app = replaceRange(
   app,
   '  const syncCookLogsToServer = (logs: CookLog[], deletedIds?: string[]) => {',
   '  const handleDeleteCook = (id: string) => {',
-  `  const syncCookLogsToServer = async (logs: CookLog[], _deletedIds?: string[]): Promise<boolean> => {
+  `  const syncCookLogsToServer = async (logs: CookLog[], deletedIds?: string[]): Promise<boolean> => {
     if (!currentUser?.uid) return false;
+    const tombstones = Array.from(new Set([
+      ...loadDeletedCookLogIds(),
+      ...(deletedIds || []),
+    ]));
+    saveDeletedCookLogIds(tombstones);
     setSyncStatus('syncing');
     try {
       const success = await saveUserBundleToFirestore(currentUser.uid, {
@@ -138,6 +226,7 @@ app = replaceRange(
         cookLogs: logs,
         fuelLogs,
         charGPTMemory: loadCharGPTMemory(),
+        deletedCookLogIds: tombstones,
       });
       setSyncStatus(success ? 'synced' : 'error');
       return success;
@@ -188,6 +277,7 @@ app = replaceRange(
       cookLogs,
       fuelLogs,
       charGPTMemory: loadCharGPTMemory(),
+      deletedCookLogIds: loadDeletedCookLogIds(),
     }).catch(() => false);
     setSyncStatus(synced ? 'synced' : 'error');
     if (!synced) {
@@ -227,6 +317,8 @@ for (const forbidden of ['auth_token_default', 'MASTER_ADMIN_EMAIL', 'autoEvolve
   if (app.includes(forbidden)) throw new Error(`[trusted-client] forbidden legacy pattern remains: ${forbidden}`);
 }
 if (nav.includes("isMasterAdmin(currentUserEmail)")) throw new Error('[trusted-client] Navbar still trusts email for admin visibility');
+if (!app.includes('deletedCookLogIds: tombstones')) throw new Error('[trusted-client] deletion tombstones are not persisted');
+if (!app.includes('const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE }')) throw new Error('[trusted-client] new account isolation is missing');
 
 fs.writeFileSync(appOutPath, app, 'utf8');
-console.log('[trusted-client] Generated trusted App/Navbar runtime.');
+console.log('[trusted-client] Generated trusted App/Navbar runtime with account isolation and tombstones.');
