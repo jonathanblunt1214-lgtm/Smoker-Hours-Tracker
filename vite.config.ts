@@ -18,6 +18,22 @@ export default defineConfig(() => {
         },
       ],
     },
+    build: {
+      chunkSizeWarningLimit: 900,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('/firebase/') || id.includes('firebase-admin')) return 'firebase';
+            if (id.includes('/recharts/') || id.includes('/d3-')) return 'charts';
+            if (id.includes('/lucide-react/')) return 'icons';
+            if (id.includes('/motion/')) return 'motion';
+            if (id.includes('/react/') || id.includes('/react-dom/')) return 'react-vendor';
+            return 'vendor';
+          },
+        },
+      },
+    },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
