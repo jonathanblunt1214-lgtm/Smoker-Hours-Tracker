@@ -31,8 +31,11 @@ hub = hub.replace(/Sign in with Amazon to enable Fire TV notifications and link 
 hub = hub.replace(/Copied Alexa Account Linking Code!/g, 'Alexa account linking is not configured; no real link code exists.');
 hub = hub.replace(/Generated new Alexa link code: \$\{newCode\}/g, 'Alexa account linking is not configured; generated codes are disabled.');
 hub = hub.replace(/const handleCopyLinkCode = \(\) => \{[\s\S]*?\n  \};\n\n  const handleRegenerateCode = \(\) => \{[\s\S]*?\n  \};/, `const handleCopyLinkCode = () => {\n    if (onShowToast) onShowToast('Alexa account linking is not configured. No real link code is available.');\n  };\n\n  const handleRegenerateCode = () => {\n    if (onShowToast) onShowToast('Alexa account linking requires a real Alexa Skill OAuth flow; local codes are disabled.');\n  };`);
-hub = hub.replace(/onClick=\{\(\) => \{\n\s*const session: UserAuthSession = \{[\s\S]*?onShowToast\('Signed in with Amazon account successfully!'\);\n\s*\}\}/, "onClick={() => { if (onShowToast) onShowToast('Amazon account linking is not configured. This panel is preview-only.'); }}");
-if (hub.includes('Signed in with Amazon account successfully!')) throw new Error('[voice-truth] fake Amazon sign-in remains');
+hub = hub.replace(/saveActiveUserSession\(session, true\);/g, "if (onShowToast) onShowToast('Amazon account linking is not configured. This is a local preview only.');");
+hub = hub.replace(/setUserSession\(session\);/g, 'void session;');
+hub = hub.replace(/Signed in with Amazon account successfully!/g, 'Amazon account linking is not configured. This panel is preview-only.');
+if (hub.includes("saveActiveUserSession(session, true)")) throw new Error('[voice-truth] fake Amazon session persistence remains');
+if (hub.includes('Signed in with Amazon account successfully!')) throw new Error('[voice-truth] fake Amazon sign-in success remains');
 if (hub.includes('Generated new Alexa link code:')) throw new Error('[voice-truth] fake Alexa code generation remains');
 fs.writeFileSync(hubOut, hub, 'utf8');
 
