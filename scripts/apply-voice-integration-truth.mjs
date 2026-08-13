@@ -7,6 +7,7 @@ const hubOut = 'src/components/PushAndAlexaHub.trusted.tsx';
 const aiSource = 'src/components/AIPitmasterModal.tsx';
 const aiOut = 'src/components/AIPitmasterModal.trusted.tsx';
 const appPath = 'src/App.trusted.tsx';
+const serverPath = 'server.secure.generated.ts';
 
 let notification = fs.readFileSync(notificationSource, 'utf8');
 notification = notification.replace("  enabled: true,\n  deviceName: 'Living Room Nest Hub',\n  broadcastVoiceEnabled: true,", "  enabled: false,\n  deviceName: 'Not connected',\n  broadcastVoiceEnabled: false,");
@@ -34,9 +35,16 @@ hub = hub.replace(/const handleCopyLinkCode = \(\) => \{[\s\S]*?\n  \};\n\n  con
 hub = hub.replace(/saveActiveUserSession\(session, true\);/g, "if (onShowToast) onShowToast('Amazon account linking is not configured. This is a local preview only.');");
 hub = hub.replace(/setUserSession\(session\);/g, 'void session;');
 hub = hub.replace(/Signed in with Amazon account successfully!/g, 'Amazon account linking is not configured. This panel is preview-only.');
+
+// A local preview must never POST telemetry to an endpoint named for Alexa or present its response as cloud connectivity.
+hub = hub.replace(/\n\s*\/\/ Auto-sync current cook and telemetry to server for Alexa requests[\s\S]*?\n\s*syncTelemetryToServer\(\);/, '');
+hub = hub.replace(/const handleExecuteVoiceQuery = async \(queryText\?: string\) => \{[\s\S]*?\n  \};\n\n  if \(isCollapsible\)/, `const handleExecuteVoiceQuery = async (queryText?: string) => {\n    const query = queryText || simulatedVoiceQuery;\n    setSimulatedVoiceQuery(query);\n    setIsSimulatingVoice(true);\n    const spoken = 'Alexa cloud integration is not configured. This is a local SmokeStack voice-preview surface and no request was sent to Amazon.';\n    setAlexaResponseText(spoken);\n    setAlexaCardContent('Preview only — no Amazon account or Alexa Skill linked');\n    setIsPlayingAudio(true);\n    speakAlexaVoice(spoken);\n    setTimeout(() => setIsPlayingAudio(false), 3000);\n    setIsSimulatingVoice(false);\n  };\n\n  if (isCollapsible)`);
+
 if (hub.includes("saveActiveUserSession(session, true)")) throw new Error('[voice-truth] fake Amazon session persistence remains');
 if (hub.includes('Signed in with Amazon account successfully!')) throw new Error('[voice-truth] fake Amazon sign-in success remains');
 if (hub.includes('Generated new Alexa link code:')) throw new Error('[voice-truth] fake Alexa code generation remains');
+if (hub.includes("fetch('/api/alexa/skill'")) throw new Error('[voice-truth] Alexa preview still calls server skill route');
+if (hub.includes("fetch('/api/alexa/sync-telemetry'")) throw new Error('[voice-truth] Alexa preview still syncs telemetry to server');
 fs.writeFileSync(hubOut, hub, 'utf8');
 
 let ai = fs.readFileSync(aiSource, 'utf8');
@@ -47,4 +55,14 @@ let app = fs.readFileSync(appPath, 'utf8');
 app = app.replace("from './components/AIPitmasterModal'", "from './components/AIPitmasterModal.trusted'");
 if (!app.includes("from './components/AIPitmasterModal.trusted'")) throw new Error('[voice-truth] trusted CharGPT UI import missing');
 fs.writeFileSync(appPath, app, 'utf8');
-console.log('[voice-truth] Alexa, Amazon, Fire TV, and Google Home surfaces are labeled as local previews until real external account linking exists.');
+
+// Server contract: configuration is not verification, and legacy Alexa simulation endpoints are disabled.
+let server = fs.readFileSync(serverPath, 'utf8');
+const marker = '// CharGPT API Route Handler';
+if (!server.includes(marker)) throw new Error('[voice-truth] server route marker missing');
+const contract = `\napp.get('/api/integrations/status', (_req, res) => {\n  const alexaConfigured = Boolean(process.env.ALEXA_SKILL_ID && process.env.ALEXA_OAUTH_CLIENT_ID && process.env.ALEXA_OAUTH_CLIENT_SECRET);\n  const googleHomeConfigured = Boolean(process.env.GOOGLE_HOME_OAUTH_CLIENT_ID && process.env.GOOGLE_HOME_PROJECT_ID);\n  const fireTvConfigured = Boolean(process.env.FIRE_TV_INTEGRATION_ID);\n  return res.json({\n    alexa: { state: alexaConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    googleHome: { state: googleHomeConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    fireTv: { state: fireTvConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    googleDrive: { state: 'authorization_required', verified: false, verification: 'OAuth plus successful write/read-back required' }\n  });\n});\napp.use(['/api/alexa/skill', '/api/alexa/sync-telemetry'], (_req, res) => res.status(503).json({\n  success: false, integration: 'alexa', state: 'unconfigured', previewOnly: true,\n  error: 'Real Alexa account linking is not configured. Legacy server simulation is disabled.'\n}));\n`;
+server = server.replace(marker, contract + '\n' + marker);
+if (!server.includes("'/api/integrations/status'")) throw new Error('[voice-truth] integration status endpoint missing');
+fs.writeFileSync(serverPath, server, 'utf8');
+
+console.log('[voice-truth] External integration trust contract enforced: previews stay local; provider connections require real authorization and verification.');
