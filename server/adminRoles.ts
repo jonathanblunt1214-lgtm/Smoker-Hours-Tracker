@@ -39,28 +39,57 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
     firestoreError = error?.message || 'Firestore health check failed.';
   }
 
-  const aiConfigured = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY);
-  const aiProvider = process.env.CHARGPT_PROVIDER || (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'Gemini' : process.env.API_KEY ? 'Configured provider' : null);
+  const vertexConfigured = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE);
+  const aiConfigured = vertexConfigured || Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY);
+  const aiProvider = process.env.CHARGPT_PROVIDER || (vertexConfigured ? 'Vertex' : process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'Gemini' : process.env.API_KEY ? 'Configured provider' : null);
   const aiModel = process.env.CHARGPT_MODEL || null;
   const commit = process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null;
   const revision = process.env.K_REVISION || null;
 
-  const knowledgePipelines = [
-    { id: 'smokers', label: 'Smoker manufacturers', status: 'needs_setup', sourcePolicy: 'Manufacturer or verified source required' },
-    { id: 'fuels', label: 'Fuel catalog', status: 'needs_setup', sourcePolicy: 'Verified product/manufacturer source required' },
-    { id: 'meats', label: 'Meat & cut catalog', status: 'needs_setup', sourcePolicy: 'Verified food-safety/cooking source required' },
-    { id: 'mods', label: 'Smoker modifications', status: 'needs_setup', sourcePolicy: 'Verified compatibility/source evidence required' },
+  const pipelineDefinitions = [
+    { id: 'smoker', label: 'Smoker manufacturers', sourcePolicy: 'Manufacturer or verified source required' },
+    { id: 'fuel', label: 'Fuel catalog', sourcePolicy: 'Verified product/manufacturer source required' },
+    { id: 'meat', label: 'Meat & cut catalog', sourcePolicy: 'Verified food-safety/cooking source required' },
+    { id: 'mod', label: 'Smoker modifications', sourcePolicy: 'Verified compatibility/source evidence required' },
   ];
+
+  let publishedCounts: Record<string, number> = { smoker: 0, fuel: 0, meat: 0, mod: 0 };
+  let pendingCount = 0;
+  let knowledgeError: string | null = null;
+  if (firestore === 'operational') {
+    try {
+      const snapshot = await adminDb.collection('verifiedKnowledge').limit(500).get();
+      for (const doc of snapshot.docs) {
+        const data: any = doc.data();
+        if (data?.status === 'pending_review') pendingCount += 1;
+        if (data?.status === 'published' && Object.prototype.hasOwnProperty.call(publishedCounts, data?.type)) {
+          publishedCounts[data.type] += 1;
+        }
+      }
+    } catch (error: any) {
+      knowledgeError = error?.message || 'Verified knowledge status check failed.';
+    }
+  }
+
+  const knowledgePipelines = pipelineDefinitions.map((pipeline) => ({
+    ...pipeline,
+    status: publishedCounts[pipeline.id] > 0 ? 'published' : 'ready_for_ingestion',
+    publishedRecords: publishedCounts[pipeline.id],
+  }));
+  const totalPublished = Object.values(publishedCounts).reduce((sum, count) => sum + count, 0);
+  const knowledgeStatus = knowledgeError ? 'degraded' : totalPublished > 0 ? 'published' : 'ready_for_ingestion';
 
   res.json({
     generatedAt: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'unknown',
     summary: {
-      overall: firestore === 'operational' && aiConfigured ? 'healthy' : 'attention_required',
+      overall: firestore === 'operational' && aiConfigured && !knowledgeError ? 'healthy' : 'attention_required',
       attention: [
         ...(firestore === 'degraded' ? ['Firestore health check needs attention.'] : []),
         ...(!aiConfigured ? ['CharGPT server credential is not configured.'] : []),
-        'Verified knowledge ingestion pipelines are not published yet.',
+        ...(knowledgeError ? ['Verified knowledge status check needs attention.'] : []),
+        ...(totalPublished === 0 && !knowledgeError ? ['Verified knowledge is ready for source ingestion and review; no records are published yet.'] : []),
+        ...(pendingCount > 0 ? [`${pendingCount} verified knowledge candidate(s) are awaiting review.`] : []),
       ],
     },
     services: {
@@ -69,10 +98,13 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
       firestore: { status: firestore, detail: firestoreError || 'Authoritative account data service responded.' },
       chargpt: {
         status: aiConfigured ? 'configured' : 'not_configured',
-        detail: aiConfigured ? 'Server-side CharGPT credential is configured.' : 'No server-side AI credential detected.',
+        detail: aiConfigured ? 'Server-side CharGPT model access is configured.' : 'No server-side AI access detected.',
       },
       sync: { status: firestore === 'operational' ? 'configured' : 'degraded', detail: 'Signed-in account data uses Firebase/Firestore. A separate fleet-wide sync operations service is not implemented.' },
-      knowledgePipelines: { status: 'needs_setup', detail: 'Verified smoker/fuel/meat/mod ingestion and approval pipelines have not been published yet.' },
+      knowledgePipelines: {
+        status: knowledgeStatus,
+        detail: knowledgeError || (totalPublished > 0 ? `${totalPublished} reviewed provenance-backed record(s) are published.` : 'Provenance and human-review pipelines are implemented and ready for source ingestion.'),
+      },
       backup: { status: 'client_managed', detail: 'Google Drive remains an optional user backup/export integration.' },
     },
     chargpt: {
@@ -80,18 +112,21 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
       provider: aiProvider,
       model: aiModel,
       credentials: aiConfigured ? 'configured' : 'missing',
-      retrieval: 'not_configured',
+      retrieval: knowledgeError ? 'degraded' : 'published_only',
       evaluation: 'not_configured',
       feedbackReview: 'not_configured',
       durableLearning: 'approval_required',
       detail: aiConfigured
-        ? 'CharGPT can call the configured server-side model. Retrieval, evaluation, and learning review services still need production implementation.'
+        ? 'CharGPT can call the configured server-side model and retrieve only reviewed, published knowledge records. Evaluation and learning review services still need production implementation.'
         : 'Configure the server-side AI provider before CharGPT can be considered production ready.',
     },
     knowledge: {
-      status: 'needs_setup',
+      status: knowledgeStatus,
+      totalPublished,
+      pendingReview: pendingCount,
       pipelines: knowledgePipelines,
-      publishingPolicy: 'No record is presented as verified until provenance and review gates pass.',
+      publishingPolicy: 'Only provenance-bearing records explicitly approved by an authenticated admin are published and eligible for CharGPT retrieval.',
+      error: knowledgeError,
     },
     release: {
       appVersion: process.env.APP_VERSION || null,

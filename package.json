@@ -4,7 +4,7 @@
   "version": "0.02A",
   "type": "module",
   "scripts": {
-    "generate:secure-server": "node scripts/build-secure-server.mjs && node scripts/apply-chargpt-production-policy.mjs",
+    "generate:secure-server": "node scripts/build-secure-server.mjs && node scripts/apply-chargpt-production-policy.mjs && node scripts/apply-verified-knowledge.mjs",
     "generate:trusted-client": "node scripts/build-trusted-client.mjs",
     "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
     "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
