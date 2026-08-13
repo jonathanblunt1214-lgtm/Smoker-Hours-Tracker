@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth } from './authMiddleware';
+import { harvestKnowledge } from './knowledgeHarvester';
 
 export { getPublishedKnowledgeForPrompt } from './verifiedKnowledgeRetrieval';
 export const verifiedKnowledgeRouter = Router();
@@ -9,6 +10,7 @@ export const verifiedKnowledgeRouter = Router();
 const TYPES = new Set(['smoker', 'fuel', 'meat', 'mod']);
 const SOURCE_TYPES = new Set(['manufacturer', 'government', 'standards_body', 'verified_publisher']);
 const STATUSES = new Set(['pending_review', 'published', 'rejected']);
+const HARVEST_MODES = new Set(['url', 'smoker', 'fuel', 'mod']);
 
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -53,6 +55,45 @@ verifiedKnowledgeRouter.get('/candidates', requireAuth, requireAdmin, async (req
     res.json({ records: records.slice(0, limit) });
   } catch (error: any) {
     res.status(503).json({ error: error?.message || 'Verified knowledge review queue is unavailable.' });
+  }
+});
+
+verifiedKnowledgeRouter.post('/harvest', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const mode = clean(req.body?.mode);
+  const value = clean(req.body?.value);
+  if (!HARVEST_MODES.has(mode) || !value) return res.status(400).json({ error: 'mode must be url, smoker, fuel, or mod, and value is required.' });
+
+  try {
+    const candidate = await harvestKnowledge({ mode: mode as 'url' | 'smoker' | 'fuel' | 'mod', value });
+    const duplicateSnapshot = await adminDb.collection('verifiedKnowledge').limit(500).get();
+    const duplicate = duplicateSnapshot.docs.find((doc: any) => {
+      const record: any = doc.data();
+      return clean(record?.source?.url) === candidate.sourceUrl && clean(record?.title).toLowerCase() === candidate.title.toLowerCase() && record?.status !== 'rejected';
+    });
+    if (duplicate) return res.status(409).json({ error: 'This source/title already exists in the knowledge queue or published catalog.', id: duplicate.id });
+
+    const ref = await adminDb.collection('verifiedKnowledge').add({
+      type: candidate.type,
+      title: candidate.title,
+      claims: candidate.claims,
+      source: {
+        url: candidate.sourceUrl,
+        type: candidate.sourceType,
+        publisher: candidate.publisher,
+        retrievedAt: new Date().toISOString(),
+        harvested: true,
+        harvestQuery: { mode, value },
+      },
+      status: 'pending_review',
+      submittedBy: req.user!.uid,
+      submittedAt: FieldValue.serverTimestamp(),
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewNote: null,
+    });
+    res.status(201).json({ ok: true, id: ref.id, status: 'pending_review', candidate });
+  } catch (error: any) {
+    res.status(422).json({ error: error?.message || 'Knowledge harvest failed. Nothing was saved.' });
   }
 });
 
