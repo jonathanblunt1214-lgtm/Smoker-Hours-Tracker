@@ -40,23 +40,58 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
   }
 
   const aiConfigured = Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY);
+  const aiProvider = process.env.CHARGPT_PROVIDER || (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'Gemini' : process.env.API_KEY ? 'Configured provider' : null);
+  const aiModel = process.env.CHARGPT_MODEL || null;
   const commit = process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null;
   const revision = process.env.K_REVISION || null;
+
+  const knowledgePipelines = [
+    { id: 'smokers', label: 'Smoker manufacturers', status: 'needs_setup', sourcePolicy: 'Manufacturer or verified source required' },
+    { id: 'fuels', label: 'Fuel catalog', status: 'needs_setup', sourcePolicy: 'Verified product/manufacturer source required' },
+    { id: 'meats', label: 'Meat & cut catalog', status: 'needs_setup', sourcePolicy: 'Verified food-safety/cooking source required' },
+    { id: 'mods', label: 'Smoker modifications', status: 'needs_setup', sourcePolicy: 'Verified compatibility/source evidence required' },
+  ];
 
   res.json({
     generatedAt: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'unknown',
+    summary: {
+      overall: firestore === 'operational' && aiConfigured ? 'healthy' : 'attention_required',
+      attention: [
+        ...(firestore === 'degraded' ? ['Firestore health check needs attention.'] : []),
+        ...(!aiConfigured ? ['CharGPT server credential is not configured.'] : []),
+        'Verified knowledge ingestion pipelines are not published yet.',
+      ],
+    },
     services: {
-      api: { status: 'operational', detail: 'Authenticated admin API responded.' },
+      api: { status: 'operational', detail: 'Authenticated SmokeStack Operations API responded.' },
       authorization: { status: 'operational', detail: 'Firebase custom claims verified.' },
-      firestore: { status: firestore, detail: firestoreError },
+      firestore: { status: firestore, detail: firestoreError || 'Authoritative account data service responded.' },
       chargpt: {
         status: aiConfigured ? 'configured' : 'not_configured',
-        detail: aiConfigured ? 'Server-side AI credential is configured.' : 'No server-side AI credential detected.',
+        detail: aiConfigured ? 'Server-side CharGPT credential is configured.' : 'No server-side AI credential detected.',
       },
-      sync: { status: 'unavailable', detail: 'Server-side production sync operations dashboard is not implemented yet.' },
-      knowledgePipelines: { status: 'not_configured', detail: 'Verified smoker/fuel/meat/mod pipelines have not been published yet.' },
+      sync: { status: firestore === 'operational' ? 'configured' : 'degraded', detail: 'Signed-in account data uses Firebase/Firestore. A separate fleet-wide sync operations service is not implemented.' },
+      knowledgePipelines: { status: 'needs_setup', detail: 'Verified smoker/fuel/meat/mod ingestion and approval pipelines have not been published yet.' },
       backup: { status: 'client_managed', detail: 'Google Drive remains an optional user backup/export integration.' },
+    },
+    chargpt: {
+      status: aiConfigured ? 'ready' : 'needs_setup',
+      provider: aiProvider,
+      model: aiModel,
+      credentials: aiConfigured ? 'configured' : 'missing',
+      retrieval: 'not_configured',
+      evaluation: 'not_configured',
+      feedbackReview: 'not_configured',
+      durableLearning: 'approval_required',
+      detail: aiConfigured
+        ? 'CharGPT can call the configured server-side model. Retrieval, evaluation, and learning review services still need production implementation.'
+        : 'Configure the server-side AI provider before CharGPT can be considered production ready.',
+    },
+    knowledge: {
+      status: 'needs_setup',
+      pipelines: knowledgePipelines,
+      publishingPolicy: 'No record is presented as verified until provenance and review gates pass.',
     },
     release: {
       appVersion: process.env.APP_VERSION || null,
