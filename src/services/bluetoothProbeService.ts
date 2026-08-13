@@ -5,7 +5,7 @@ export interface CombustionProbeData {
   surfaceTempF: number;
   ambientTempF: number;
   predictionMin: number;
-  sensorsF: number[]; // 8 internal sensors along needle
+  sensorsF: number[];
   batteryPct: number;
   signalRssi: number;
   timestamp: string;
@@ -46,17 +46,13 @@ class BluetoothProbeService {
 
   public subscribeTelemetry(listener: TelemetryListener): () => void {
     this.telemetryListeners.add(listener);
-    if (this.activeDevice && this.activeDevice.telemetry) {
-      listener(this.activeDevice.telemetry, this.activeDevice);
-    }
+    if (this.activeDevice?.telemetry) listener(this.activeDevice.telemetry, this.activeDevice);
     return () => this.telemetryListeners.delete(listener);
   }
 
   public subscribeStatus(listener: StatusListener): () => void {
     this.statusListeners.add(listener);
-    if (this.activeDevice) {
-      listener(this.activeDevice);
-    }
+    if (this.activeDevice) listener(this.activeDevice);
     return () => this.statusListeners.delete(listener);
   }
 
@@ -73,126 +69,116 @@ class BluetoothProbeService {
     this.telemetryListeners.forEach((fn) => fn(data, currentDevice));
   }
 
+  /**
+   * Connects to a real WebBluetooth device. Simulation is allowed only when the
+   * caller explicitly requests it; it never activates as a fallback for a failed
+   * or unsupported real connection.
+   */
   public async connectCombustionDevice(forceSimulation = false): Promise<BluetoothProbeDevice> {
     this.disconnect();
 
-    const deviceName = 'Combustion Inc. Predictive Thermometer (CP-82)';
+    const deviceName = 'Combustion Inc. Predictive Thermometer';
     this.activeDevice = {
-      id: 'combustion-inc-probe',
-      name: deviceName,
+      id: forceSimulation ? 'combustion-demo-probe' : 'combustion-inc-probe',
+      name: forceSimulation ? `${deviceName} — SIMULATED DEMO` : deviceName,
       brand: 'Combustion Inc',
-      wirelessType: 'Bluetooth 5.2 (Open GATT)',
+      wirelessType: 'Bluetooth',
       status: 'connecting',
       telemetry: null,
       isSimulated: forceSimulation,
     };
     this.notifyStatus();
 
-    // Check WebBluetooth availability
+    if (forceSimulation) {
+      this.activeDevice.status = 'connected';
+      this.activeDevice.isSimulated = true;
+      this.notifyStatus();
+      this.startSimulationStream();
+      return this.activeDevice;
+    }
+
     const nav = typeof navigator !== 'undefined' ? (navigator as any) : null;
-    if (!forceSimulation && nav && nav.bluetooth) {
-      try {
-        const device = await nav.bluetooth.requestDevice({
-          filters: [
-            { namePrefix: 'Combustion' },
-            { namePrefix: 'CP' },
-            { namePrefix: 'Probe' },
-          ],
-          optionalServices: [COMBUSTION_SERVICE_UUID, COMBUSTION_UART_SERVICE, 'battery_service', 'device_information'],
-        });
-
-        if (device) {
-          this.activeDevice.name = device.name || deviceName;
-          this.notifyStatus();
-
-          device.addEventListener('gattserverdisconnected', () => {
-            if (this.activeDevice) {
-              this.activeDevice.status = 'disconnected';
-              this.notifyStatus();
-            }
-          });
-
-          const server = await device.gatt.connect();
-          this.gattServer = server;
-          this.activeDevice.status = 'connected';
-          this.activeDevice.isSimulated = false;
-          this.notifyStatus();
-
-          // Start reading notifications or fallback to telemetry poller
-          this.startRealGattReading(server);
-          return this.activeDevice;
-        }
-      } catch (err: any) {
-        console.warn('[BluetoothProbeService] WebBluetooth connection attempt failed or canceled:', err?.message || err);
-        this.activeDevice.status = 'error';
-        this.activeDevice.errorMessage = err?.message || 'Bluetooth connection failed or was cancelled.';
-        this.notifyStatus();
-        return this.activeDevice;
-      }
-    } else if (!forceSimulation) {
+    if (!nav?.bluetooth) {
       this.activeDevice.status = 'error';
       this.activeDevice.errorMessage = 'WebBluetooth is not supported in this browser environment.';
       this.notifyStatus();
       return this.activeDevice;
     }
 
-    // Start live simulated telemetry stream for Combustion Inc.
-    this.activeDevice.status = 'connected';
-    this.activeDevice.isSimulated = true;
-    this.notifyStatus();
-    this.startSimulationStream();
-    return this.activeDevice;
-  }
+    try {
+      const device = await nav.bluetooth.requestDevice({
+        filters: [
+          { namePrefix: 'Combustion' },
+          { namePrefix: 'CP' },
+          { namePrefix: 'Probe' },
+        ],
+        optionalServices: [COMBUSTION_SERVICE_UUID, COMBUSTION_UART_SERVICE, 'battery_service', 'device_information'],
+      });
 
-  private startRealGattReading(server: any) {
-    // If GATT notification setup is supported on the connected device
-    let pollingActive = true;
-    const pollInterval = setInterval(() => {
-      if (!server || !server.connected || !pollingActive) {
-        clearInterval(pollInterval);
-        return;
+      if (!device) {
+        this.activeDevice.status = 'error';
+        this.activeDevice.errorMessage = 'No Bluetooth device was selected.';
+        this.notifyStatus();
+        return this.activeDevice;
       }
-      // Generate telemetry tick anchored on probe GATT connection
-      this.tickSimulatedTelemetry();
-    }, 2500);
 
-    this.simulationInterval = pollInterval;
+      this.activeDevice.name = device.name || deviceName;
+      device.addEventListener('gattserverdisconnected', () => {
+        if (this.activeDevice) {
+          this.activeDevice.status = 'disconnected';
+          this.activeDevice.telemetry = null;
+          this.notifyStatus();
+        }
+      });
+
+      const server = await device.gatt.connect();
+      this.gattServer = server;
+
+      // SmokeStack does not yet have a verified parser for this device's live
+      // temperature characteristics. A GATT link alone must not be represented
+      // as live SmokeStack telemetry.
+      this.activeDevice.status = 'error';
+      this.activeDevice.isSimulated = false;
+      this.activeDevice.telemetry = null;
+      this.activeDevice.errorMessage = 'Bluetooth link established, but verified SmokeStack temperature decoding is not implemented for this device yet.';
+      this.notifyStatus();
+      return this.activeDevice;
+    } catch (err: any) {
+      console.warn('[BluetoothProbeService] WebBluetooth connection attempt failed or canceled:', err?.message || err);
+      this.activeDevice.status = 'error';
+      this.activeDevice.telemetry = null;
+      this.activeDevice.errorMessage = err?.message || 'Bluetooth connection failed or was cancelled.';
+      this.notifyStatus();
+      return this.activeDevice;
+    }
   }
 
   private startSimulationStream() {
     if (this.simulationInterval) clearInterval(this.simulationInterval);
     this.tickSimulatedTelemetry();
-    this.simulationInterval = setInterval(() => {
-      this.tickSimulatedTelemetry();
-    }, 2500);
+    this.simulationInterval = setInterval(() => this.tickSimulatedTelemetry(), 2500);
   }
 
   private tickSimulatedTelemetry() {
-    if (!this.activeDevice || this.activeDevice.status !== 'connected') return;
+    if (!this.activeDevice || this.activeDevice.status !== 'connected' || !this.activeDevice.isSimulated) return;
 
-    // Simulate realistic brisket or pork shoulder cook thermal curve
     this.simCore = Math.min(203, +(this.simCore + (Math.random() * 0.4 - 0.05)).toFixed(1));
     this.simSurface = Math.min(220, +(this.simSurface + (Math.random() * 0.5 - 0.1)).toFixed(1));
     this.simAmbient = Math.max(215, Math.min(245, +(this.simAmbient + (Math.random() * 2 - 1)).toFixed(1)));
-    
-    const remainingDeg = Math.max(0, 203 - this.simCore);
-    this.simPrediction = Math.round(remainingDeg * 1.6);
+    this.simPrediction = Math.round(Math.max(0, 203 - this.simCore) * 1.6);
 
-    // Combustion 8-sensor gradient along probe
     const sensors = [
-      this.simCore, // T1: Core sensor
+      this.simCore,
       +(this.simCore + (this.simSurface - this.simCore) * 0.15).toFixed(1),
       +(this.simCore + (this.simSurface - this.simCore) * 0.35).toFixed(1),
       +(this.simCore + (this.simSurface - this.simCore) * 0.60).toFixed(1),
       +(this.simCore + (this.simSurface - this.simCore) * 0.85).toFixed(1),
-      this.simSurface, // T6: Surface sensor
+      this.simSurface,
       +(this.simSurface + (this.simAmbient - this.simSurface) * 0.5).toFixed(1),
-      this.simAmbient, // T8: Ambient sensor
+      this.simAmbient,
     ];
 
     const now = new Date();
-    const timeStr = `${now.getHours()}:${now.getMinutes() < 10 ? '0' : ''}${now.getMinutes()}:${now.getSeconds() < 10 ? '0' : ''}${now.getSeconds()}`;
-
     const data: CombustionProbeData = {
       coreTempF: this.simCore,
       surfaceTempF: this.simSurface,
@@ -201,7 +187,7 @@ class BluetoothProbeService {
       sensorsF: sensors,
       batteryPct: Math.max(82, Math.round(100 - (Date.now() % 3600000) / 360000)),
       signalRssi: -58 + Math.floor(Math.random() * 6),
-      timestamp: timeStr,
+      timestamp: `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`,
     };
 
     this.notifyTelemetry(data);
@@ -212,14 +198,13 @@ class BluetoothProbeService {
       clearInterval(this.simulationInterval);
       this.simulationInterval = null;
     }
-    if (this.gattServer && this.gattServer.disconnect) {
-      try {
-        this.gattServer.disconnect();
-      } catch (e) {}
+    if (this.gattServer?.disconnect) {
+      try { this.gattServer.disconnect(); } catch {}
       this.gattServer = null;
     }
     if (this.activeDevice) {
       this.activeDevice.status = 'disconnected';
+      this.activeDevice.telemetry = null;
       this.notifyStatus();
       this.activeDevice = null;
     }
