@@ -18,8 +18,6 @@ source = replaceRange(
   'export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPTMemory): CharGPTMemory {',
   'export function loadSmokerProfile(): SmokerProfile {',
   `export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPTMemory): CharGPTMemory {
-  // Phase-0 trust rule: automatic analysis may not create or persist durable
-  // preferences/rules. Return a read-only derived snapshot only.
   const baseMemory = currentMemory || loadCharGPTMemory();
   return {
     ...baseMemory,
@@ -38,8 +36,6 @@ source = replaceRange(
   'export function sanitizeAndFillCookLog(c: Partial<CookLog>, index = 0): CookLog {',
   'export function loadCookLogs(): CookLog[] {',
   `export function sanitizeAndFillCookLog(c: Partial<CookLog>, index = 0): CookLog {
-  // Preserve supplied values and use neutral unknown/empty placeholders only.
-  // Never invent a completed cook, telemetry, ratings, fuel use, weather or notes.
   const title = String(c.title || '').trim() || 'Untitled cook';
   const proteinCut = String(c.proteinCut || '').trim() || 'Unknown cut';
   const proteinType = (c.proteinType || 'Other') as ProteinType;
@@ -81,8 +77,18 @@ source = replaceRange(
   'cook log non-fabricating sanitizer',
 );
 
+source = replaceRange(
+  source,
+  'export const INITIAL_VERIFIED_MEAT_CUTS:',
+  'export function loadVerifiedMeatCuts():',
+  `export const INITIAL_VERIFIED_MEAT_CUTS: import('../types').VerifiedMeatCut[] = [];
+// Food-safety references with source URLs are defined in src/data/verifiedMeatCutsData.ts.`,
+  'legacy verified meat defaults',
+);
+
 if (source.includes('if (hoursLogged <= 0) hoursLogged = 6.0')) throw new Error('[trusted-storage] fabricated duration fallback remains');
 if (source.includes("finishedNotes: c.finishedNotes || 'Excellent smoke ring")) throw new Error('[trusted-storage] fabricated finished notes remain');
+if (source.includes("verifiedStatus: 'Global Online Verified'")) throw new Error('[trusted-storage] legacy meat verification remains');
 
 fs.writeFileSync(outputPath, source, 'utf8');
-console.log('[trusted-storage] Generated src/utils/storage.trusted.ts');
+console.log('[trusted-storage] Generated trusted storage without fabricated cook or meat verification defaults.');
