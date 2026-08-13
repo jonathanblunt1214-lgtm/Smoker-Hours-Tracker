@@ -8,9 +8,22 @@ export const verifiedKnowledgeRouter = Router();
 
 const TYPES = new Set(['smoker', 'fuel', 'meat', 'mod']);
 const SOURCE_TYPES = new Set(['manufacturer', 'government', 'standards_body', 'verified_publisher']);
+const STATUSES = new Set(['pending_review', 'published', 'rejected']);
 
 function clean(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function serializeRecord(doc: any) {
+  const data = doc.data();
+  const submittedAt = data.submittedAt?.toDate?.() ?? null;
+  const reviewedAt = data.reviewedAt?.toDate?.() ?? null;
+  return {
+    id: doc.id,
+    ...data,
+    submittedAt: submittedAt ? submittedAt.toISOString() : data.submittedAt ?? null,
+    reviewedAt: reviewedAt ? reviewedAt.toISOString() : data.reviewedAt ?? null,
+  };
 }
 
 verifiedKnowledgeRouter.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
@@ -20,10 +33,26 @@ verifiedKnowledgeRouter.get('/', requireAuth, async (req: AuthenticatedRequest, 
     let query: any = adminDb.collection('verifiedKnowledge').where('status', '==', 'published');
     if (type && TYPES.has(type)) query = query.where('type', '==', type);
     const snapshot = await query.limit(limit).get();
-    const records = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+    const records = snapshot.docs.map(serializeRecord);
     res.json({ records, verificationPolicy: 'Only reviewed records with source provenance are published.' });
   } catch (error: any) {
     res.status(503).json({ error: error?.message || 'Verified knowledge is unavailable.' });
+  }
+});
+
+verifiedKnowledgeRouter.get('/candidates', requireAuth, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const requestedStatus = clean(req.query.status);
+  const requestedType = clean(req.query.type);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
+  try {
+    const snapshot = await adminDb.collection('verifiedKnowledge').limit(500).get();
+    let records = snapshot.docs.map(serializeRecord);
+    if (requestedStatus && STATUSES.has(requestedStatus)) records = records.filter((record: any) => record.status === requestedStatus);
+    if (requestedType && TYPES.has(requestedType)) records = records.filter((record: any) => record.type === requestedType);
+    records.sort((a: any, b: any) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')));
+    res.json({ records: records.slice(0, limit) });
+  } catch (error: any) {
+    res.status(503).json({ error: error?.message || 'Verified knowledge review queue is unavailable.' });
   }
 });
 
@@ -50,6 +79,7 @@ verifiedKnowledgeRouter.post('/candidates', requireAuth, requireAdmin, async (re
     submittedAt: FieldValue.serverTimestamp(),
     reviewedBy: null,
     reviewedAt: null,
+    reviewNote: null,
   });
   res.status(201).json({ ok: true, id: ref.id, status: 'pending_review' });
 });
@@ -61,6 +91,7 @@ verifiedKnowledgeRouter.post('/:id/review', requireAuth, requireAdmin, async (re
   const snap = await ref.get();
   if (!snap.exists) return res.status(404).json({ error: 'Knowledge candidate not found.' });
   const record: any = snap.data();
+  if (record?.status !== 'pending_review') return res.status(409).json({ error: `Only pending_review records can be reviewed. Current status: ${record?.status || 'unknown'}.` });
   if (!record?.source?.url || !record?.source?.type || !Array.isArray(record?.claims) || record.claims.length === 0) {
     return res.status(409).json({ error: 'Candidate is missing required provenance and cannot be published.' });
   }
