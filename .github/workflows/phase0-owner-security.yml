@@ -1,0 +1,50 @@
+name: Phase 0 Owner Security Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify owner security transformation
+        run: npm run verify:owner-security
+
+      - name: TypeScript check
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify generated owner route
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .generated/server.secure.ts
+          grep -q "requireOwner as any" .generated/server.secure.ts
+          grep -q "deploymentState: 'draft'" .generated/server.secure.ts
+          grep -q "deploymentState: 'not_generated'" .generated/server.secure.ts
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' .generated/server.secure.ts | grep -q "Applied Live"; then
+            echo "Fake Applied Live language remains in protected route"
+            exit 1
+          fi
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' .generated/server.secure.ts | grep -q "userEmail"; then
+            echo "Client-supplied userEmail remains in protected route"
+            exit 1
+          fi
