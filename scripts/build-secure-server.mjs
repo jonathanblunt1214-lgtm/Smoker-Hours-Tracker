@@ -3,8 +3,7 @@ import path from 'node:path';
 
 const root = process.cwd();
 const sourcePath = path.join(root, 'server.ts');
-const outputDir = path.join(root, '.generated');
-const outputPath = path.join(outputDir, 'server.secure.ts');
+const outputPath = path.join(root, 'server.secure.generated.ts');
 
 let source = fs.readFileSync(sourcePath, 'utf8');
 
@@ -90,8 +89,6 @@ if (!route.includes("requireOwner as any")) {
 }
 
 source = source.slice(0, routeStart) + route + source.slice(routeEnd);
-
-fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(outputPath, source, 'utf8');
 
 console.log(`[secure-server] Generated ${path.relative(root, outputPath)}`);
