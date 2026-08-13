@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth } from './authMiddleware';
 
+export { getPublishedKnowledgeForPrompt } from './verifiedKnowledgeRetrieval';
 export const verifiedKnowledgeRouter = Router();
 
 const TYPES = new Set(['smoker', 'fuel', 'meat', 'mod']);
