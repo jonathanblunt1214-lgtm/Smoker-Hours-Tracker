@@ -1,0 +1,8 @@
+{
+  "appId": "com.smokestack.pitmaster",
+  "appName": "Smoke Stack Pitmaster Companion",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

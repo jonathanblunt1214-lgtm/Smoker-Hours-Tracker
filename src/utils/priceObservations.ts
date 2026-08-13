@@ -1,5 +1,6 @@
 import { addDoc, collection, getDocs, orderBy, query, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { calculateCostPerLb, costPerLbToKg } from './costUnits';
 
 export type FuelPriceObservationSource = 'manual_entry' | 'receipt' | 'retailer_page';
 
@@ -14,6 +15,7 @@ export interface FuelPriceObservation {
   quantityUnits?: number;
   totalPrice: number;
   normalizedCostPerLb?: number;
+  normalizedCostPerKg?: number;
   observedAt: string;
   sourceType: FuelPriceObservationSource;
   sourceUrl?: string;
@@ -43,7 +45,7 @@ function normalizeProductKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
 }
 
-export async function saveAccountFuelPriceObservation(uid: string, input: Omit<FuelPriceObservation, 'id' | 'productKey' | 'normalizedCostPerLb' | 'verificationState'>): Promise<string> {
+export async function saveAccountFuelPriceObservation(uid: string, input: Omit<FuelPriceObservation, 'id' | 'productKey' | 'normalizedCostPerLb' | 'normalizedCostPerKg' | 'verificationState'>): Promise<string> {
   if (!uid) throw new Error('Sign in is required to save a price observation.');
   const productName = input.productName.trim();
   const retailerName = input.retailerName.trim();
@@ -52,6 +54,8 @@ export async function saveAccountFuelPriceObservation(uid: string, input: Omit<F
   if (!productName || !retailerName || !totalPrice) throw new Error('Product, retailer, and a positive observed price are required.');
   if (input.sourceType === 'retailer_page' && (!input.sourceUrl || !/^https:\/\//i.test(input.sourceUrl))) throw new Error('Retailer-page observations require an HTTPS source URL.');
 
+  const perLb = weight ? calculateCostPerLb(totalPrice, weight) : null;
+  const perKg = perLb === null ? null : costPerLbToKg(perLb);
   const payload = {
     productKey: normalizeProductKey(`${input.brand || ''}-${productName}`),
     productName,
@@ -61,7 +65,8 @@ export async function saveAccountFuelPriceObservation(uid: string, input: Omit<F
     bagWeightLbs: weight,
     quantityUnits: finitePositive(input.quantityUnits),
     totalPrice,
-    normalizedCostPerLb: weight ? Number((totalPrice / weight).toFixed(4)) : null,
+    normalizedCostPerLb: perLb === null ? null : Number(perLb.toFixed(4)),
+    normalizedCostPerKg: perKg === null ? null : Number(perKg.toFixed(4)),
     observedAt: input.observedAt || new Date().toISOString(),
     sourceType: input.sourceType,
     sourceUrl: input.sourceUrl?.trim() || null,
