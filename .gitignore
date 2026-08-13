@@ -5,6 +5,7 @@ dist/
 server.secure.generated.ts
 src/App.trusted.tsx
 src/components/Navbar.trusted.tsx
+src/utils/storage.trusted.ts
 coverage/
 .DS_Store
 *.log
