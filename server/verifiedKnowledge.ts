@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth } from './authMiddleware';
 import { harvestKnowledge } from './knowledgeHarvester';
+import { revalidatePublishedKnowledge } from './knowledgeRevalidation';
 
 export { getPublishedKnowledgeForPrompt } from './verifiedKnowledgeRetrieval';
 export const verifiedKnowledgeRouter = Router();
@@ -55,6 +56,20 @@ verifiedKnowledgeRouter.get('/candidates', requireAuth, requireAdmin, async (req
     res.json({ records: records.slice(0, limit) });
   } catch (error: any) {
     res.status(503).json({ error: error?.message || 'Verified knowledge review queue is unavailable.' });
+  }
+});
+
+verifiedKnowledgeRouter.post('/scheduler/revalidate', async (req, res) => {
+  const schedulerMarker = clean(req.header('x-cloudscheduler'));
+  if (schedulerMarker.toLowerCase() !== 'true') {
+    return res.status(403).json({ error: 'Scheduler invocation required.' });
+  }
+
+  try {
+    const result = await revalidatePublishedKnowledge(200);
+    res.json({ ok: true, ...result });
+  } catch (error: any) {
+    res.status(503).json({ error: error?.message || 'Knowledge revalidation failed.' });
   }
 });
 
