@@ -9,24 +9,31 @@ let modal = fs.readFileSync(sourcePath, 'utf8');
 const typeImport = "import { CookLog, FuelLog, SmokerProfile } from '../types';";
 const staticImport = "import { KnowledgeAdminPanel } from './KnowledgeAdminPanel';\n";
 const lazyDeclaration = "const KnowledgeAdminPanel = React.lazy(() => import('./KnowledgeAdminPanel').then((module) => ({ default: module.KnowledgeAdminPanel })));";
+const meatLazyDeclaration = "const MeatSourceHarvesterPanel = React.lazy(() => import('./MeatSourceHarvesterPanel').then((module) => ({ default: module.MeatSourceHarvesterPanel })));";
 
 modal = modal.replace(staticImport, '');
 if (!modal.includes(lazyDeclaration)) {
   if (!modal.includes(typeImport)) throw new Error('[knowledge-admin-ui] type import anchor not found');
-  modal = modal.replace(typeImport, `${typeImport}\n\n${lazyDeclaration}`);
+  modal = modal.replace(typeImport, `${typeImport}\n\n${lazyDeclaration}\n${meatLazyDeclaration}`);
+} else if (!modal.includes(meatLazyDeclaration)) {
+  modal = modal.replace(lazyDeclaration, `${lazyDeclaration}\n${meatLazyDeclaration}`);
 }
 
 const anchor = `      </Panel>\n    </div>;\n\n    if (activeTab === 'access')`;
-const replacement = `      </Panel>\n      <React.Suspense fallback={<div className="rounded-2xl border border-zinc-800 bg-[#141414] p-5 text-sm text-zinc-500">Loading verified knowledge workbench…</div>}>\n        <KnowledgeAdminPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />\n      </React.Suspense>\n    </div>;\n\n    if (activeTab === 'access')`;
+const replacement = `      </Panel>\n      <React.Suspense fallback={<div className="rounded-2xl border border-zinc-800 bg-[#141414] p-5 text-sm text-zinc-500">Loading verified knowledge workbench…</div>}>\n        <div className="space-y-5">\n          <MeatSourceHarvesterPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />\n          <KnowledgeAdminPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />\n        </div>\n      </React.Suspense>\n    </div>;\n\n    if (activeTab === 'access')`;
 
 if (!modal.includes('<KnowledgeAdminPanel request={authorizedFetch}')) {
   if (!modal.includes(anchor)) throw new Error('[knowledge-admin-ui] knowledge-tab anchor not found');
   modal = modal.replace(anchor, replacement);
+} else if (!modal.includes('<MeatSourceHarvesterPanel request={authorizedFetch}')) {
+  modal = modal.replace('<KnowledgeAdminPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />', '<div className="space-y-5"><MeatSourceHarvesterPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} /><KnowledgeAdminPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} /></div>');
 }
 
 if (!modal.includes(lazyDeclaration)) throw new Error('[knowledge-admin-ui] lazy import verification failed');
+if (!modal.includes(meatLazyDeclaration)) throw new Error('[knowledge-admin-ui] meat harvester lazy import verification failed');
 if (!modal.includes('<React.Suspense fallback=')) throw new Error('[knowledge-admin-ui] suspense verification failed');
 if (!modal.includes('<KnowledgeAdminPanel request={authorizedFetch}')) throw new Error('[knowledge-admin-ui] workbench mount verification failed');
+if (!modal.includes('<MeatSourceHarvesterPanel request={authorizedFetch}')) throw new Error('[knowledge-admin-ui] meat harvester mount verification failed');
 
 fs.writeFileSync(modalOutPath, modal, 'utf8');
 
@@ -62,6 +69,6 @@ if (!app.includes('<HomeCommandCenter')) throw new Error('[home-command-center] 
 if (!app.includes('<FuelMarketTracker')) throw new Error('[fuel-market] mount verification failed');
 fs.writeFileSync(appTrustedPath, app, 'utf8');
 
-console.log('[knowledge-admin-ui] Generated trusted Operations modal; Knowledge workbench is mounted and lazy-loaded.');
+console.log('[knowledge-admin-ui] Generated trusted Operations modal with Knowledge and Meat Source Harvester panels.');
 console.log('[home-command-center] Mounted trust-safe AI Studio command center.');
 console.log('[fuel-market] Mounted account-linked observed price tracker; no synthetic market movement.');
