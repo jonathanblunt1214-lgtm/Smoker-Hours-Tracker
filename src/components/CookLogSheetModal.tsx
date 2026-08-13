@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { CookLog } from '../types';
 import { AI_PITMASTER_NAME } from '../constants/appName';
-import { X, Printer, Flame, CheckSquare, Square, FileText, Sparkles, Award, DollarSign, Database, TrendingDown, ShoppingBag } from 'lucide-react';
+import { ThermalCurveAnalyticsCard } from './ThermalCurveAnalyticsCard';
+import { PhysicalLogSheetModal } from './PhysicalLogSheetModal';
+import QRCode from 'qrcode';
+import { X, Printer, Flame, CheckSquare, Square, FileText, Sparkles, Award, DollarSign, Database, TrendingDown, ShoppingBag, QrCode, Download, Trash2 } from 'lucide-react';
 import { calculateCookPelletHourlyCost } from '../utils/retailerPriceSync';
 
 interface CookLogSheetModalProps {
@@ -9,6 +12,8 @@ interface CookLogSheetModalProps {
   onClose: () => void;
   onAnalyzeWithAI?: (cook: CookLog) => void;
   onOpenCertificate?: (cook: CookLog) => void;
+  onEditCook?: (cook: CookLog) => void;
+  onDeleteCook?: (id: string) => void;
 }
 
 export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
@@ -16,7 +21,91 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
   onClose,
   onAnalyzeWithAI,
   onOpenCertificate,
+  onEditCook,
+  onDeleteCook,
 }) => {
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [showPhysicalSheetModal, setShowPhysicalSheetModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!cook) return;
+
+    const generateSmokeStackQR = async () => {
+      try {
+        const payload = JSON.stringify({
+          app: 'SmokeStack',
+          type: 'cook_log_sheet',
+          id: cook.id,
+          title: cook.title,
+          smokerType: cook.smokerType,
+          date: cook.date,
+          proteinType: cook.proteinType,
+          pageNumber: cook.pageNumber || 48,
+          readingsCount: cook.temperatureReadings.length,
+          v: '1.0',
+        });
+
+        const url = await QRCode.toDataURL(payload, {
+          errorCorrectionLevel: 'H',
+          margin: 1,
+          width: 180,
+          color: {
+            dark: '#3b1202',
+            light: '#fffbeb',
+          },
+        });
+
+        const img = new Image();
+        img.src = url;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 180;
+          canvas.height = 180;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          ctx.drawImage(img, 0, 0, 180, 180);
+
+          // Center SmokeStack emblem badge
+          const cx = 90;
+          const cy = 90;
+          ctx.fillStyle = '#2d0c02';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 20, 0, 2 * Math.PI);
+          ctx.fill();
+
+          ctx.strokeStyle = '#d97706';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          ctx.fillStyle = '#f97316';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('💨', cx, cy);
+
+          setQrDataUrl(canvas.toDataURL('image/png'));
+        };
+      } catch (err) {
+        console.error('Error rendering SmokeStack QR code:', err);
+      }
+    };
+
+    generateSmokeStackQR();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'unset';
+    };
+  }, [cook, onClose]);
+
   if (!cook) return null;
 
   const handlePrint = () => {
@@ -26,16 +115,65 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
   const hourlyAnalysis = calculateCookPelletHourlyCost(cook);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl w-full max-w-4xl p-4 sm:p-8 shadow-2xl relative font-sans my-8">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-start justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+    >
+      {/* Fixed Viewport Quick Close Button */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="fixed top-4 right-4 z-50 px-3 py-2 bg-slate-900/90 text-amber-300 hover:text-white hover:bg-slate-800 rounded-full border border-amber-500/40 shadow-2xl transition-all cursor-pointer print:hidden flex items-center space-x-1"
+        title="Close Journal Sheet (Esc)"
+      >
+        <X className="w-5 h-5" />
+        <span className="text-xs font-bold pr-1">Close</span>
+      </button>
+
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-amber-50/95 text-slate-900 border-2 border-amber-900/30 rounded-2xl w-full max-w-4xl p-4 sm:p-8 shadow-2xl relative font-sans my-4 sm:my-8 cursor-default"
+      >
         
         {/* Top Actions bar (Non-printable) */}
         <div className="flex items-center justify-between pb-4 border-b border-amber-900/20 print:hidden">
           <div className="flex items-center space-x-2">
             <Flame className="w-5 h-5 text-amber-700" />
-            <span className="font-bold text-amber-950">Official Pitmaster Smoker Journal Sheet</span>
+            <span className="font-bold text-amber-950 text-sm sm:text-base">Official Pitmaster Smoker Journal Sheet</span>
           </div>
           <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+            {onEditCook && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onEditCook(cook);
+                }}
+                className="inline-flex items-center px-3 py-1.5 rounded-lg bg-orange-500 text-zinc-950 font-black text-xs hover:bg-orange-400 transition-colors shadow-sm cursor-pointer"
+              >
+                <FileText className="w-4 h-4 mr-1.5" />
+                <span>Edit Smoke Log</span>
+              </button>
+            )}
+            {onDeleteCook && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to delete cook log "${cook.title}"?`)) {
+                    onDeleteCook(cook.id);
+                    onClose();
+                  }
+                }}
+                className="inline-flex items-center px-3 py-1.5 rounded-lg bg-red-600/20 text-red-700 hover:bg-red-600/30 border border-red-600/40 font-bold text-xs transition-colors shadow-sm cursor-pointer"
+                title="Delete Cook Log Entry"
+              >
+                <Trash2 className="w-4 h-4 mr-1.5 text-red-600" />
+                <span>Delete</span>
+              </button>
+            )}
             {onOpenCertificate && (
               <button
                 type="button"
@@ -59,6 +197,14 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
               </button>
             )}
             <button
+              onClick={() => setShowPhysicalSheetModal(true)}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg bg-amber-800 text-amber-100 font-semibold text-xs hover:bg-amber-900 transition-colors cursor-pointer border border-amber-900/40"
+              title="Download physical data logging sheet with auto-filled date and smoker"
+            >
+              <Download className="w-4 h-4 mr-1.5 text-amber-300" />
+              Physical Log Sheet
+            </button>
+            <button
               onClick={handlePrint}
               className="inline-flex items-center px-3 py-1.5 rounded-lg bg-slate-900 text-amber-300 font-semibold text-xs hover:bg-slate-800 transition-colors cursor-pointer"
             >
@@ -68,6 +214,7 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-amber-200/50 transition-colors cursor-pointer"
+              title="Close Modal"
             >
               <X className="w-5 h-5" />
             </button>
@@ -115,7 +262,7 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
                 what is cook?
               </span>
               <div className="text-lg font-bold font-mono text-amber-950 border-b-2 border-dashed border-amber-900/40 pb-1 mt-1">
-                {cook.title} <span className="text-sm font-normal text-amber-800">({cook.proteinCut})</span>
+                {cook.title} {cook.proteinCut && cook.proteinCut !== cook.title && <span className="text-sm font-normal text-amber-800">({cook.proteinCut})</span>}
               </div>
             </div>
           </div>
@@ -178,6 +325,11 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* SAVED THERMAL CURVE ANALYTICS WITHIN COOK LOG */}
+              <div className="pt-2">
+                <ThermalCurveAnalyticsCard cook={cook} title="Thermal Curve Analytics & Saved Performance" isPublished={cook.isPublishedToTotalHours} />
               </div>
             </div>
 
@@ -346,11 +498,62 @@ export const CookLogSheetModal: React.FC<CookLogSheetModalProps> = ({
               </div>
             </div>
 
+            {/* FOOTER: SMOKE STACK-ONLY QR CODE */}
+            <div className="pt-3 border-t-2 border-amber-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center space-x-3">
+                {qrDataUrl ? (
+                  <div className="p-1 bg-amber-100 border border-amber-900/40 rounded shadow-sm shrink-0">
+                    <img src={qrDataUrl} alt="SmokeStack QR Code" className="w-18 h-18 object-contain" />
+                  </div>
+                ) : (
+                  <div className="w-18 h-18 bg-amber-100/60 border border-amber-900/30 flex items-center justify-center text-[10px] font-mono">
+                    Generating QR...
+                  </div>
+                )}
+                <div>
+                  <div className="flex items-center space-x-1.5 font-bold font-serif text-sm text-amber-950">
+                    <Flame className="w-4 h-4 text-orange-700" />
+                    <span>SmokeStack Official Log Code</span>
+                  </div>
+                  <p className="text-[11px] text-amber-900 max-w-sm mt-0.5 font-mono">
+                    Smoke stack-only QR code. Scan using mobile camera or upload log sheet image in Cook Journal to auto-import.
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right text-[10px] font-mono text-amber-900 hidden sm:block">
+                <div>SmokeStack Pitmaster Edition</div>
+                <div>Date: {cook.date}</div>
+              </div>
+            </div>
+
           </div>
 
         </div>
 
+        {/* Bottom Close Button row (Non-printable) */}
+        <div className="mt-6 pt-4 border-t border-amber-900/20 flex flex-col sm:flex-row items-center justify-between gap-3 print:hidden">
+          <div className="text-xs text-amber-900 font-mono">
+            Pitmaster Log Sheet ID: <span className="font-bold">{cook.id}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full sm:w-auto px-6 py-2.5 bg-amber-900 hover:bg-amber-950 text-amber-100 font-extrabold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center space-x-2 border border-amber-700"
+          >
+            <X className="w-4 h-4" />
+            <span>Close Journal Sheet</span>
+          </button>
+        </div>
+
       </div>
+
+      {showPhysicalSheetModal && (
+        <PhysicalLogSheetModal
+          cook={cook}
+          onClose={() => setShowPhysicalSheetModal(false)}
+        />
+      )}
     </div>
   );
 };

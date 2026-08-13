@@ -53,9 +53,9 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   const [customSmokerType, setCustomSmokerType] = useState('Custom Reverse Flow Offset');
   const [customFuelType, setCustomFuelType] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Wood Splits');
   const [metalGauge, setMetalGauge] = useState('1/4" Heavy Rolled Steel');
-  const [customChamberVolumeSqIn, setCustomChamberVolumeSqIn] = useState<number>(1200);
-  const [customHopperCapacityLbs, setCustomHopperCapacityLbs] = useState<number>(30);
-  const [customBaselineBurnRateLbsHr, setCustomBaselineBurnRateLbsHr] = useState<number>(1.25);
+  const [customChamberVolumeSqIn, setCustomChamberVolumeSqIn] = useState<number | string>(1200);
+  const [customHopperCapacityLbs, setCustomHopperCapacityLbs] = useState<number | string>(0);
+  const [customBaselineBurnRateLbsHr, setCustomBaselineBurnRateLbsHr] = useState<number | string>(1.25);
   const [draftType, setDraftType] = useState('Reverse Flow Airflow');
   const [customNotes, setCustomNotes] = useState('');
 
@@ -64,10 +64,11 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   const [mfgModel, setMfgModel] = useState('');
   const [mfgCategory, setMfgCategory] = useState('Pellet Smoker / Grill');
   const [mfgFuelType, setMfgFuelType] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Pellets');
-  const [mfgBaselineBurnRate, setMfgBaselineBurnRate] = useState<number>(1.20);
-  const [mfgHighHeatBurnRate, setMfgHighHeatBurnRate] = useState<number>(2.50);
-  const [mfgHopperCapacity, setMfgHopperCapacity] = useState<number>(22);
-  const [mfgCookingArea, setMfgCookingArea] = useState<number>(850);
+  const [mfgBaselineBurnRate, setMfgBaselineBurnRate] = useState<number | string>(1.20);
+  const [mfgHighHeatBurnRate, setMfgHighHeatBurnRate] = useState<number | string>(2.50);
+  const [mfgHopperCapacity, setMfgHopperCapacity] = useState<number | string>(22);
+  const [mfgBowlCapacity, setMfgBowlCapacity] = useState<number | string>(0);
+  const [mfgCookingArea, setMfgCookingArea] = useState<number | string>(850);
   const [mfgInsulation, setMfgInsulation] = useState('Double-Wall Insulated Steel');
   const [mfgThermalRating, setMfgThermalRating] = useState<'Extreme' | 'High' | 'Standard' | 'Moderate'>('High');
   const [mfgController, setMfgController] = useState('Digital PID Wi-Fi Screen');
@@ -203,6 +204,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
       factoryBaselineBurnRateLbsHr: Number(mfgBaselineBurnRate) || 1.20,
       factoryHighHeatBurnRateLbsHr: Number(mfgHighHeatBurnRate) || 2.50,
       hopperCapacityLbs: Number(mfgHopperCapacity) || 20,
+      bowlCapacityLbs: Number(mfgBowlCapacity) || 0,
       cookingAreaSqIn: Number(mfgCookingArea) || 800,
       insulationType: mfgInsulation,
       thermalEfficiencyRating: mfgThermalRating,
@@ -212,6 +214,17 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
       pitmasterAlias,
       isVerifiedManufacturerData: true,
     };
+
+    // Auto convert manufacturer capacity to account metric if set as active
+    if (setActiveAsCurrent) {
+      const effectiveCap = (Number(mfgBowlCapacity) || 0) > 0 ? (Number(mfgBowlCapacity) || 0) : (Number(mfgHopperCapacity) || 20);
+      try {
+        const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+        const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+        acc.fuelOnHand = `${effectiveCap} lbs`;
+        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+      } catch (e) {}
+    }
 
     // Save locally
     const existing = loadSavedManufacturerSmokers();
@@ -509,7 +522,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                       min="100"
                       max="10000"
                       value={customChamberVolumeSqIn}
-                      onChange={(e) => setCustomChamberVolumeSqIn(Number(e.target.value))}
+                      onChange={(e) => setCustomChamberVolumeSqIn(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -522,7 +535,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                       min="1"
                       max="200"
                       value={customHopperCapacityLbs}
-                      onChange={(e) => setCustomHopperCapacityLbs(Number(e.target.value))}
+                      onChange={(e) => setCustomHopperCapacityLbs(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -535,11 +548,11 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                     </label>
                     <input
                       type="number"
-                      step="0.05"
-                      min="0.1"
+                      step="0.01"
+                      min="0.01"
                       max="10.0"
                       value={customBaselineBurnRateLbsHr}
-                      onChange={(e) => setCustomBaselineBurnRateLbsHr(Number(e.target.value))}
+                      onChange={(e) => setCustomBaselineBurnRateLbsHr(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -717,7 +730,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                       type="number"
                       step="0.05"
                       value={mfgBaselineBurnRate}
-                      onChange={(e) => setMfgBaselineBurnRate(Number(e.target.value))}
+                      onChange={(e) => setMfgBaselineBurnRate(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -729,7 +742,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                       type="number"
                       step="0.1"
                       value={mfgHighHeatBurnRate}
-                      onChange={(e) => setMfgHighHeatBurnRate(Number(e.target.value))}
+                      onChange={(e) => setMfgHighHeatBurnRate(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -740,8 +753,20 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                     <input
                       type="number"
                       value={mfgHopperCapacity}
-                      onChange={(e) => setMfgHopperCapacity(Number(e.target.value))}
+                      onChange={(e) => setMfgHopperCapacity(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                      Firebox / Charcoal Bowl Capacity (lbs)
+                    </label>
+                    <input
+                      type="number"
+                      value={mfgBowlCapacity}
+                      onChange={(e) => setMfgBowlCapacity(e.target.value)}
+                      className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-amber-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      placeholder="0"
                     />
                   </div>
                   <div>
@@ -751,7 +776,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                     <input
                       type="number"
                       value={mfgCookingArea}
-                      onChange={(e) => setMfgCookingArea(Number(e.target.value))}
+                      onChange={(e) => setMfgCookingArea(e.target.value)}
                       className="w-full bg-[#181818] border border-[#333333] rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:ring-1 focus:ring-orange-500"
                     />
                   </div>
@@ -936,7 +961,16 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {/* Manufacturer Specs List */}
+                  {filteredMfgList.length === 0 && filteredCustomList.length === 0 ? (
+                    <div className="p-8 text-center bg-[#202020] rounded-xl border border-[#2a2a2a] space-y-2">
+                      <div className="text-zinc-300 font-bold text-sm">Server Smoker Database Pool Cleared</div>
+                      <p className="text-xs text-zinc-400 max-w-md mx-auto">
+                        The community server pool is cleared for initial deployment. When pitmasters opt-in and contribute custom smoker specs or manufacturer data to the pool, they will appear here for everyone!
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Manufacturer Specs List */}
                   {(communityFilter === 'all' || communityFilter === 'manufacturer') && (
                     <div className="space-y-2">
                       {communityFilter === 'all' && (
@@ -1054,12 +1088,14 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                       )}
                     </div>
                   )}
-                </div>
+                </>
               )}
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
+  </div>
+</div>
   );
 };

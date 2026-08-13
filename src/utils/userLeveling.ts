@@ -125,30 +125,33 @@ export function calculateUserAccount(
   profile?: SmokerProfile,
   charGPTMemory?: CharGPTMemory
 ): UserPitmasterAccount {
+  const safeCooks = Array.isArray(cookLogs) ? cookLogs.filter((c) => c && c.isPublishedToTotalHours === true) : [];
+  const safeFuel = Array.isArray(fuelLogs) ? fuelLogs : [];
+
   // Compute XP breakdown
-  const cooksCount = cookLogs.length;
+  const cooksCount = safeCooks.length;
   const cookXp = cooksCount * 50;
 
-  const ratedCooks = cookLogs.filter((c) => c.ratings && c.ratings.overall > 0).length;
+  const ratedCooks = safeCooks.filter((c) => c && c.ratings && c.ratings.overall > 0).length;
   const ratingXp = ratedCooks * 25;
 
-  const nextTimeNotesCount = cookLogs.filter((c) => c.nextTimeNotes && c.nextTimeNotes.trim().length > 0).length;
+  const nextTimeNotesCount = safeCooks.filter((c) => c && c.nextTimeNotes && typeof c.nextTimeNotes === 'string' && c.nextTimeNotes.trim().length > 0).length;
   const notesXp = nextTimeNotesCount * 25;
 
   // Custom fuel blends count (+40 XP each) & normal fuel logs (+20 XP each)
-  const blendCount = fuelLogs.filter((f) => f.isBlend).length;
-  const normalFuelCount = fuelLogs.length - blendCount;
+  const blendCount = safeFuel.filter((f) => f && f.isBlend).length;
+  const normalFuelCount = safeFuel.length - blendCount;
   const fuelXp = blendCount * 40 + normalFuelCount * 20;
 
   // Serviced maintenance tasks
-  const servicedTasks = profile
-    ? profile.maintenanceTasks.filter((t) => t.lastPerformedHours > 0).length
+  const servicedTasks = profile && Array.isArray(profile.maintenanceTasks)
+    ? profile.maintenanceTasks.filter((t) => t && typeof t.lastPerformedHours === 'number' && t.lastPerformedHours > 0).length
     : 0;
   const maintenanceXp = servicedTasks * 35;
 
   // CharGPT rules taught by user
-  const rulesTaught = charGPTMemory
-    ? charGPTMemory.learnedRules.filter((r) => r.source === 'user_taught').length
+  const rulesTaught = charGPTMemory && Array.isArray(charGPTMemory.learnedRules)
+    ? charGPTMemory.learnedRules.filter((r) => r && r.source === 'user_taught').length
     : 0;
   const aiRulesXp = rulesTaught * 15;
 
@@ -158,7 +161,7 @@ export function calculateUserAccount(
 
   // Check achievements
   const hasBlend = blendCount > 0;
-  const has5Star = cookLogs.some((c) => c.ratings && c.ratings.overall >= 5);
+  const has5Star = safeCooks.some((c) => c && c.ratings && c.ratings.overall >= 5);
   const achievements: UserAchievement[] = ALL_ACHIEVEMENTS.map((ach) => {
     let unlocked = false;
     if (ach.id === 'blend_alchemist') unlocked = hasBlend;
@@ -167,7 +170,7 @@ export function calculateUserAccount(
     else if (ach.id === 'maintenance_hawk') unlocked = servicedTasks >= 1;
     else if (ach.id === 'ai_instructor') unlocked = rulesTaught >= 1;
     else if (ach.id === 'five_star_pit') unlocked = has5Star;
-    else if (ach.id === 'fuel_master') unlocked = fuelLogs.length >= 3;
+    else if (ach.id === 'fuel_master') unlocked = safeFuel.length >= 3;
 
     return {
       ...ach,
@@ -187,11 +190,11 @@ export function calculateUserAccount(
     achievements,
     createdAt: new Date().toISOString(),
     linkedSmokerId: profile?.id,
-    linkedSmokerName: profile?.name || 'Pit Boss Copperhead 5-Series',
-    linkedSmokerModel: profile?.model || 'Vertical Pellet Smoker',
-    linkedSmokerType: profile?.smokerType || 'Vertical Pellet Smoker',
+    linkedSmokerName: profile?.name || 'Smoker Rig',
+    linkedSmokerModel: profile?.model || 'Custom Smoker',
+    linkedSmokerType: profile?.smokerType || 'Pellet Smoker',
     linkedSmokerFuelType: profile?.fuelType || 'Pellets',
-    linkedSmokerHopperCapacityLbs: profile?.pelletHopperCapacityLbs || 20,
+    linkedSmokerHopperCapacityLbs: (profile?.name && profile.name.trim() !== '' && profile.name !== 'None Selected') ? (profile.pelletHopperCapacityLbs || 0) : 0,
     linkedSmokerTotalHours: profile?.currentHours || 0,
   };
 }

@@ -1,5 +1,6 @@
 import { CookLog, SmokerProfile, FuelLog } from '../types';
 import { getEffectiveSmokerSpecs, calculateGlobalBurnEfficiencyRate } from './smokerCalculations';
+import { ALL_SMOKERS_DATABASE, findSmokerSpecInDatabase, ExtendedSmokerSpec } from '../data/smokerDatabases';
 
 export interface SmokerManufacturerSpec {
   brandModel: string;
@@ -13,118 +14,17 @@ export interface SmokerManufacturerSpec {
   manufacturerNotes: string;
 }
 
-export const MANUFACTURER_DATABASE: SmokerManufacturerSpec[] = [
-  {
-    brandModel: 'Pit Boss Copperhead 5-Series / Vertical Series',
-    category: 'Vertical Pellet Smoker',
-    smokerTypeKey: 'Vertical Pellet Smoker',
-    factoryBaselineBurnRateLbsHr: 1.00,
-    factoryHighHeatBurnRateLbsHr: 2.20,
-    standardCapacityLbs: 60,
-    insulationType: 'Double-Wall Insulated Cabinet',
-    thermalEfficiencyRating: 'High',
-    manufacturerNotes: 'Vertical cabinet retains heat efficiently due to top gravity drafting and double-wall door seals.',
-  },
-  {
-    brandModel: 'Traeger Pro / Ironwood / Timberline Series',
-    category: 'Horizontal Pellet Grill / Smoker',
-    smokerTypeKey: 'Horizontal Pellet Grill / Smoker',
-    factoryBaselineBurnRateLbsHr: 1.50,
-    factoryHighHeatBurnRateLbsHr: 3.00,
-    standardCapacityLbs: 20,
-    insulationType: 'Single-Wall Barrel / Downdraft Exhaust',
-    thermalEfficiencyRating: 'Standard',
-    manufacturerNotes: 'Horizontal barrel layout exposes more surface area to ambient wind; downdraft circulation balances heat.',
-  },
-  {
-    brandModel: 'Camp Chef Woodwind / SmokePro / XXL Vertical',
-    category: 'Pellet Smoker / Grill',
-    smokerTypeKey: 'Pellet Smoker / Grill',
-    factoryBaselineBurnRateLbsHr: 1.25,
-    factoryHighHeatBurnRateLbsHr: 2.50,
-    standardCapacityLbs: 22,
-    insulationType: 'Insulated Lid & PID Controller',
-    thermalEfficiencyRating: 'High',
-    manufacturerNotes: 'PID temperature algorithms maintain steady auger feed rates within ±5°F of set point.',
-  },
-  {
-    brandModel: 'Masterbuilt Gravity Series (560 / 800 / 1050)',
-    category: 'Gravity Series Digital Charcoal Smoker',
-    smokerTypeKey: 'Gravity Series Digital Charcoal Smoker',
-    factoryBaselineBurnRateLbsHr: 1.35,
-    factoryHighHeatBurnRateLbsHr: 3.20,
-    standardCapacityLbs: 16,
-    insulationType: 'Chamber Heat Shield & Fan Forced Draft',
-    thermalEfficiencyRating: 'Standard',
-    manufacturerNotes: 'Digital fan maintains high precision charcoal combustion; higher energy output per pound of lump charcoal.',
-  },
-  {
-    brandModel: 'Oklahoma Joe / Yoder / Offset Stickburner',
-    category: 'Offset Wood & Charcoal Smoker',
-    smokerTypeKey: 'Offset Wood & Charcoal Smoker',
-    factoryBaselineBurnRateLbsHr: 2.25,
-    factoryHighHeatBurnRateLbsHr: 4.50,
-    standardCapacityLbs: 25,
-    insulationType: 'Heavy Gauge Rolled Steel (1/4")',
-    thermalEfficiencyRating: 'Moderate',
-    manufacturerNotes: 'Open airflow draft requires steady log additions; high radiant thermal mass once steel chamber heat-saturates.',
-  },
-  {
-    brandModel: 'Kamado Joe / Big Green Egg / Primo Ceramic',
-    category: 'Kamado Ceramic Charcoal Cooker',
-    smokerTypeKey: 'Kamado Ceramic Charcoal Cooker',
-    factoryBaselineBurnRateLbsHr: 0.65,
-    factoryHighHeatBurnRateLbsHr: 1.80,
-    standardCapacityLbs: 10,
-    insulationType: 'Thick Ceramic Thermal Mass Core',
-    thermalEfficiencyRating: 'Extreme',
-    manufacturerNotes: 'Industry-leading thermal retention; holds 225°F for 18+ hours on a single 10lb load of lump charcoal.',
-  },
-  {
-    brandModel: 'Pit Barrel Cooker / Drum Smoker',
-    category: 'Ugly Drum Smoker (UDS)',
-    smokerTypeKey: 'Ugly Drum Smoker (UDS)',
-    factoryBaselineBurnRateLbsHr: 0.85,
-    factoryHighHeatBurnRateLbsHr: 2.00,
-    standardCapacityLbs: 8,
-    insulationType: 'Convection Airflow Steel Cylinder',
-    thermalEfficiencyRating: 'High',
-    manufacturerNotes: 'Vertical hanging method and sealed intake creates natural convection currents with minimal charcoal loss.',
-  },
-  {
-    brandModel: 'Weber Smokey Mountain (WSM 18" / 22")',
-    category: 'Water Smoker / Charcoal Bullet',
-    smokerTypeKey: 'Water Smoker / Charcoal Bullet',
-    factoryBaselineBurnRateLbsHr: 1.10,
-    factoryHighHeatBurnRateLbsHr: 2.40,
-    standardCapacityLbs: 12,
-    insulationType: 'Porcelain-Enameled Steel with Water Pan Heat Sink',
-    thermalEfficiencyRating: 'Standard',
-    manufacturerNotes: 'Water bowl acts as a thermal buffer to regulate pit temperatures at 225°F.',
-  },
-  {
-    brandModel: 'Masterbuilt 30" / Bradley Electric Smoker',
-    category: 'Electric Smoker',
-    smokerTypeKey: 'Electric Smoker',
-    factoryBaselineBurnRateLbsHr: 0.35,
-    factoryHighHeatBurnRateLbsHr: 0.80,
-    standardCapacityLbs: 5,
-    insulationType: 'Fully Insulated Refrigerator Style Cabinet',
-    thermalEfficiencyRating: 'Extreme',
-    manufacturerNotes: 'Electric element supplies primary thermal heat; wood chips/bisquettes used solely for smoke generation.',
-  },
-  {
-    brandModel: 'Camp Chef Smoke Vault / Gas Propane Smoker',
-    category: 'Gas / Propane Smoker',
-    smokerTypeKey: 'Gas / Propane Smoker',
-    factoryBaselineBurnRateLbsHr: 0.45,
-    factoryHighHeatBurnRateLbsHr: 1.10,
-    standardCapacityLbs: 20,
-    insulationType: 'Ventilated Metal Cabinet',
-    thermalEfficiencyRating: 'High',
-    manufacturerNotes: 'LP gas burner supplies baseline BTUs while wood chunks smolder in a dedicated cast-iron tray.',
-  },
-];
+export const MANUFACTURER_DATABASE: SmokerManufacturerSpec[] = ALL_SMOKERS_DATABASE.map((s) => ({
+  brandModel: s.brandModel,
+  category: s.category,
+  smokerTypeKey: s.smokerTypeKey,
+  factoryBaselineBurnRateLbsHr: s.factoryBaselineBurnRateLbsHr,
+  factoryHighHeatBurnRateLbsHr: s.factoryHighHeatBurnRateLbsHr,
+  standardCapacityLbs: s.standardCapacityLbs,
+  insulationType: s.insulationType,
+  thermalEfficiencyRating: s.thermalEfficiencyRating,
+  manufacturerNotes: s.manufacturerNotes,
+}));
 
 /**
  * Intelligent lookup function matching smoker name / model / type input string to manufacturer specification specs.
@@ -134,51 +34,18 @@ export function getManufacturerSpecs(
   smokerModel: string,
   smokerType: string
 ): SmokerManufacturerSpec {
-  const query = `${smokerName} ${smokerModel} ${smokerType}`.toLowerCase();
-
-  // 1. Direct model keyword matching
-  if (query.includes('copperhead') || query.includes('pit boss') || query.includes('vertical pellet')) {
-    return MANUFACTURER_DATABASE[0];
-  }
-  if (query.includes('traeger') || query.includes('ironwood') || query.includes('timberline') || query.includes('horizontal pellet')) {
-    return MANUFACTURER_DATABASE[1];
-  }
-  if (query.includes('camp chef') || query.includes('woodwind')) {
-    return MANUFACTURER_DATABASE[2];
-  }
-  if (query.includes('gravity') || query.includes('masterbuilt 560') || query.includes('masterbuilt 1050')) {
-    return MANUFACTURER_DATABASE[3];
-  }
-  if (query.includes('offset') || query.includes('oklahoma') || query.includes('yoder') || query.includes('stickburner')) {
-    return MANUFACTURER_DATABASE[4];
-  }
-  if (query.includes('kamado') || query.includes('green egg') || query.includes('primo') || query.includes('ceramic')) {
-    return MANUFACTURER_DATABASE[5];
-  }
-  if (query.includes('drum') || query.includes('pit barrel') || query.includes('uds')) {
-    return MANUFACTURER_DATABASE[6];
-  }
-  if (query.includes('weber') || query.includes('wsm') || query.includes('smokey mountain') || query.includes('water smoker')) {
-    return MANUFACTURER_DATABASE[7];
-  }
-  if (query.includes('electric') || query.includes('bradley')) {
-    return MANUFACTURER_DATABASE[8];
-  }
-  if (query.includes('gas') || query.includes('propane') || query.includes('smoke vault')) {
-    return MANUFACTURER_DATABASE[9];
-  }
-
-  // 2. Fallback matching by smokerType string
-  const matchedType = MANUFACTURER_DATABASE.find(
-    (spec) => spec.smokerTypeKey.toLowerCase() === smokerType.toLowerCase()
-  );
-
-  if (matchedType) {
-    return matchedType;
-  }
-
-  // 3. Generic default fallback (Standard Vertical Pellet Spec)
-  return MANUFACTURER_DATABASE[0];
+  const matched = findSmokerSpecInDatabase(smokerName, smokerModel, smokerType);
+  return {
+    brandModel: matched.brandModel,
+    category: matched.category,
+    smokerTypeKey: matched.smokerTypeKey,
+    factoryBaselineBurnRateLbsHr: matched.factoryBaselineBurnRateLbsHr,
+    factoryHighHeatBurnRateLbsHr: matched.factoryHighHeatBurnRateLbsHr,
+    standardCapacityLbs: matched.standardCapacityLbs,
+    insulationType: matched.insulationType,
+    thermalEfficiencyRating: matched.thermalEfficiencyRating,
+    manufacturerNotes: matched.manufacturerNotes,
+  };
 }
 
 export interface BurnEfficiencyResult {
@@ -205,7 +72,7 @@ export function calculateBurnEfficiencySync(
   const mfrSpec = getManufacturerSpecs(profile.name, profile.model, profile.smokerType || '');
   const effectiveSpecs = getEffectiveSmokerSpecs(profile);
 
-  // Calculate actual user burn rate from logged cooks
+  // Calculate actual user burn rate from logged cooks (published or local draft)
   const validCooks = cookLogs.filter((c) => c.hoursLogged > 0 && c.fuelLbsConsumed > 0);
   const totalHours = validCooks.reduce((sum, c) => sum + c.hoursLogged, 0);
   const totalFuelLbs = validCooks.reduce((sum, c) => sum + c.fuelLbsConsumed, 0);
@@ -322,11 +189,13 @@ export function calculateRefillPelletUsage(
   profile: SmokerProfile,
   cookLogs: CookLog[],
   fuelLogs: FuelLog[] = [],
-  overrideHoursSinceRefill?: number
+  overrideHoursSinceRefill?: number,
+  warningThresholdPercent: number = 20
 ): RefillPelletUsageResult {
+  const isUnassigned = !profile || !profile.name || profile.name.trim() === '' || profile.name === 'None Selected' || profile.name.includes('Unassigned Smoker');
   const burnSync = calculateBurnEfficiencySync(profile, cookLogs);
-  const mfrBurnRate = burnSync.weatherAdjustedBaselineBurnRateLbsHr || burnSync.factoryBaselineBurnRateLbsHr || 1.0;
-  const hopperCapacityLbs = burnSync.mfrSpec.standardCapacityLbs || profile.pelletHopperCapacityLbs || 60;
+  const mfrBurnRate = isUnassigned ? 0 : (burnSync.weatherAdjustedBaselineBurnRateLbsHr || burnSync.factoryBaselineBurnRateLbsHr || 1.0);
+  const hopperCapacityLbs = isUnassigned ? 0 : (burnSync.mfrSpec?.standardCapacityLbs || profile.pelletHopperCapacityLbs || 0);
 
   // Fuel Inventory Calculations
   const rawRestockedLbs = fuelLogs.reduce((sum, f) => sum + (f.quantityLbs || 0), 0);
@@ -367,10 +236,10 @@ export function calculateRefillPelletUsage(
   }
 
   const pelletUsageLbs = Number((hoursSinceRefill * mfrBurnRate).toFixed(2));
-  const remainingPelletsLbs = Math.max(0, Number((hopperCapacityLbs - pelletUsageLbs).toFixed(2)));
-  const hopperPercentFull = Math.max(0, Math.min(100, Math.round((remainingPelletsLbs / hopperCapacityLbs) * 100)));
+  const remainingPelletsLbs = hopperCapacityLbs > 0 ? Math.max(0, Number((hopperCapacityLbs - pelletUsageLbs).toFixed(2))) : 0;
+  const hopperPercentFull = hopperCapacityLbs > 0 ? Math.max(0, Math.min(100, Math.round((remainingPelletsLbs / hopperCapacityLbs) * 100))) : 0;
   const hoursUntilEmpty = mfrBurnRate > 0 ? Number((remainingPelletsLbs / mfrBurnRate).toFixed(1)) : 0;
-  const isLowPelletWarning = hopperPercentFull <= 20;
+  const isLowPelletWarning = hopperCapacityLbs > 0 && hopperPercentFull <= warningThresholdPercent;
 
   return {
     hoursSinceRefill,

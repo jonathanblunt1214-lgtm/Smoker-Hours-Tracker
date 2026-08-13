@@ -207,3 +207,20 @@
   padding-top: 12px !important;
   padding-bottom: 12px !important;
 }
+
+/* ==========================================================================
+   Amazon Fire Tablet 4th Gen & Newer Responsive Silk Browser Compatibility
+   ========================================================================== */
+@media screen and (min-width: 600px) and (max-width: 1280px) {
+  html, body {
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+  input, select, textarea, button {
+    font-size: 14px;
+    min-height: 42px;
+  }
+  .modal-container, .fire-tablet-scroll {
+    -webkit-overflow-scrolling: touch;
+  }
+}

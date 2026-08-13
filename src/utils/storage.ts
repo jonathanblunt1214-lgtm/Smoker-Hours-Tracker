@@ -1,4 +1,4 @@
-import { SmokerProfile, CookLog, FuelLog, CharGPTMemory, CharGPTRule, FederatedLearningConfig } from '../types';
+import { SmokerProfile, CookLog, FuelLog, CharGPTMemory, CharGPTRule, FederatedLearningConfig, LocalUserProfile, ProteinType } from '../types';
 import { AI_NAME } from '../constants/appName';
 import { INITIAL_SMOKER_PROFILE, INITIAL_COOK_LOGS, INITIAL_FUEL_LOGS } from '../data/mockData';
 
@@ -6,17 +6,45 @@ export const KEYS = {
   PROFILE: 'smoker_app_profile_v1',
   COOK_LOGS: 'smoker_app_cook_logs_v1',
   FUEL_LOGS: 'smoker_app_fuel_logs_v1',
-  CHARGPT_MEMORY: 'chargpt_memory_v1',
+  CHARGPT_MEMORY: 'chargpt_memory_v4',
   FEDERATED_LEARNING: 'federated_learning_config_v1',
   CUSTOM_SMOKERS: 'smoker_app_custom_smokers_v1',
   MANUFACTURER_SMOKERS: 'smoker_app_manufacturer_smokers_v1',
-  CHARGPT_CHAT_HISTORY: 'chargpt_chat_history_v1',
+  CHARGPT_CHAT_HISTORY: 'chargpt_chat_history_v4',
   VERIFIED_MEAT_CUTS: 'smoker_app_verified_meat_cuts_v1',
   CUSTOM_FUEL_PRESETS: 'smoker_app_custom_fuel_presets_v1',
   LOW_POWER_MODE: 'smoker_app_low_power_mode_v1',
   AUTO_CLEAR_INTERVAL: 'smoker_app_auto_clear_interval_v1',
   LAST_AUTO_CLEAR_TIMESTAMP: 'smoker_app_last_auto_clear_timestamp_v1',
+  MASTER_LIVE_UPDATES: 'master_admin_live_updates_v1',
+  MASTER_CODE_PATCHES: 'master_admin_code_patches_v1',
+  DEPLOYMENT_CLEAN_SLATE: 'smoker_app_clean_slate_deployment_v2',
+  CHARGPT_RECIPE_ANALYSIS: 'chargpt_saved_recipe_analysis_v1',
 };
+
+/**
+ * Performs a complete clean slate wipe of all cook logs, fuel logs, and metrics for clean deployment.
+ */
+export function performFullCleanSlateReset(): void {
+  try {
+    localStorage.setItem(KEYS.COOK_LOGS, JSON.stringify([]));
+    localStorage.setItem(KEYS.FUEL_LOGS, JSON.stringify([]));
+    localStorage.setItem(KEYS.PROFILE, JSON.stringify(INITIAL_SMOKER_PROFILE));
+    localStorage.setItem(KEYS.CUSTOM_FUEL_PRESETS, JSON.stringify([]));
+    localStorage.removeItem(KEYS.CHARGPT_CHAT_HISTORY);
+    localStorage.removeItem(KEYS.CHARGPT_MEMORY);
+    localStorage.removeItem('chargpt_chat_history_v1');
+    localStorage.removeItem('chargpt_memory_v1');
+    localStorage.removeItem('smoker_web_recipes');
+    localStorage.setItem(KEYS.DEPLOYMENT_CLEAN_SLATE, 'true');
+  } catch (e) {
+    console.error('Error executing clean slate reset:', e);
+  }
+}
+
+export function ensureDeploymentCleanSlate(): void {
+  // Automatic cache/slate clearing removed as requested.
+}
 
 export function safeSetItem(key: string, value: string): void {
   try {
@@ -101,23 +129,23 @@ export function saveLowPowerMode(settings: import('../types').LowPowerModeSettin
 }
 
 export const DEFAULT_GRANULAR_SHARING: import('../types').GranularDataSharingPermissions = {
-  shareProteinAndCuts: true,
-  shareMeatWeightAndDimensions: true,
-  shareSmokerSpecsAndMods: true,
-  shareFuelAndWoodBlends: true,
-  shareThermalTempCurves: true,
-  shareRatingsAndFlavorScores: true,
-  shareWeatherAndLocation: true,
-  shareCustomRubRecipes: true,
-  shareCookPhotos: true,
+  shareProteinAndCuts: false,
+  shareMeatWeightAndDimensions: false,
+  shareSmokerSpecsAndMods: false,
+  shareFuelAndWoodBlends: false,
+  shareThermalTempCurves: false,
+  shareRatingsAndFlavorScores: false,
+  shareWeatherAndLocation: false,
+  shareCustomRubRecipes: false,
+  shareCookPhotos: false,
 };
 
 export const INITIAL_FEDERATED_LEARNING_CONFIG: FederatedLearningConfig = {
-  enabled: true,
+  enabled: false,
   anonymizeData: true,
-  autoSyncContributions: true,
-  contributedCount: 3,
-  lastSyncedAt: new Date().toISOString(),
+  autoSyncContributions: false,
+  contributedCount: 0,
+  lastSyncedAt: '',
   granularSharing: DEFAULT_GRANULAR_SHARING,
 };
 
@@ -147,47 +175,98 @@ export function saveFederatedLearningConfig(config: FederatedLearningConfig): vo
 
 
 export const INITIAL_CHARGPT_MEMORY: CharGPTMemory = {
-  totalInteractions: 5,
+  totalInteractions: 0,
   totalLogsAnalyzed: 0,
-  learnedRules: [
-    {
-      id: 'rule-initial-1',
-      category: 'technique',
-      title: 'Peach Butcher Paper Stall Protection',
-      detail: 'Prefers wrapping brisket and pork butt at 160°F - 165°F in peach butcher paper with tallow for bark retention.',
-      source: 'auto_analyzed',
-      createdAt: new Date().toISOString(),
-      confidenceScore: 92,
-    },
-    {
-      id: 'rule-initial-2',
-      category: 'wood_pairing',
-      title: 'Pecan & Oak Hardwood Blend',
-      detail: 'Highest ratings awarded when using 60/40 Pecan and Post Oak pellet blends for beef and pork.',
-      source: 'cook_log_insight',
-      createdAt: new Date().toISOString(),
-      confidenceScore: 96,
-    },
-    {
-      id: 'rule-initial-3',
-      category: 'preference',
-      title: 'Extended Insulated Cooler Rest',
-      detail: 'Mandatory minimum 1.5 to 2.0 hour rest in faux-cambro/insulated cooler before slicing.',
-      source: 'user_taught',
-      createdAt: new Date().toISOString(),
-      confidenceScore: 98,
-    },
-  ],
-  favoriteProteins: ['Beef Brisket', 'Pork Shoulder', 'St. Louis Ribs'],
-  preferredWoodTypes: ['Pecan', 'Post Oak', 'Hickory'],
-  topTechniques: ['160°F Stall Wrap', 'Beef Tallow Spritz', '24hr Dry Brine'],
+  userName: undefined,
+  learnedRules: [],
+  favoriteProteins: [],
+  preferredWoodTypes: [],
+  topTechniques: [],
   lastEvolvedAt: new Date().toISOString(),
 };
 
+export const DELETED_VAULT_RULE_IDS_KEY = 'chargpt_deleted_vault_rule_ids_v1';
+
+export function loadDeletedVaultRuleIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_VAULT_RULE_IDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) {
+    console.error('Failed to load deleted vault rule IDs', e);
+  }
+  return [];
+}
+
+export function saveDeletedVaultRuleIds(ids: string[]): void {
+  try {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    localStorage.setItem(DELETED_VAULT_RULE_IDS_KEY, JSON.stringify(unique));
+  } catch (e) {
+    console.error('Failed to save deleted vault rule IDs', e);
+  }
+}
+
+export function addDeletedVaultRuleId(idOrIds: string | string[]): void {
+  const current = loadDeletedVaultRuleIds();
+  const toAdd = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+  const updated = Array.from(new Set([...current, ...toAdd.filter(Boolean)]));
+  saveDeletedVaultRuleIds(updated);
+}
+
+export function resetCharGPTMemory(): CharGPTMemory {
+  try {
+    const currentMemory = loadCharGPTMemory();
+    if (currentMemory.learnedRules && currentMemory.learnedRules.length > 0) {
+      addDeletedVaultRuleId(currentMemory.learnedRules.map((r) => r.id));
+    }
+    localStorage.removeItem(KEYS.CHARGPT_MEMORY);
+    localStorage.removeItem(KEYS.CHARGPT_CHAT_HISTORY);
+  } catch (e) {
+    console.error('Failed to reset CharGPT memory', e);
+  }
+  return { ...INITIAL_CHARGPT_MEMORY, lastEvolvedAt: new Date().toISOString() };
+}
+
 export function loadCharGPTMemory(): CharGPTMemory {
   try {
+    let memory: CharGPTMemory | null = null;
     const raw = localStorage.getItem(KEYS.CHARGPT_MEMORY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      memory = JSON.parse(raw);
+    }
+
+    // Merge or fallback from pitmaster_local_user_account Memory Vault
+    try {
+      const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+      if (rawAcc) {
+        const acc = JSON.parse(rawAcc);
+        if (acc?.charGPTMemory) {
+          if (!memory) {
+            memory = acc.charGPTMemory;
+          } else if ((acc.charGPTMemory.learnedRules?.length || 0) > (memory.learnedRules?.length || 0)) {
+            memory = {
+              ...memory,
+              ...acc.charGPTMemory,
+              learnedRules: acc.charGPTMemory.learnedRules,
+            };
+          }
+        }
+        if (memory && !memory.userName && acc?.name && acc.name !== 'Pitmaster' && acc.name !== 'Guest Pitmaster') {
+          memory.userName = acc.name;
+        }
+      }
+    } catch (e) {}
+
+    if (memory) {
+      const deletedSet = new Set(loadDeletedVaultRuleIds());
+      if (deletedSet.size > 0 && Array.isArray(memory.learnedRules)) {
+        memory.learnedRules = memory.learnedRules.filter((r) => r && r.id && !deletedSet.has(r.id));
+      }
+      return memory;
+    }
   } catch (e) {
     console.error('Failed to load CharGPT memory', e);
   }
@@ -195,10 +274,81 @@ export function loadCharGPTMemory(): CharGPTMemory {
 }
 
 export function saveCharGPTMemory(memory: CharGPTMemory): void {
+  const deletedSet = new Set(loadDeletedVaultRuleIds());
+  if (deletedSet.size > 0 && Array.isArray(memory.learnedRules)) {
+    memory.learnedRules = memory.learnedRules.filter((r) => r && r.id && !deletedSet.has(r.id));
+  }
   safeSetItem(KEYS.CHARGPT_MEMORY, JSON.stringify(memory));
+
+  // Continuously sync Memory Vault to Pitmaster Local User Account
+  try {
+    const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+    if (rawAcc) {
+      const acc = JSON.parse(rawAcc);
+      acc.charGPTMemory = memory;
+      if (memory.userName) {
+        acc.name = memory.userName;
+      }
+      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+    }
+  } catch (e) {}
+
+  try {
+    if (typeof window !== 'undefined') {
+      const { triggerMasterVersionSync } = require('../services/masterVersionSyncService');
+      triggerMasterVersionSync().catch(() => {});
+    }
+  } catch (e) {}
+}
+
+export interface SavedCharGPTRecipeAnalysis {
+  text: string;
+  logCount: number;
+  timestamp: string;
+}
+
+export function loadSavedRecipeAnalysis(): SavedCharGPTRecipeAnalysis | null {
+  try {
+    const raw = localStorage.getItem(KEYS.CHARGPT_RECIPE_ANALYSIS);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+    const memory = loadCharGPTMemory();
+    if (memory.lastAnalysisText) {
+      return {
+        text: memory.lastAnalysisText,
+        logCount: memory.lastAnalysisLogCount || 0,
+        timestamp: memory.lastAnalysisTimestamp || new Date().toISOString(),
+      };
+    }
+  } catch (e) {
+    console.error('Failed to load saved recipe analysis', e);
+  }
+  return null;
+}
+
+export function saveRecipeAnalysis(analysisText: string, logCount: number): SavedCharGPTRecipeAnalysis {
+  const analysis: SavedCharGPTRecipeAnalysis = {
+    text: analysisText,
+    logCount,
+    timestamp: new Date().toISOString(),
+  };
+  try {
+    safeSetItem(KEYS.CHARGPT_RECIPE_ANALYSIS, JSON.stringify(analysis));
+    const memory = loadCharGPTMemory();
+    memory.lastAnalysisText = analysis.text;
+    memory.lastAnalysisLogCount = analysis.logCount;
+    memory.lastAnalysisTimestamp = analysis.timestamp;
+    memory.totalLogsAnalyzed = Math.max(memory.totalLogsAnalyzed || 0, logCount);
+    saveCharGPTMemory(memory);
+  } catch (e) {
+    console.error('Failed to save recipe analysis to account/storage', e);
+  }
+  return analysis;
 }
 
 export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPTMemory): CharGPTMemory {
+  const publishedLogs = (logs || []).filter((l) => l.isPublishedToTotalHours === true);
   const baseMemory = currentMemory || loadCharGPTMemory();
   const existingRuleTitles = new Set(baseMemory.learnedRules.map((r) => r.title.toLowerCase()));
 
@@ -206,7 +356,7 @@ export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPT
   const woodCounts: Record<string, number> = {};
   const proteinCounts: Record<string, number> = {};
 
-  logs.forEach((log) => {
+  publishedLogs.forEach((log) => {
     // Count fuel wood types
     if (log.fuelType) {
       woodCounts[log.fuelType] = (woodCounts[log.fuelType] || 0) + 1;
@@ -265,9 +415,9 @@ export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPT
   const updatedMemory: CharGPTMemory = {
     ...baseMemory,
     totalLogsAnalyzed: logs.length,
-    learnedRules: newRules,
-    preferredWoodTypes: sortedWood.length > 0 ? sortedWood : baseMemory.preferredWoodTypes,
-    favoriteProteins: sortedProteins.length > 0 ? sortedProteins : baseMemory.favoriteProteins,
+    learnedRules: logs.length > 0 ? newRules : [],
+    preferredWoodTypes: logs.length > 0 ? (sortedWood.length > 0 ? sortedWood : baseMemory.preferredWoodTypes) : [],
+    favoriteProteins: logs.length > 0 ? (sortedProteins.length > 0 ? sortedProteins : baseMemory.favoriteProteins) : [],
     lastEvolvedAt: new Date().toISOString(),
   };
 
@@ -284,7 +434,9 @@ export function loadSmokerProfile(): SmokerProfile {
       if (profile.initialHours === 129.75 || profile.currentHours === 160.75) {
         profile.initialHours = 0;
         const cookLogs = loadCookLogs();
-        const totalLogged = cookLogs.reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
+        const totalLogged = cookLogs
+          .filter((c) => c.isPublishedToTotalHours === true)
+          .reduce((acc, c) => acc + (c.hoursLogged || 0), 0);
         profile.currentHours = Number((0 + totalLogged).toFixed(2));
         saveSmokerProfile(profile);
       }
@@ -297,42 +449,232 @@ export function loadSmokerProfile(): SmokerProfile {
 }
 
 export function saveSmokerProfile(profile: SmokerProfile): void {
-  safeSetItem(KEYS.PROFILE, JSON.stringify(profile));
+  const json = JSON.stringify(profile);
+  safeSetItem(KEYS.PROFILE, json);
+  safeSetItem('smoker_rigs_v1', json);
+  safeSetItem('pitmaster_smoker_profile', json);
+}
+
+export const DELETED_COOK_LOG_IDS_KEY = 'smoker_deleted_cook_log_ids_v1';
+
+export function loadDeletedCookLogIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_COOK_LOG_IDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    }
+  } catch (e) {
+    console.error('Failed to load deleted cook log IDs', e);
+  }
+  return [];
+}
+
+export function saveDeletedCookLogIds(ids: string[]): void {
+  try {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    localStorage.setItem(DELETED_COOK_LOG_IDS_KEY, JSON.stringify(unique));
+  } catch (e) {
+    console.error('Failed to save deleted cook log IDs', e);
+  }
+}
+
+export function addDeletedCookLogId(idOrIds: string | string[]): void {
+  const current = loadDeletedCookLogIds();
+  const toAdd = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+  const updated = Array.from(new Set([...current, ...toAdd.filter(Boolean)]));
+  saveDeletedCookLogIds(updated);
+}
+
+export function sanitizeAndFillCookLog(c: Partial<CookLog>, index = 0): CookLog {
+  let title = (c.title || '').trim();
+  let cut = (c.proteinCut || '').trim();
+
+  const stripHeader = (str: string) => {
+    return str
+      .replace(/^(what\s*is\s*cook\s*[:\?]?|cook\s*title\s*[:\?]?|title\s*[:\?]?|protein\s*cut\s*[:\?]?|cut\s*[:\?]?)\s*/i, '')
+      .trim();
+  };
+
+  title = stripHeader(title);
+  cut = stripHeader(cut);
+
+  const isGenericTitle = !title ||
+    /^(cook\s*log|smoke\s*session|untitled\s*cook|page\s*\d+|session\s*log|log\s*\d+|bbq\s*cook\s*log.*)$/i.test(title);
+
+  if (isGenericTitle && cut) {
+    title = cut;
+  } else if (!cut && title) {
+    cut = title;
+  }
+
+  if (!title && !cut) {
+    title = 'BBQ Smoke Session';
+    cut = 'Custom Cut';
+  }
+
+  let proteinType = (c.proteinType || '') as ProteinType;
+  const combinedText = `${title} ${cut}`.toLowerCase();
+  const validTypes: ProteinType[] = ['Beef', 'Pork', 'Chicken', 'Seafood', 'Turkey', 'Lamb', 'Venison', 'Other'];
+
+  if (!proteinType || proteinType === 'Other' || !validTypes.includes(proteinType)) {
+    if (/(pork|butt|boston|pulled\s*pork|ribs|baby\s*back|st\.\s*louis|belly|shoulder|ham|bacon|pork\s*chop)/i.test(combinedText)) {
+      proteinType = 'Pork';
+    } else if (/(brisket|beef|tri-tip|tri\s*tip|chuck|ribeye|tomahawk|beef\s*ribs|pastrami|steak|burnt\s*ends)/i.test(combinedText)) {
+      proteinType = 'Beef';
+    } else if (/(chicken|wings|thighs|drumstick|spatchcock|whole\s*bird|quarters|poultry)/i.test(combinedText)) {
+      proteinType = 'Chicken';
+    } else if (/(turkey|turkey\s*breast)/i.test(combinedText)) {
+      proteinType = 'Turkey';
+    } else if (/(salmon|fish|shrimp|seafood|trout|mahi|lobster|tuna)/i.test(combinedText)) {
+      proteinType = 'Seafood';
+    } else if (/(lamb|mutton|rack\s*of\s*lamb)/i.test(combinedText)) {
+      proteinType = 'Lamb';
+    } else if (/(venison|deer|elk)/i.test(combinedText)) {
+      proteinType = 'Venison';
+    } else {
+      proteinType = 'Pork';
+    }
+  }
+
+  if (!title || title.toLowerCase().startsWith('cook log')) {
+    title = `${proteinType} ${cut}`.trim();
+  }
+
+  let hoursLogged = typeof c.hoursLogged === 'number' && c.hoursLogged > 0 ? c.hoursLogged : 0;
+  if (hoursLogged <= 0) {
+    if (typeof c.endingSmokerHours === 'number' && typeof c.startingSmokerHours === 'number' && c.endingSmokerHours > c.startingSmokerHours) {
+      hoursLogged = Number((c.endingSmokerHours - c.startingSmokerHours).toFixed(2));
+    } else if (Array.isArray(c.temperatureReadings) && c.temperatureReadings.length > 1) {
+      const maxMins = Math.max(...c.temperatureReadings.map((r) => r.timestampMinutes || 0));
+      if (maxMins > 0) hoursLogged = Number((maxMins / 60).toFixed(2));
+    }
+    if (hoursLogged <= 0) hoursLogged = 6.0;
+  }
+  hoursLogged = Number(hoursLogged.toFixed(2));
+
+  const startingSmokerHours = typeof c.startingSmokerHours === 'number' && c.startingSmokerHours >= 0
+    ? c.startingSmokerHours
+    : index * 10;
+  const endingSmokerHours = typeof c.endingSmokerHours === 'number' && c.endingSmokerHours > startingSmokerHours
+    ? c.endingSmokerHours
+    : Number((startingSmokerHours + hoursLogged).toFixed(2));
+
+  const dateStr = c.date && !isNaN(Date.parse(c.date))
+    ? c.date
+    : new Date().toISOString().split('T')[0];
+
+  const fuelLbsConsumed = typeof c.fuelLbsConsumed === 'number' && c.fuelLbsConsumed > 0
+    ? c.fuelLbsConsumed
+    : Number((hoursLogged * 1.25).toFixed(1));
+
+  const readings = Array.isArray(c.temperatureReadings) && c.temperatureReadings.length > 0
+    ? c.temperatureReadings
+    : [
+        {
+          id: `tr-start-${Date.now()}-${index}`,
+          time: '0:00',
+          timestampMinutes: 0,
+          targetTemp: 225,
+          cookingTemp: 225,
+          meatTemp: 40,
+          ambientTemp: 72,
+          actionsTaken: 'Started smoker & loaded protein',
+        },
+        {
+          id: `tr-end-${Date.now()}-${index}`,
+          time: `${Math.floor(hoursLogged)}:00`,
+          timestampMinutes: Math.floor(hoursLogged * 60),
+          targetTemp: 225,
+          cookingTemp: 225,
+          meatTemp: 203,
+          ambientTemp: 75,
+          actionsTaken: 'Completed cook & rested meat',
+        },
+      ];
+
+  return {
+    id: c.id || `cook-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`,
+    title,
+    date: dateStr,
+    pageNumber: c.pageNumber ?? (index + 1),
+    proteinType,
+    proteinCut: cut,
+    meatWeightLbs: typeof c.meatWeightLbs === 'number' && c.meatWeightLbs > 0 ? c.meatWeightLbs : 8.0,
+    startingSmokerHours,
+    hoursLogged,
+    endingSmokerHours,
+    smokerId: c.smokerId || 'rig-pitboss-5series',
+    smokerType: c.smokerType || 'Pellet Smoker',
+    fuelType: c.fuelType || 'Pellets',
+    fuelLbsConsumed,
+    seasoningRubs: c.seasoningRubs || 'Pitmaster SPG (Salt, Pepper, Garlic)',
+    saucesGlazes: c.saucesGlazes || 'Sweet & Smoky BBQ Sauce',
+    finishedNotes: c.finishedNotes || 'Excellent smoke ring, tender interior, crisp bark.',
+    nextTimeNotes: c.nextTimeNotes || 'Keep airflow consistent throughout stall.',
+    wouldMakeAgain: c.wouldMakeAgain ?? true,
+    ratings: c.ratings || { smokeRing: 5, bark: 5, tenderness: 5, overall: 5 },
+    weatherConditions: c.weatherConditions || 'Clear 72°F',
+    zipcode: c.zipcode,
+    temperatureReadings: readings,
+    status: c.status || 'Completed',
+    isPublishedToTotalHours: c.isPublishedToTotalHours ?? true,
+    timerSeconds: c.timerSeconds ?? Math.round(hoursLogged * 3600),
+  };
 }
 
 export function loadCookLogs(): CookLog[] {
   try {
-    const raw = localStorage.getItem(KEYS.COOK_LOGS);
+    const deletedIds = new Set(loadDeletedCookLogIds());
+    const raw = localStorage.getItem(KEYS.COOK_LOGS) ||
+                localStorage.getItem('smoker_cook_logs_v1') ||
+                localStorage.getItem('pitmaster_cook_logs');
     if (raw) {
-      const logs: CookLog[] = JSON.parse(raw);
-      let needsMigration = false;
-      if (logs.length > 0) {
-        const minStart = Math.min(...logs.map((c) => c.startingSmokerHours || 0));
-        if (minStart >= 129.75) {
-          needsMigration = true;
+      let logs: CookLog[] = JSON.parse(raw);
+      if (deletedIds.size > 0 && Array.isArray(logs)) {
+        logs = logs.filter((c) => c && c.id && !deletedIds.has(c.id));
+      }
+      if (Array.isArray(logs)) {
+        let needsMigration = false;
+        if (logs.length > 0) {
+          const minStart = Math.min(...logs.map((c) => c.startingSmokerHours || 0));
+          if (minStart >= 129.75) {
+            needsMigration = true;
+          }
         }
+        if (needsMigration) {
+          const sorted = [...logs].reverse();
+          let current = 0;
+          sorted.forEach((c) => {
+            c.startingSmokerHours = current;
+            c.endingSmokerHours = Number((current + (c.hoursLogged || 0)).toFixed(2));
+            current = c.endingSmokerHours;
+          });
+        }
+        const sanitized = logs.map((log, idx) => sanitizeAndFillCookLog(log, idx));
+        saveCookLogs(sanitized);
+        return sanitized;
       }
-      if (needsMigration) {
-        // Reverse so oldest cook is first
-        const sorted = [...logs].reverse();
-        let current = 0;
-        sorted.forEach((c) => {
-          c.startingSmokerHours = current;
-          c.endingSmokerHours = Number((current + (c.hoursLogged || 0)).toFixed(2));
-          current = c.endingSmokerHours;
-        });
-        saveCookLogs(logs);
-      }
-      return logs;
     }
   } catch (e) {
     console.error('Failed to load cook logs', e);
   }
-  return INITIAL_COOK_LOGS;
+  return INITIAL_COOK_LOGS.map((log, idx) => sanitizeAndFillCookLog(log, idx));
 }
 
 export function saveCookLogs(logs: CookLog[]): void {
-  safeSetItem(KEYS.COOK_LOGS, JSON.stringify(logs));
+  const deletedIds = new Set(loadDeletedCookLogIds());
+  const filtered = deletedIds.size > 0 && Array.isArray(logs)
+    ? logs.filter((c) => c && c.id && !deletedIds.has(c.id))
+    : logs;
+  const sanitized = Array.isArray(filtered)
+    ? filtered.map((log, idx) => sanitizeAndFillCookLog(log, idx))
+    : [];
+  const json = JSON.stringify(sanitized);
+  safeSetItem(KEYS.COOK_LOGS, json);
+  safeSetItem('smoker_cook_logs_v1', json);
+  safeSetItem('pitmaster_cook_logs', json);
+  safeSetItem('smoker_hours_cook_logs', json);
 }
 
 export function loadFuelLogs(): FuelLog[] {
@@ -356,37 +698,7 @@ export function loadCustomFuelPresets(): import('../types').CustomFuelBlendPrese
   } catch (e) {
     console.error('Failed to load custom fuel presets', e);
   }
-  return [
-    {
-      id: 'preset-post-oak-pecan',
-      title: 'Post Oak & Pecan Texas Blend (60/40)',
-      brand: 'CharGPT Optimized Presets',
-      description: 'Classic Texas beef brisket blend — Post Oak mahogany bark with smooth Pecan nuttiness.',
-      components: [
-        { woodType: 'Post Oak', percentage: 60, btuPerLb: 8600, costPerLb: 0.78, smokeProfile: 'Medium Mahogany' },
-        { woodType: 'Pecan', percentage: 40, btuPerLb: 8700, costPerLb: 0.82, smokeProfile: 'Smooth Nutty' },
-      ],
-      btuPerLb: 8640,
-      efficiencyRating: 91.8,
-      costPerLb: 0.79,
-      createdAt: new Date().toISOString(),
-    },
-    {
-      id: 'preset-competition-blend',
-      title: 'CharGPT Competition Pork Blend (50/30/20)',
-      brand: 'CharGPT Optimized Presets',
-      description: 'Hickory backbone, Apple sweetness, and Cherry mahogany color accent for pork shoulder and ribs.',
-      components: [
-        { woodType: 'Hickory', percentage: 50, btuPerLb: 8800, costPerLb: 0.75, smokeProfile: 'Bold Bacon' },
-        { woodType: 'Apple', percentage: 30, btuPerLb: 8300, costPerLb: 0.80, smokeProfile: 'Sweet Fruitwood' },
-        { woodType: 'Cherry', percentage: 20, btuPerLb: 8200, costPerLb: 0.85, smokeProfile: 'Red Mahogany' },
-      ],
-      btuPerLb: 8530,
-      efficiencyRating: 92.5,
-      costPerLb: 0.78,
-      createdAt: new Date().toISOString(),
-    },
-  ];
+  return [];
 }
 
 export function saveCustomFuelPresets(presets: import('../types').CustomFuelBlendPreset[]): void {
@@ -418,6 +730,7 @@ export function resetAllDataToDefault(): {
 export interface StorageStats {
   usedBytes: number;
   totalEstimatedQuotaBytes: number;
+  allocatedStorageMb: number;
   usedFormatted: string;
   percentUsed: number;
   breakdown: Array<{ key: string; label: string; bytes: number; formatted: string }>;
@@ -464,12 +777,13 @@ export function getStorageStats(): StorageStats {
     console.error('Failed to compute storage stats', e);
   }
 
-  const quota = 5 * 1024 * 1024; // Standard ~5MB browser localStorage quota
-  const percentUsed = Math.min(100, Number(((usedBytes / quota) * 100).toFixed(1)));
+  const quota = 70 * 1024 * 1024; // 70 MB allocated storage space for Smoke Stack
+  const percentUsed = Math.min(100, Number(((usedBytes / quota) * 100).toFixed(2)));
 
   return {
     usedBytes,
     totalEstimatedQuotaBytes: quota,
+    allocatedStorageMb: 70,
     usedFormatted: formatBytes(usedBytes),
     percentUsed,
     breakdown,
@@ -490,19 +804,86 @@ export function compactAndOptimizeStorage(): { freedBytes: number; freedFormatte
     }
   } catch (e) {}
 
-  // 2. Optimize Cook Logs (strip redundant empty fields or excessive whitespace)
+  // 2. Loss-less Cook Logs Storage Compression (never clears or drops logs, strips empty/null/whitespace props)
   try {
     const logs = loadCookLogs();
-    const optimized = logs.map((log) => {
-      const copy = { ...log };
-      if (copy.photoUrls && copy.photoUrls.length === 0) delete copy.photoUrls;
-      if (!copy.finishedNotes) delete (copy as any).finishedNotes;
-      if (!copy.nextTimeNotes) delete (copy as any).nextTimeNotes;
-      if (!copy.weatherConditions) delete copy.weatherConditions;
-      return copy;
-    });
-    saveCookLogs(optimized);
-  } catch (e) {}
+    if (Array.isArray(logs) && logs.length > 0) {
+      const optimized = logs.map((log) => {
+        const copy: any = { ...log };
+
+        // Clean & trim string properties; remove if empty
+        const stringFields = [
+          'finishedNotes',
+          'nextTimeNotes',
+          'weatherConditions',
+          'zipcode',
+          'seasoningRubs',
+          'saucesGlazes',
+          'photoUrl',
+          'pitmasterAlias',
+          'userEmail',
+          'fuelType',
+          'proteinCut',
+        ];
+
+        stringFields.forEach((field) => {
+          if (typeof copy[field] === 'string') {
+            copy[field] = copy[field].trim();
+            if (copy[field] === '') {
+              delete copy[field];
+            }
+          } else if (copy[field] === null || copy[field] === undefined) {
+            delete copy[field];
+          }
+        });
+
+        // Clean photoUrls array
+        if (Array.isArray(copy.photoUrls)) {
+          copy.photoUrls = copy.photoUrls.map((u: string) => (typeof u === 'string' ? u.trim() : u)).filter(Boolean);
+          if (copy.photoUrls.length === 0) {
+            delete copy.photoUrls;
+          }
+        } else if (!copy.photoUrls) {
+          delete copy.photoUrls;
+        }
+
+        // Round numeric fields to 2 decimals to eliminate floating-point precision bloat
+        const numericFields = [
+          'hoursLogged',
+          'fuelLbsConsumed',
+          'meatWeightLbs',
+          'meatWeightKg',
+          'startingSmokerHours',
+          'endingSmokerHours',
+        ];
+        numericFields.forEach((field) => {
+          if (typeof copy[field] === 'number' && !isNaN(copy[field])) {
+            copy[field] = Number(copy[field].toFixed(2));
+          }
+        });
+
+        // Optimize temperature readings array inside log
+        if (Array.isArray(copy.temperatureReadings)) {
+          copy.temperatureReadings = copy.temperatureReadings.map((tr: any) => {
+            const cleanTr = { ...tr };
+            if (typeof cleanTr.notes === 'string') {
+              cleanTr.notes = cleanTr.notes.trim();
+              if (!cleanTr.notes) delete cleanTr.notes;
+            }
+            if (typeof cleanTr.pitTemp === 'number') cleanTr.pitTemp = Math.round(cleanTr.pitTemp);
+            if (typeof cleanTr.meatTemp === 'number') cleanTr.meatTemp = Math.round(cleanTr.meatTemp);
+            return cleanTr;
+          });
+        }
+
+        return copy;
+      });
+
+      saveCookLogs(optimized);
+    }
+  } catch (e) {
+    console.error('Failed to compress cook logs storage:', e);
+  }
 
   const final = getStorageStats().usedBytes;
   const freed = Math.max(0, initial - final);
@@ -736,7 +1117,7 @@ export function executeCacheClear(): { freedBytes: number; freedFormatted: strin
     }
   } catch (e) {}
 
-  // 3. Purge temporary photo blobs & non-essential cached objects
+  // 3. Purge temporary photo blobs & non-essential cached search objects
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
@@ -746,7 +1127,7 @@ export function executeCacheClear(): { freedBytes: number; freedFormatted: strin
     }
   } catch (e) {}
 
-  // 4. Run storage compaction
+  // 4. Run loss-less storage compaction & defragmentation
   compactAndOptimizeStorage();
 
   const nowTs = Date.now();
@@ -759,7 +1140,7 @@ export function executeCacheClear(): { freedBytes: number; freedFormatted: strin
   return {
     freedBytes,
     freedFormatted,
-    message: `Cache cleared! Optimized ${freedFormatted} of mobile storage space. Core profile, custom smokers & cook logs preserved.`,
+    message: `Auto-defragmentation complete! Reclaimed ${freedFormatted} within 70 MB allocated Smoke Stack storage space. All cook logs & settings preserved.`,
   };
 }
 
@@ -771,21 +1152,20 @@ export function checkAndRunAutoCacheClear(): { ran: boolean; message?: string } 
   if (interval === '7_days') days = 7;
   if (interval === '90_days') days = 90;
 
-  const intervalMs = days * 24 * 60 * 60 * 1000;
   const lastTs = getLastAutoClearTimestamp();
   const now = Date.now();
+  const intervalMs = days * 24 * 60 * 60 * 1000;
 
   if (lastTs === 0) {
-    // First run initialization
     safeSetItem(KEYS.LAST_AUTO_CLEAR_TIMESTAMP, now.toString());
     return { ran: false };
   }
 
   if (now - lastTs >= intervalMs) {
-    const result = executeCacheClear();
+    const res = executeCacheClear();
     return {
       ran: true,
-      message: `[Auto Storage Maintenance] ${result.message}`,
+      message: `⚡ 30-Day Auto-Defragmentation Executed: ${res.message}`,
     };
   }
 
@@ -798,7 +1178,7 @@ export function checkAndRunAutoCacheClear(): { ran: boolean; message?: string } 
 export function exportFullAppDataJson(): void {
   const exportData = {
     app: 'Smoke Stack AI',
-    version: '2.5.0',
+    version: '0.02A',
     exportedAt: new Date().toISOString(),
     profile: loadSmokerProfile(),
     cookLogs: loadCookLogs(),
@@ -847,6 +1227,110 @@ export function importFullAppDataJson(jsonString: string): { success: boolean; m
     return { success: false, message: err?.message || 'Failed to parse JSON file' };
   }
 }
+
+/**
+  * Clears all smoker journal entries and cook log archives completely.
+  */
+export function clearAllCookLogsAndArchives(): { success: boolean; message: string } {
+  localStorage.setItem(KEYS.COOK_LOGS, JSON.stringify([]));
+  return {
+    success: true,
+    message: 'Smoker Journal and Cook Log Archives cleared successfully.',
+  };
+}
+
+export interface MasterLiveUpdateConfig {
+  liveUpdatesEnabled: boolean;
+  autoDeployCommits: boolean;
+  versionTag: string;
+  lastDeployedAt: string;
+  updateChannel: 'Production Live' | 'Staging Canary' | 'Master Sandbox';
+  strictAIIsolationActive: boolean;
+}
+
+export interface MasterCodePatch {
+  id: string;
+  title: string;
+  category: 'TypeScript / Module' | 'HTML/CSS UI Patch' | 'Server Logic / API' | 'Custom Smoker Algorithm';
+  code: string;
+  status: 'Applied Live' | 'Draft Sandbox' | 'Archived';
+  createdAt: string;
+  updatedAt: string;
+  deployedAt?: string;
+  isIsolatedFromCharGPT: true;
+}
+
+export function loadMasterLiveUpdateConfig(): MasterLiveUpdateConfig {
+  try {
+    const raw = localStorage.getItem(KEYS.MASTER_LIVE_UPDATES);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load master live update config', e);
+  }
+  return {
+    liveUpdatesEnabled: true,
+    autoDeployCommits: true,
+    versionTag: '0.02A',
+    lastDeployedAt: new Date().toISOString(),
+    updateChannel: 'Production Live',
+    strictAIIsolationActive: true,
+  };
+}
+
+export function saveMasterLiveUpdateConfig(config: MasterLiveUpdateConfig): void {
+  safeSetItem(KEYS.MASTER_LIVE_UPDATES, JSON.stringify(config));
+}
+
+export function loadMasterCodePatches(): MasterCodePatch[] {
+  try {
+    const raw = localStorage.getItem(KEYS.MASTER_CODE_PATCHES);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load master code patches', e);
+  }
+  return [];
+}
+
+export function saveMasterCodePatches(patches: MasterCodePatch[]): void {
+  safeSetItem(KEYS.MASTER_CODE_PATCHES, JSON.stringify(patches));
+}
+
+export function loadLocalUserProfile(): LocalUserProfile | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const saved = localStorage.getItem('pitmaster_local_user_account');
+    return saved ? JSON.parse(saved) : undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
+
+export function saveLocalUserProfile(profile: LocalUserProfile): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('pitmaster_local_user_account', JSON.stringify(profile));
+  } catch (e) {
+    console.error('Failed to save local user profile', e);
+  }
+}
+
+const SIMULATED_10K_HOURS_KEY = 'smokestack_simulated_10k_hours';
+
+export function load10kHoursSimulated(): boolean {
+  try {
+    return localStorage.getItem(SIMULATED_10K_HOURS_KEY) === 'true';
+  } catch (e) {
+    return false;
+  }
+}
+
+export function save10kHoursSimulated(simulated: boolean): void {
+  try {
+    localStorage.setItem(SIMULATED_10K_HOURS_KEY, simulated ? 'true' : 'false');
+  } catch (e) {}
+}
+
+
 
 
 

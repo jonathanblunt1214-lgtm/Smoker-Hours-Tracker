@@ -8,6 +8,7 @@ import {
   loadSavedWebRecipes,
   saveWebRecipe,
 } from '../utils/webRecipeParser';
+import { loadSavedRecipeAnalysis, saveRecipeAnalysis } from '../utils/storage';
 import {
   ChefHat,
   Flame,
@@ -75,7 +76,18 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
 
   // CharGPT Log Analysis state
   const [isAnalyzingOverallLogs, setIsAnalyzingOverallLogs] = useState(false);
-  const [overallAnalysisText, setOverallAnalysisText] = useState<string | null>(null);
+  const [overallAnalysisText, setOverallAnalysisText] = useState<string | null>(() => {
+    const saved = loadSavedRecipeAnalysis();
+    return saved ? saved.text : null;
+  });
+  const [savedLogCount, setSavedLogCount] = useState<number>(() => {
+    const saved = loadSavedRecipeAnalysis();
+    return saved ? saved.logCount : 0;
+  });
+  const [savedTimestamp, setSavedTimestamp] = useState<string | null>(() => {
+    const saved = loadSavedRecipeAnalysis();
+    return saved ? saved.timestamp : null;
+  });
   const [showOverallAnalysis, setShowOverallAnalysis] = useState(false);
 
   // Online Web Search state & persistent cached web recipes for offline/low memory
@@ -180,12 +192,31 @@ Return a complete, step-by-step smoking guide including:
     onStartCookFromRecipe(convertedRecipe);
   };
 
+  // Clear CharGPT Log Analysis state
+  const handleClearAnalysis = () => {
+    setOverallAnalysisText(null);
+    setShowOverallAnalysis(false);
+  };
+
   // Analyze all cook logs to generate custom recipe recommendations
-  const handleAnalyzeLogsForRecipeMatches = async () => {
+  const handleAnalyzeLogsForRecipeMatches = async (forceRefresh = false) => {
     setShowOverallAnalysis(true);
-    if (overallAnalysisText) return;
+    const publishedLogs = (cookLogs || []).filter((c) => c.isPublishedToTotalHours === true);
+    const currentLogsCount = publishedLogs.length;
+    const currentMilestone = Math.floor(currentLogsCount / 20);
+    const savedMilestone = savedLogCount > 0 ? Math.floor(savedLogCount / 20) : 0;
+
+    if (overallAnalysisText && !forceRefresh && savedLogCount >= 20 && currentMilestone <= savedMilestone) {
+      return;
+    }
 
     setIsAnalyzingOverallLogs(true);
+    if (forceRefresh) {
+      setOverallAnalysisText(null);
+    }
+
+    let finalAnalysisText = '';
+
     try {
       const res = await fetch('/api/chargpt', {
         method: 'POST',
@@ -193,50 +224,54 @@ Return a complete, step-by-step smoking guide including:
         body: JSON.stringify({
           smokerProfile: profile,
           effectiveSpecs: profile ? getEffectiveSmokerSpecs(profile) : null,
-          prompt: `Based on my complete cook log history, conduct a Pitmaster Log Analysis.
+          prompt: `Based on my complete published cook log history (${currentLogsCount} logs), conduct a Pitmaster Log Analysis.
 Recommend which of the suggested recipes (Texas Brisket, Kansas City Pork Ribs, Pulled Pork, Smoked Wings, Smoked Salmon, Smoked Turkey Breast, Beef Short Ribs) I should cook next.
 Explain specifically how trying these recipes will help fix past issues logged in my journal (such as tenderness, bark, thermal stalls, or seasoning balance) and help me level up my pitmaster skills!`,
-          allCookLogs: cookLogs,
+          allCookLogs: publishedLogs,
         }),
       });
 
       if (res.ok) {
         const data = await res.json();
         if (data.text) {
-          setOverallAnalysisText(data.text);
-          setIsAnalyzingOverallLogs(false);
-          return;
+          finalAnalysisText = data.text;
         }
       }
     } catch (err) {
       console.warn('API error during log analysis for recipe matches', err);
     }
 
-    // Local fallback analysis based on cookLogs
-    const totalLogs = cookLogs.length;
-    const avgRating = totalLogs > 0
-      ? (cookLogs.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) / totalLogs).toFixed(1)
-      : '5.0';
-    
-    const beefCooks = cookLogs.filter((c) => c.proteinType === 'Beef').length;
-    const porkCooks = cookLogs.filter((c) => c.proteinType === 'Pork').length;
-    const chickenCooks = cookLogs.filter((c) => c.proteinType === 'Chicken' || c.proteinType === 'Turkey').length;
+    if (!finalAnalysisText) {
+      // Local fallback analysis based on published cookLogs
+      const totalLogs = currentLogsCount;
+      const avgRating = totalLogs > 0
+        ? (publishedLogs.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) / totalLogs).toFixed(1)
+        : '5.0';
+      
+      const beefCooks = publishedLogs.filter((c) => c.proteinType === 'Beef').length;
+      const porkCooks = publishedLogs.filter((c) => c.proteinType === 'Pork').length;
+      const chickenCooks = publishedLogs.filter((c) => c.proteinType === 'Chicken' || c.proteinType === 'Turkey').length;
 
-    let fallbackText = `📊 Pitmaster Log Analysis (${totalLogs} Sessions Logged | Avg Rating: ${avgRating}/5 ⭐):\n\n`;
-    if (totalLogs === 0) {
-      fallbackText += `• Fresh Journal Detected: We recommend starting with "Texas Style Smoked Beef Brisket" or "Kansas City Competition Pork Ribs" to establish baseline smoker temperature control and wrap timing!`;
-    } else {
-      fallbackText += `• Historical Breakdown: You have logged ${beefCooks} Beef, ${porkCooks} Pork, and ${chickenCooks} Poultry cooks.\n`;
-      if (beefCooks === 0) {
-        fallbackText += `• High Priority Recommendation: Try "Texas Style Smoked Beef Brisket" or "Dino Beef Short Ribs" next to master the brisket stall and rendering heavy intramuscular marbling.\n`;
-      } else if (porkCooks === 0) {
-        fallbackText += `• High Priority Recommendation: Try "Kansas City Competition Pork Ribs" to test 3-2-1 wrap timing and glaze setting.\n`;
+      finalAnalysisText = `📊 Pitmaster Log Analysis (${totalLogs} Sessions Logged | Avg Rating: ${avgRating}/5 ⭐):\n\n`;
+      if (totalLogs === 0) {
+        finalAnalysisText += `• Fresh Journal Detected: We recommend starting with "Texas Style Smoked Beef Brisket" or "Kansas City Competition Pork Ribs" to establish baseline smoker temperature control and wrap timing!`;
       } else {
-        fallbackText += `• Skill Progression: Your previous logs show solid experience. Focus on "Competition Pulled Pork Shoulder" or "Dino Beef Short Ribs" with custom spritz and wood pellet blends to push tenderness ratings to 5/5!`;
+        finalAnalysisText += `• Historical Breakdown: You have logged ${beefCooks} Beef, ${porkCooks} Pork, and ${chickenCooks} Poultry cooks.\n`;
+        if (beefCooks === 0) {
+          finalAnalysisText += `• High Priority Recommendation: Try "Texas Style Smoked Beef Brisket" or "Dino Beef Short Ribs" next to master the brisket stall and rendering heavy intramuscular marbling.\n`;
+        } else if (porkCooks === 0) {
+          finalAnalysisText += `• High Priority Recommendation: Try "Kansas City Competition Pork Ribs" to test 3-2-1 wrap timing and glaze setting.\n`;
+        } else {
+          finalAnalysisText += `• Skill Progression: Your previous logs show solid experience. Focus on "Competition Pulled Pork Shoulder" or "Dino Beef Short Ribs" with custom spritz and wood pellet blends to push tenderness ratings to 5/5!`;
+        }
       }
     }
 
-    setOverallAnalysisText(fallbackText);
+    // Save/overwrite analysis in account storage
+    const savedObj = saveRecipeAnalysis(finalAnalysisText, currentLogsCount);
+    setOverallAnalysisText(savedObj.text);
+    setSavedLogCount(savedObj.logCount);
+    setSavedTimestamp(savedObj.timestamp);
     setIsAnalyzingOverallLogs(false);
   };
 
@@ -347,6 +382,20 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
     }
   }, [search, selectedProtein, filteredRecipes.length, webSearchTerm, isSearchingWeb]);
 
+  // Automatic CharGPT Log Analysis & Smart Recipe Match every additional 20 logs using all logs available
+  useEffect(() => {
+    const currentCount = cookLogs?.length || 0;
+    if (currentCount >= 20 && !isAnalyzingOverallLogs) {
+      const currentMilestone = Math.floor(currentCount / 20);
+      const savedMilestone = savedLogCount > 0 ? Math.floor(savedLogCount / 20) : 0;
+
+      // Re-run if first 20-log milestone reached or every additional 20 logs milestone (20, 40, 60, 80...)
+      if (savedLogCount < 20 || currentMilestone > savedMilestone) {
+        handleAnalyzeLogsForRecipeMatches(false);
+      }
+    }
+  }, [cookLogs?.length, savedLogCount, isAnalyzingOverallLogs]);
+
   const proteinBadgeColors: Record<string, string> = {
     Beef: 'bg-red-500/20 text-red-300 border-red-500/30',
     Pork: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
@@ -391,7 +440,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 <span>Pitmaster Recipe Suggestions & Inspiration</span>
               </h2>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-bold border border-orange-500/30">
-                {filteredRecipes.length} of {allAvailableRecipes.length} Suggestions
+                {overallAnalysisText ? filteredRecipes.length : 0} of {allAvailableRecipes.length} Suggestions
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
@@ -450,7 +499,7 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 onChange={(e) => setSelectedProtein(e.target.value)}
                 className="w-full bg-[#1a1a1a] border border-[#2a2a2a] text-zinc-200 font-medium rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
               >
-                <option value="ALL">All Meats</option>
+                <option value="ALL">Select Protein Category (All Meats)</option>
                 <optgroup label="Domestic Meats">
                   <option value="Beef">Beef</option>
                   <option value="Pork">Pork</option>
@@ -580,47 +629,69 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   <Bot className="w-5 h-5 text-orange-400" />
                 </div>
                 <div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                     <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-1.5">
                       <span>CharGPT Log Analysis & Smart Recipe Match</span>
                     </h3>
-                    <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                      {cookLogs.length} Logs Analyzed
-                    </span>
+                    {savedLogCount > 0 ? (
+                      <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Saved to Account ({savedLogCount} Logs)</span>
+                      </span>
+                    ) : (cookLogs?.length || 0) >= 20 ? (
+                      <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                        <Zap className="w-3 h-3 text-emerald-400" />
+                        <span>⚡ Auto-Triggering ({cookLogs?.length || 0} Logs)</span>
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                        {cookLogs?.length || 0}/20 Logs (Auto-triggers at 20)
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-zinc-400 mt-0.5">
-                    Ask CharGPT to review your past smoke logs (tenderness, bark, ratings & notes) and suggest which recipes to cook next based on learned preferences.
+                    {(cookLogs?.length || 0) >= 20 
+                      ? `Saved to account & overwriting every +20 logs. Next auto-run milestone at ${Math.max(20, (Math.floor((cookLogs?.length || 0) / 20) + 1) * 20)} logs (Currently ${cookLogs?.length || 0}).` 
+                      : `Saved to account on run. Automatically re-runs every additional 20 logs using all available logs in your journal.`}
                   </p>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleAnalyzeLogsForRecipeMatches}
-                disabled={isAnalyzingOverallLogs}
-                className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all cursor-pointer shrink-0 active:scale-95 disabled:opacity-50 min-h-[38px]"
-              >
-                {isAnalyzingOverallLogs ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-zinc-950" />
-                    <span>Analyzing Journal Logs...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4 text-zinc-950" />
-                    <span>{showOverallAnalysis ? 'Re-Analyze Logs' : 'Analyze Logs For Recipe Matches'}</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleAnalyzeLogsForRecipeMatches(Boolean(overallAnalysisText))}
+                  disabled={isAnalyzingOverallLogs}
+                  className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs rounded-xl shadow-md flex items-center justify-center space-x-1.5 transition-all cursor-pointer shrink-0 active:scale-95 disabled:opacity-50 min-h-[38px]"
+                >
+                  {isAnalyzingOverallLogs ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-zinc-950" />
+                      <span>{(cookLogs?.length || 0) >= 20 ? 'Analyzing All Available Logs...' : 'Analyzing Journal Logs...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-zinc-950" />
+                      <span>{overallAnalysisText ? 'Re-Analyze All Logs' : 'Analyze Logs For Recipe Matches'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Expanded Analysis Drawer */}
             {showOverallAnalysis && (
               <div className="mt-3 p-4 bg-[#1a1a1a] border border-orange-500/30 rounded-xl space-y-2 animate-fadeIn text-xs">
-                <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
-                  <div className="flex items-center space-x-2 text-orange-400 font-bold">
+                <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a] flex-wrap gap-2">
+                  <div className="flex items-center space-x-2 text-orange-400 font-bold flex-wrap gap-y-1">
                     <BarChart3 className="w-4 h-4 text-orange-400" />
                     <span>Personalized {AI_PITMASTER_NAME} Recipe Recommendations</span>
+                    {savedLogCount > 0 && (
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Saved to Account ({savedLogCount} Logs Evaluated)</span>
+                      </span>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -634,18 +705,54 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                 {isAnalyzingOverallLogs ? (
                   <div className="py-6 flex flex-col items-center justify-center space-y-2 text-zinc-400 text-xs">
                     <Loader2 className="w-6 h-6 animate-spin text-orange-400" />
-                    <span>Consulting {AI_PITMASTER_NAME} against your complete cook journal history...</span>
+                    <span>Consulting {AI_PITMASTER_NAME} against all {cookLogs?.length || 0} logged cook sessions...</span>
                   </div>
                 ) : (
-                  <div className="text-zinc-200 whitespace-pre-line leading-relaxed text-xs font-sans">
-                    {overallAnalysisText}
+                  <div className="space-y-2">
+                    <div className="text-zinc-200 whitespace-pre-line leading-relaxed text-xs font-sans">
+                      {overallAnalysisText}
+                    </div>
+                    {savedLogCount > 0 && (
+                      <div className="pt-2 border-t border-[#2a2a2a] flex items-center justify-between text-[10px] text-zinc-400 font-mono flex-wrap gap-1">
+                        <span>💾 Saved in Account Storage ({savedLogCount} logs evaluated)</span>
+                        <span>Next +20 log auto-rerun at {Math.max(20, (Math.floor(savedLogCount / 20) + 1) * 20)} logs</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* Recipes Cards Grid */}
+          {/* 5-Item Recipe Suggestions Carousel - Only loads after first analysis is made */}
+          {!overallAnalysisText && !isAnalyzingOverallLogs ? (
+            <div className="bg-[#121212] border border-amber-500/30 rounded-2xl p-6 text-center space-y-3 shadow-lg">
+              <div className="w-10 h-10 mx-auto rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-amber-400" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="text-sm font-bold text-white">
+                  Awaiting CharGPT Log Analysis ({cookLogs.length}/20 Logs)
+                </h4>
+                <p className="text-xs text-amber-300/90 font-medium max-w-md mx-auto">
+                  {cookLogs.length >= 20
+                    ? `20+ logs collected! Triggering automatic CharGPT Log Analysis & Smart Recipe Match...`
+                    : `Collect 20 cook logs to automatically unlock CharGPT Log Analysis & Smart Recipe Match, or click "Analyze Logs For Recipe Matches" above anytime to calculate recommendations now!`}
+                </p>
+              </div>
+            </div>
+          ) : isAnalyzingOverallLogs ? (
+            <div className="bg-[#121212] border border-orange-500/30 rounded-2xl p-6 text-center space-y-3 shadow-lg">
+              <Loader2 className="w-8 h-8 animate-spin text-orange-400 mx-auto" />
+              <p className="text-xs text-zinc-300 font-medium">
+                {cookLogs.length >= 20
+                  ? `⚡ 20 Logs Milestone Reached! Automatically analyzing ${cookLogs.length} cook logs and matching 5-item recipe suggestions...`
+                  : `Analyzing cook logs and matching 5-item recipe suggestions...`}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Recipes Cards Grid */}
           {filteredRecipes.length === 0 ? (
             <div className="bg-[#121212] border border-orange-500/30 rounded-2xl p-8 text-center text-zinc-400 space-y-4">
               <div className="w-12 h-12 mx-auto rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 flex items-center justify-center">
@@ -919,6 +1026,8 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
               </div>
             </div>
           )}
+          </>
+        )}
 
         </div>
       )}

@@ -5,16 +5,29 @@ import { Search, Filter, Flame, FlaskConical, Layers, Zap, Sparkles, Check, Plus
 import { checkAndUpdateRetailerPricesOnline, getLastPriceSyncTimestamp, loadRetailerFuelPrices } from '../utils/retailerPriceSync';
 
 interface FuelDatabaseExplorerProps {
-  onAddFuelLog: (newFuel: FuelLog) => void;
+  onAddFuelLog?: (newFuel: FuelLog) => void;
   onSelectForBlend?: (item: FuelDatabaseItem) => void;
+  onSelectFuel?: (item: FuelDatabaseItem) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
+  selectedFuelId?: string;
   hopperCapacityLbs?: number;
+  fuelLogs?: FuelLog[];
+  isLpSmoker?: boolean;
 }
 
 export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
   onAddFuelLog,
   onSelectForBlend,
+  onSelectFuel,
+  isOpen,
+  onClose,
+  selectedFuelId,
   hopperCapacityLbs = 40,
+  fuelLogs = [],
+  isLpSmoker = false,
 }) => {
+  if (isOpen === false) return null;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSmokeDensity, setSelectedSmokeDensity] = useState<string>('all');
@@ -76,8 +89,8 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
     setRestockItem(null);
   };
 
-  return (
-    <div className="bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-6 space-y-6 shadow-2xl">
+  const explorerContent = (
+    <div className={`bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-6 space-y-6 shadow-2xl ${isOpen ? 'max-w-5xl w-full max-h-[90vh] overflow-y-auto' : ''}`}>
       {/* HEADER BAR */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2a2a2a] pb-5">
         <div className="flex items-center space-x-3">
@@ -97,24 +110,46 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
           </div>
         </div>
 
-        {/* 24-HOUR ONLINE RETAIL PRICE INDEX STATUS */}
-        <div className="flex items-center space-x-2 bg-[#202020] border border-[#333] px-3 py-2 rounded-xl text-xs shrink-0">
-          <div className="flex items-center space-x-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-zinc-300 font-mono text-[11px]">
-              Daily Retail Price Sync (Last: <span className="text-emerald-400 font-bold">{lastSyncText}</span>)
-            </span>
+        <div className="flex items-center space-x-2">
+          {/* 24-HOUR ONLINE RETAIL PRICE INDEX STATUS */}
+          <div className="flex items-center space-x-2 bg-[#202020] border border-[#333] px-3 py-2 rounded-xl text-xs shrink-0">
+            <div className="flex items-center space-x-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-zinc-300 font-mono text-[11px]">
+                Daily Retail Price Sync (Last: <span className="text-emerald-400 font-bold">{lastSyncText}</span>)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleManualPriceSync}
+              className="p-1 rounded-lg bg-[#2a2a2a] hover:bg-[#383838] text-zinc-200 transition-colors cursor-pointer border border-[#444]"
+              title="Force immediate online retail price update"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-zinc-300" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleManualPriceSync}
-            className="p-1 rounded-lg bg-[#2a2a2a] hover:bg-[#383838] text-zinc-200 transition-colors cursor-pointer border border-[#444]"
-            title="Force immediate online retail price update"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl bg-[#242424] hover:bg-[#333] text-zinc-400 hover:text-white border border-[#333] transition-colors cursor-pointer"
+              title="Close Database"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {isLpSmoker && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center justify-between text-xs text-amber-300">
+          <div className="flex items-center space-x-2">
+            <Flame className="w-4 h-4 text-amber-400 shrink-0" />
+            <span><strong>LP Gas / Propane Smoker Active:</strong> Wood chip, chunk & pellet selections are tuned for LP chip trays and matched directly with your restock log & inventory.</span>
+          </div>
+        </div>
+      )}
 
       {syncStatusMsg && (
         <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-200 text-xs px-3.5 py-2 rounded-xl font-mono flex items-center space-x-2">
@@ -125,12 +160,12 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
 
       {/* SEARCH & FILTERS BAR */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 text-xs">
-        {/* Search Input (5 Cols) */}
-        <div className="lg:col-span-5 relative">
+        {/* Search Input (3 Cols) */}
+        <div className="lg:col-span-3 relative">
           <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search by species, brand (e.g. Bear Mountain), flavor (e.g. Bacon), meat (e.g. Brisket)..."
+            placeholder="Search species, chips, pellets..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl pl-10 pr-9 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none placeholder-zinc-500 font-sans"
@@ -146,18 +181,34 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
           )}
         </div>
 
+        {/* Category Filter (2 Cols) */}
+        <div className="lg:col-span-2">
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="w-full bg-[#121212] border border-[#2a2a2a] text-amber-400 font-bold rounded-xl px-2.5 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer"
+          >
+            <option value="all">🔥 All Fuel Categories</option>
+            <option value="Smoker Wood Chips">🪵 Wood Chips (LP / Gas)</option>
+            <option value="Pure Wood Species">🪵 Pure Wood Species</option>
+            <option value="Commercial Pellets">🪵 Commercial Pellets</option>
+            <option value="Pitmaster Blends">🧪 Pitmaster Blends</option>
+            <option value="Charcoal & Lump">🔥 Charcoal & Lump</option>
+          </select>
+        </div>
+
         {/* Smoke Density Filter (2 Cols) */}
         <div className="lg:col-span-2">
           <select
             value={selectedSmokeDensity}
             onChange={(e) => setSelectedSmokeDensity(e.target.value)}
-            className="w-full bg-[#121212] border border-[#2a2a2a] text-zinc-200 rounded-xl px-3 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer font-medium"
+            className="w-full bg-[#121212] border border-[#2a2a2a] text-zinc-200 rounded-xl px-2.5 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer font-medium"
           >
-            <option value="all">💨 All Smoke Densities</option>
-            <option value="Light">Light Smoke Density</option>
-            <option value="Medium">Medium Smoke Density</option>
-            <option value="Bold">Bold Smoke Density</option>
-            <option value="Heavy">Heavy Smoke Density</option>
+            <option value="all">💨 All Densities</option>
+            <option value="Light">Light Density</option>
+            <option value="Medium">Medium Density</option>
+            <option value="Bold">Bold Density</option>
+            <option value="Heavy">Heavy Density</option>
           </select>
         </div>
 
@@ -166,10 +217,10 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
           <select
             value={selectedProtein}
             onChange={(e) => setSelectedProtein(e.target.value)}
-            className="w-full bg-[#121212] border border-[#2a2a2a] text-zinc-200 rounded-xl px-3 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer font-medium"
+            className="w-full bg-[#121212] border border-[#2a2a2a] text-zinc-200 rounded-xl px-2.5 py-2.5 text-xs focus:ring-2 focus:ring-orange-500 focus:outline-none cursor-pointer font-medium"
           >
-            <option value="all">🥩 All Protein Pairings</option>
-            <option value="Beef">Beef (Brisket, Ribs)</option>
+            <option value="all">🥩 All Pairings</option>
+            <option value="Beef">Beef (Brisket)</option>
             <option value="Pork">Pork (Shoulder, Ribs)</option>
             <option value="Chicken">Chicken & Poultry</option>
             <option value="Turkey">Turkey</option>
@@ -229,7 +280,9 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
               {/* TOP BADGES */}
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border ${
-                  item.category === 'Pure Wood Species'
+                  item.category === 'Smoker Wood Chips'
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 font-extrabold'
+                    : item.category === 'Pure Wood Species'
                     ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                     : item.category === 'Commercial Pellets'
                     ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
@@ -313,18 +366,29 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
                 <span>Specs & Chemistry</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setRestockItem(item);
-                  setRestockBagLbs(hopperCapacityLbs);
-                  setRestockPrice(Number((hopperCapacityLbs * 0.75).toFixed(2)));
-                }}
-                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-black rounded-xl text-[11px] shadow-md transition-all cursor-pointer flex items-center space-x-1"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Restock Bag</span>
-              </button>
+              {onSelectFuel ? (
+                <button
+                  type="button"
+                  onClick={() => onSelectFuel(item)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-black rounded-xl text-[11px] shadow-md transition-all cursor-pointer flex items-center space-x-1"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Select Fuel</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRestockItem(item);
+                    setRestockBagLbs(hopperCapacityLbs);
+                    setRestockPrice(Number((hopperCapacityLbs * 0.75).toFixed(2)));
+                  }}
+                  className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-black rounded-xl text-[11px] shadow-md transition-all cursor-pointer flex items-center space-x-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Restock Bag</span>
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -539,4 +603,16 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
       )}
     </div>
   );
+
+  if (isOpen) {
+    return (
+      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm p-3 sm:p-6 flex items-center justify-center overflow-y-auto">
+        <div className="relative w-full max-w-5xl">
+          {explorerContent}
+        </div>
+      </div>
+    );
+  }
+
+  return explorerContent;
 };

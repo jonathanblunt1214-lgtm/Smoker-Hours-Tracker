@@ -1,5 +1,5 @@
-// Smoke Stack Pitmaster - Progressive Web App Service Worker
-const CACHE_NAME = 'smokestack-cache-v1';
+// Smoke Stack Pitmaster - Progressive Web App & Cross-Format Service Worker
+const CACHE_NAME = 'smokestack-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -54,3 +54,56 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Background Push Notification Event Handling for Mobile PWAs and Browsers
+self.addEventListener('push', (event) => {
+  let data = {
+    title: '🔥 Smoke Stack Alert',
+    body: 'Time to check internal meat temperature & pit status!',
+  };
+
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data.body = event.data.text();
+    }
+  }
+
+  const options = {
+    body: data.body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    vibrate: [200, 100, 200, 100, 400],
+    data: data.url || '/',
+    actions: [
+      { action: 'open_app', title: 'Open Smoke Log' },
+      { action: 'snooze', title: 'Snooze 10m' }
+    ],
+    requireInteraction: true,
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || '🔥 Smoke Stack Reminder', options)
+  );
+});
+
+// Handle Notification Clicks
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  if (event.action === 'open_app' || !event.action) {
+    event.waitUntil(
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const client of clientList) {
+          if (client.url && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        if (clients.openWindow) {
+          return clients.openWindow(event.notification.data || '/');
+        }
+      })
+    );
+  }
+});
+

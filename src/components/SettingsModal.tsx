@@ -1,24 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import {
   googleSignIn,
   saveToGoogleDrive,
   loadFromGoogleDrive,
+  getAccessToken,
 } from '../lib/driveSync';
 import { SmokerProfile, CookLog, FuelLog, FederatedLearningConfig, FederatedPoolStats, CustomSmokerSpec, ManufacturerSmokerSpec, LowPowerModeSettings, LocalUserProfile, OneDriveAccount } from '../types';
 import { calculateUserAccount, getUserLevelThresholds } from '../utils/userLeveling';
-import { loadFederatedLearningConfig, saveFederatedLearningConfig, loadSavedCustomSmokers, saveSavedCustomSmokers, loadSavedManufacturerSmokers, saveSavedManufacturerSmokers, getStorageStats, compactAndOptimizeStorage, DEFAULT_GRANULAR_SHARING, getAutoClearInterval, setAutoClearInterval, executeCacheClear, getNextAutoClearDateFormatted, AutoClearIntervalOption } from '../utils/storage';
+import { MasterSyncEngine, triggerMasterVersionSync } from '../services/masterVersionSyncService';
+import { loadFederatedLearningConfig, saveFederatedLearningConfig, loadSavedCustomSmokers, saveSavedCustomSmokers, loadSavedManufacturerSmokers, saveSavedManufacturerSmokers, getStorageStats, compactAndOptimizeStorage, DEFAULT_GRANULAR_SHARING, getAutoClearInterval, setAutoClearInterval, executeCacheClear, getNextAutoClearDateFormatted, AutoClearIntervalOption, saveLocalUserProfile } from '../utils/storage';
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
-import { isMasterAdmin, isAdminUser, getSubAdmins, addSubAdmin, removeSubAdmin } from '../utils/adminAuth';
+import { ALL_SMOKERS_DATABASE, ExtendedSmokerSpec } from '../data/smokerDatabases';
+import { isMasterAdmin, isAdminUser, getSubAdmins, addSubAdmin, removeSubAdmin, MASTER_ADMIN_EMAIL } from '../utils/adminAuth';
+import { saveActiveUserSession } from '../utils/userAuthSession';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { TermsOfServiceModal } from './TermsOfServiceModal';
 import { SmokerModManager } from './SmokerModManager';
 import { PushAndAlexaHub } from './PushAndAlexaHub';
+import { MasterVersionSyncCard } from './MasterVersionSyncCard';
+import { ScreenOptimizerCard } from './ScreenOptimizerCard';
+import { SmokerUnitProfileChart } from './SmokerUnitProfileChart';
+import { CharGPTProfileLinkCard } from './CharGPTProfileLinkCard';
+import { ErrorBoundary } from './ErrorBoundary';
+import { formatFuelOnHandWeight } from '../utils/tempUtils';
 import {
   Settings,
   X,
   Thermometer,
-  Bluetooth,
+  Maximize2,
   Cloud,
   CloudUpload,
   CloudDownload,
@@ -65,8 +75,12 @@ import {
   Check,
   Info,
   Crown,
+  Globe,
   Clock,
   Cpu,
+  Search,
+  Lock,
+  Bot,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -85,7 +99,8 @@ interface SettingsModalProps {
   onToggleForceOffline: () => void;
   autoSyncDrive: boolean;
   onToggleAutoSync: () => void;
-  onOpenBluetoothModal: () => void;
+  autoSyncNewCooks?: boolean;
+  onToggleAutoSyncNewCooks?: () => void;
   onOpenDriveModal: () => void;
   isDriveConnected?: boolean;
   driveUserEmail?: string | null;
@@ -157,7 +172,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleForceOffline,
   autoSyncDrive,
   onToggleAutoSync,
-  onOpenBluetoothModal,
+  autoSyncNewCooks = true,
+  onToggleAutoSyncNewCooks,
   onOpenDriveModal,
   isDriveConnected = false,
   driveUserEmail,
@@ -181,7 +197,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
 
   // Auto Backup, Smoker Specs & Federated Learning Configuration State
-  const [dataSubTab, setDataSubTab] = useState<'account' | 'smokers' | 'cloud' | 'federated' | 'local'>(
+  const [dataSubTab, setDataSubTab] = useState<'account' | 'master_sync' | 'smokers' | 'cloud' | 'federated' | 'local'>(
     initialTab === 'smokers' ? 'smokers' : 'account'
   );
 
@@ -193,56 +209,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       } else {
         setActiveTab(initialTab || 'appearance');
       }
+      try {
+        const saved = localStorage.getItem('pitmaster_local_user_account');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setLocalAccount((prev) => ({
+            ...prev,
+            ...parsed,
+            name: parsed.name || currentUser?.displayName || 'Pitmaster Guest',
+            email: parsed.email || currentUser?.email || '',
+            title: parsed.title || 'Guest Pitmaster',
+          }));
+        } else if (currentUser) {
+          setLocalAccount((prev) => ({
+            ...prev,
+            name: currentUser.displayName || 'Pitmaster Guest',
+            email: currentUser.email || '',
+            title: 'Verified Pitmaster',
+          }));
+        }
+      } catch (e) {}
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, currentUser]);
 
   // Local User Profile Account state
   const [localAccount, setLocalAccount] = useState<LocalUserProfile>(() => {
-    try {
-      const saved = localStorage.getItem('pitmaster_local_user_account');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (!parsed.rigs || parsed.rigs.length === 0) {
-          parsed.rigs = [
-            profile || {
-              id: 'rig-pitboss-5series',
-              name: 'Pit Boss Copperhead 5-Series Vertical',
-              model: 'Copperhead 5-Series',
-              smokerType: 'Vertical Pellet Smoker',
-              fuelType: 'Pellets',
-              initialHours: 148.25,
-              currentHours: 148.25,
-              pelletHopperCapacityLbs: 60,
-              maintenanceTasks: [],
-              appliedModIds: [],
-              appliedMods: [],
-            },
-          ];
-          parsed.activeRigId = parsed.rigs[0].id;
-        }
-        return parsed;
-      }
-    } catch (e) {}
     const defaultRig = profile || {
-      id: 'rig-pitboss-5series',
-      name: 'Pit Boss Copperhead 5-Series Vertical',
-      model: 'Copperhead 5-Series',
-      smokerType: 'Vertical Pellet Smoker',
+      id: 'rig-default-1',
+      name: '',
+      model: '',
+      smokerType: '' as any,
       fuelType: 'Pellets',
-      initialHours: 148.25,
-      currentHours: 148.25,
-      pelletHopperCapacityLbs: 60,
+      initialHours: 0,
+      currentHours: 0,
+      pelletHopperCapacityLbs: 0,
       maintenanceTasks: [],
       appliedModIds: [],
       appliedMods: [],
     };
+    try {
+      const saved = localStorage.getItem('pitmaster_local_user_account');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const safeRigs = parsed.rigs && Array.isArray(parsed.rigs) ? parsed.rigs : [];
+        const nameVal = parsed.name || 'Pitmaster Guest';
+        const emailVal = parsed.email || '';
+        const titleVal = parsed.title || 'Guest Pitmaster';
+        return {
+          createdAt: new Date().toISOString().slice(0, 10),
+          rememberMe: true,
+          ...parsed,
+          name: nameVal,
+          email: emailVal,
+          title: titleVal,
+          rigs: safeRigs,
+          activeRigId: parsed.activeRigId || safeRigs[0]?.id || undefined,
+        };
+      }
+    } catch (e) {}
     return {
-      name: 'Jonathan Blunt',
-      email: 'jonathanblunt1214@gmail.com',
-      title: 'Head Pitmaster',
+      name: 'Pitmaster Guest',
+      email: '',
+      title: 'Guest Pitmaster',
       createdAt: new Date().toISOString().slice(0, 10),
-      rigs: [defaultRig],
-      activeRigId: defaultRig.id,
+      rememberMe: true,
+      rigs: [],
+      activeRigId: undefined,
     };
   });
 
@@ -266,12 +298,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [newRigType, setNewRigType] = useState('Vertical Pellet Smoker');
   const [newRigFuel, setNewRigFuel] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Pellets');
   const [newRigHours, setNewRigHours] = useState('0');
-  const [newRigHopper, setNewRigHopper] = useState('20');
+  const [newRigHopper, setNewRigHopper] = useState('0');
+  const [newRigBowlCapacity, setNewRigBowlCapacity] = useState('0');
 
   const [editingRigId, setEditingRigId] = useState<string | null>(null);
   const [editRigName, setEditRigName] = useState('');
   const [editRigHours, setEditRigHours] = useState('0');
-  const [editRigHopper, setEditRigHopper] = useState('20');
+  const [editRigHopper, setEditRigHopper] = useState('0');
+  const [editRigBowlCapacity, setEditRigBowlCapacity] = useState('0');
+
+  // Account Fuel On Hand & Manual Hours Override / Profile Upload State
+  const [accountFuelOnHandInput, setAccountFuelOnHandInput] = useState<string>(
+    localAccount?.fuelOnHand || '120 lbs'
+  );
+  const [overrideMode, setOverrideMode] = useState<'total' | 'baseline'>('total');
+  const [overrideHoursInput, setOverrideHoursInput] = useState<string>('0');
+  const [overrideSelectedRigId, setOverrideSelectedRigId] = useState<string>(
+    localAccount?.activeRigId || profile?.id || 'rig-1'
+  );
+  const [overrideSyncFeedbackMsg, setOverrideSyncFeedbackMsg] = useState<string | null>(null);
+  const [isOverrideSyncing, setIsOverrideSyncing] = useState<boolean>(false);
+  const profileFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [personaDetectionNotice, setPersonaDetectionNotice] = useState<{ persona: string; explanation: string } | null>(null);
 
   const [serverSyncStatus, setServerSyncStatus] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [isServerSyncing, setIsServerSyncing] = useState(false);
@@ -312,9 +361,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleClearRigSettings = () => {
+    if (window.confirm('Are you sure you want to clear the active smoker rig specifications and reset all custom settings?')) {
+      setActiveSpecName('');
+      setActiveSpecBrand('');
+      setActiveSpecCategory('');
+      setActiveSpecFuelType('');
+      setActiveSpecBaselineBurn('');
+      setActiveSpecHighHeatBurn('');
+      setActiveSpecCapacity('');
+      setActiveSpecBowlCapacity('');
+      setActiveSpecArea('');
+      setActiveSpecThermalRating('');
+      setActiveSpecGauge('');
+      setActiveSpecDraft('');
+      setActiveSpecInitialHours('');
+
+      if (profile && onUpdateProfile) {
+        onUpdateProfile({
+          ...profile,
+          name: '',
+          model: '',
+          smokerType: '' as any,
+          fuelType: 'Pellets',
+          pelletHopperCapacityLbs: 0,
+          bowlCapacityLbs: 0,
+          customSpecs: undefined,
+          manufacturerSpecs: undefined,
+        });
+      }
+
+      setServerSyncStatus({ type: 'success', text: '🧹 Active rig settings cleared to default baseline specifications.' });
+      setTimeout(() => setServerSyncStatus(null), 4000);
+    }
+  };
+
+  const handleAutoDetectPersonaFromLogs = () => {
+    const logs = currentAppData?.cookLogs || [];
+    let brisketCount = 0;
+    let offsetCount = 0;
+    let competitionCount = 0;
+    let thermalReadingCount = 0;
+    let kcRibsCount = 0;
+
+    logs.forEach((log) => {
+      const text = `${log.proteinType || ''} ${log.proteinCut || ''} ${log.smokerType || ''} ${log.finishedNotes || ''} ${log.saucesGlazes || ''} ${log.nextTimeNotes || ''}`.toLowerCase();
+      if (text.includes('brisket') || text.includes('offset') || text.includes('stick') || text.includes('oak')) {
+        if (text.includes('brisket')) brisketCount++;
+        if (text.includes('offset') || text.includes('stick')) offsetCount++;
+      }
+      if ((log.ratings?.overall || 0) >= 4.5 || text.includes('kcbs') || text.includes('competition') || text.includes('tenderness') || text.includes('turn-in')) {
+        competitionCount++;
+      }
+      if ((log.temperatureReadings?.length || 0) >= 5 || text.includes('stall') || text.includes('ambient') || text.includes('thermodynam')) {
+        thermalReadingCount += (log.temperatureReadings?.length || 0);
+      }
+      if (text.includes('rib') || text.includes('pork shoulder') || text.includes('glaze') || text.includes('burnt ends') || text.includes('sauce') || text.includes('hickory')) {
+        kcRibsCount++;
+      }
+    });
+
+    let detected: 'Master Pitmaster' | 'Texas Offset Specialist' | 'Competition BBQ Judge' | 'Thermal Chemist & Science' | 'Kansas City Pit Master' = 'Master Pitmaster';
+    let rationale = '';
+
+    if (brisketCount >= 2 || offsetCount >= 2) {
+      detected = 'Texas Offset Specialist';
+      rationale = `Detected ${brisketCount} Brisket cook(s) & ${offsetCount} Offset log(s) with wood splits. Recommended for heavy post-oak low & slow cooks.`;
+    } else if (competitionCount >= 2) {
+      detected = 'Competition BBQ Judge';
+      rationale = `Detected ${competitionCount} high-scoring / KCBS style cooks. Recommended for competition scoring & precision timing.`;
+    } else if (thermalReadingCount >= 10) {
+      detected = 'Thermal Chemist & Science';
+      rationale = `Detected ${thermalReadingCount} thermal probe readings & stall entries. Recommended for thermodynamic analysis.`;
+    } else if (kcRibsCount >= 2) {
+      detected = 'Kansas City Pit Master';
+      rationale = `Detected ${kcRibsCount} rib, glaze & pork shoulder cooks. Recommended for sweet hickory glazes & sauce pairing.`;
+    } else {
+      detected = 'Master Pitmaster';
+      rationale = `Analyzed ${logs.length} cook logs. Set to versatile Master Pitmaster baseline.`;
+    }
+
+    const updatedAccount = {
+      ...localAccount,
+      charGPTPersona: detected,
+    };
+
+    setLocalAccount(updatedAccount);
+    saveLocalUserProfile(updatedAccount);
+
+    setPersonaDetectionNotice({
+      persona: detected,
+      explanation: rationale,
+    });
+    setServerSyncStatus({ type: 'success', text: `✨ Auto-Detected CharGPT Persona: "${detected}" based on log analysis!` });
+    setTimeout(() => setServerSyncStatus(null), 5000);
+  };
+
   useEffect(() => {
     if (isOpen && dataSubTab === 'account') {
-      const email = currentUser?.email || localAccount.email || 'jonathanblunt1214@gmail.com';
+      const email = currentUser?.email || localAccount.email || '';
       fetch(`/api/account?email=${encodeURIComponent(email)}`)
         .then((res) => res.json())
         .then((data) => {
@@ -345,7 +490,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } catch (e) {}
     return {
       connected: false,
-      email: 'jonathanblunt1214@outlook.com',
+      email: '',
       lastSync: null,
       autoSync: false,
     };
@@ -383,27 +528,80 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Smoker Specifications & Active Pit State
   const activeProfile = profile || currentAppData?.profile;
+  const isProfileBlank = !activeProfile?.name || activeProfile.name.trim() === '' || activeProfile.name === 'None Selected' || !activeProfile.model;
   const effectiveSpecs = getEffectiveSmokerSpecs(activeProfile);
 
-  const [activeSpecName, setActiveSpecName] = useState(effectiveSpecs.displayName);
-  const [activeSpecBrand, setActiveSpecBrand] = useState(effectiveSpecs.brandOrBuilder);
-  const [activeSpecCategory, setActiveSpecCategory] = useState(effectiveSpecs.category);
-  const [activeSpecFuelType, setActiveSpecFuelType] = useState(effectiveSpecs.fuelType);
-  const [activeSpecBaselineBurn, setActiveSpecBaselineBurn] = useState(effectiveSpecs.baselineBurnRateLbsHr);
-  const [activeSpecHighHeatBurn, setActiveSpecHighHeatBurn] = useState(effectiveSpecs.highHeatBurnRateLbsHr);
-  const [activeSpecCapacity, setActiveSpecCapacity] = useState(effectiveSpecs.hopperCapacityLbs);
-  const [activeSpecArea, setActiveSpecArea] = useState(effectiveSpecs.cookingAreaSqIn);
-  const [activeSpecThermalRating, setActiveSpecThermalRating] = useState(effectiveSpecs.thermalEfficiencyRating);
-  const [activeSpecGauge, setActiveSpecGauge] = useState(effectiveSpecs.metalGaugeOrInsulation);
-  const [activeSpecDraft, setActiveSpecDraft] = useState(effectiveSpecs.draftOrController);
-  const [activeSpecInitialHours, setActiveSpecInitialHours] = useState(activeProfile?.initialHours ?? 0);
+  const [activeSpecName, setActiveSpecName] = useState(isProfileBlank ? '' : (activeProfile?.name || ''));
+  const [activeSpecBrand, setActiveSpecBrand] = useState(isProfileBlank ? '' : (activeProfile?.model || activeProfile?.manufacturerSpecs?.brand || ''));
+  const [activeSpecCategory, setActiveSpecCategory] = useState(isProfileBlank ? '' : (activeProfile?.smokerType || activeProfile?.manufacturerSpecs?.category || ''));
+  const [activeSpecFuelType, setActiveSpecFuelType] = useState(isProfileBlank ? '' : (activeProfile?.fuelType || ''));
+  const [activeSpecBaselineBurn, setActiveSpecBaselineBurn] = useState<string | number>(isProfileBlank ? '' : (activeProfile?.customSpecs?.baselineBurnRateLbsHr || activeProfile?.manufacturerSpecs?.factoryBaselineBurnRateLbsHr || ''));
+  const [activeSpecHighHeatBurn, setActiveSpecHighHeatBurn] = useState<string | number>(isProfileBlank ? '' : (activeProfile?.manufacturerSpecs?.factoryHighHeatBurnRateLbsHr || ''));
+  const [activeSpecCapacity, setActiveSpecCapacity] = useState<string | number>(isProfileBlank ? '' : (activeProfile?.pelletHopperCapacityLbs || ''));
+  const [activeSpecBowlCapacity, setActiveSpecBowlCapacity] = useState<string | number>(
+    isProfileBlank ? '' : (activeProfile?.bowlCapacityLbs || activeProfile?.manufacturerSpecs?.bowlCapacityLbs || activeProfile?.customSpecs?.bowlCapacityLbs || '')
+  );
+  const [activeSpecArea, setActiveSpecArea] = useState<string | number>(isProfileBlank ? '' : (activeProfile?.manufacturerSpecs?.cookingAreaSqIn || ''));
+  const [activeSpecThermalRating, setActiveSpecThermalRating] = useState(isProfileBlank ? '' : (activeProfile?.manufacturerSpecs?.thermalEfficiencyRating || ''));
+  const [activeSpecGauge, setActiveSpecGauge] = useState(isProfileBlank ? '' : (activeProfile?.manufacturerSpecs?.insulationType || ''));
+  const [activeSpecDraft, setActiveSpecDraft] = useState(isProfileBlank ? '' : (activeProfile?.manufacturerSpecs?.controllerType || ''));
+  const [activeSpecInitialHours, setActiveSpecInitialHours] = useState<string | number>(isProfileBlank ? '' : (activeProfile?.initialHours ?? ''));
+
+  const [showSmokerSuggestions, setShowSmokerSuggestions] = useState(false);
+
+  const autoPopulateFromDatabaseMatch = (spec: ExtendedSmokerSpec) => {
+    setActiveSpecName(spec.brandModel || `${spec.brand} ${spec.model}`);
+    setActiveSpecBrand(spec.brand);
+    setActiveSpecCategory(spec.category || spec.smokerTypeKey);
+    setActiveSpecFuelType(spec.fuelType);
+    setActiveSpecBaselineBurn(spec.factoryBaselineBurnRateLbsHr);
+    setActiveSpecHighHeatBurn(spec.factoryHighHeatBurnRateLbsHr);
+    setActiveSpecCapacity(spec.standardCapacityLbs);
+    const mfgBowlCap = (spec as any).bowlCapacityLbs || 0;
+    setActiveSpecBowlCapacity(mfgBowlCap);
+    setActiveSpecArea(spec.cookingAreaSqIn);
+    setActiveSpecThermalRating(spec.thermalEfficiencyRating);
+    setActiveSpecGauge(spec.insulationType);
+    setActiveSpecDraft(spec.manufacturerNotes || (spec.keyFeatures && spec.keyFeatures[0]) || 'PID Digital Controller');
+    
+    // Automatically convert manufacturer capacity to account metric
+    const effectiveCapLbs = mfgBowlCap > 0 ? mfgBowlCap : spec.standardCapacityLbs;
+    if (effectiveCapLbs > 0) {
+      try {
+        const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+        const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+        acc.fuelOnHand = `${effectiveCapLbs} lbs`;
+        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+        setLocalAccount(acc);
+        setAccountFuelOnHandInput(`${effectiveCapLbs} lbs`);
+      } catch (e) {}
+    }
+
+    setShowSmokerSuggestions(false);
+    setSmokerSpecSaveStatus(`✨ Auto-populated specs for ${spec.brandModel} & converted manufacturer capacity (${effectiveCapLbs} lbs) to account metric!`);
+    setTimeout(() => setSmokerSpecSaveStatus(null), 4000);
+  };
+
+  const handleSmokerNameInputChange = (inputVal: string) => {
+    setActiveSpecName(inputVal);
+    setShowSmokerSuggestions(true);
+  };
+
+  const matchingDatabaseSmokers = React.useMemo(() => {
+    if (!activeSpecName || activeSpecName.trim().length < 1) return [];
+    const q = activeSpecName.trim().toLowerCase();
+    return ALL_SMOKERS_DATABASE.filter((s) => {
+      const text = `${s.brandModel} ${s.brand} ${s.model} ${s.category} ${s.smokerTypeKey} ${s.fuelType}`.toLowerCase();
+      return text.includes(q);
+    }).slice(0, 8);
+  }, [activeSpecName]);
 
   // Account Settings: Initial Smoker Hours & Sub-Admin Controls State
   const [subAdminsList, setSubAdminsList] = useState<string[]>(getSubAdmins());
   const [newSubAdminInput, setNewSubAdminInput] = useState('');
   const [subAdminMsg, setSubAdminMsg] = useState<string | null>(null);
   const [accountInitialHours, setAccountInitialHours] = useState<number>(activeProfile?.initialHours ?? 0);
-  const [globalBulkBaselineInput, setGlobalBulkBaselineInput] = useState('100');
+  const [globalBulkBaselineInput, setGlobalBulkBaselineInput] = useState('');
 
   useEffect(() => {
     if (activeProfile?.initialHours !== undefined) {
@@ -511,22 +709,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [smokerSpecSaveStatus, setSmokerSpecSaveStatus] = useState<string | null>(null);
 
-  // Sync state if activeProfile changes
+  const prevActiveProfileKeyRef = useRef<string | null>(null);
+
+  // Sync state ONLY if activeProfile actually changes to a different profile
   useEffect(() => {
     if (activeProfile) {
-      const eff = getEffectiveSmokerSpecs(activeProfile);
-      setActiveSpecName(eff.displayName);
-      setActiveSpecBrand(eff.brandOrBuilder);
-      setActiveSpecCategory(eff.category);
-      setActiveSpecFuelType(eff.fuelType);
-      setActiveSpecBaselineBurn(eff.baselineBurnRateLbsHr);
-      setActiveSpecHighHeatBurn(eff.highHeatBurnRateLbsHr);
-      setActiveSpecCapacity(eff.hopperCapacityLbs);
-      setActiveSpecArea(eff.cookingAreaSqIn);
-      setActiveSpecThermalRating(eff.thermalEfficiencyRating);
-      setActiveSpecGauge(eff.metalGaugeOrInsulation);
-      setActiveSpecDraft(eff.draftOrController);
-      setActiveSpecInitialHours(activeProfile.initialHours ?? 0);
+      const currentKey = `${activeProfile.id || 'no-id'}:${activeProfile.name || ''}:${activeProfile.model || ''}:${activeProfile.smokerType || ''}:${activeProfile.fuelType || ''}`;
+      
+      if (prevActiveProfileKeyRef.current !== currentKey) {
+        prevActiveProfileKeyRef.current = currentKey;
+        const eff = getEffectiveSmokerSpecs(activeProfile);
+        setActiveSpecName(eff.displayName);
+        setActiveSpecBrand(eff.brandOrBuilder);
+        setActiveSpecCategory(eff.category);
+        setActiveSpecFuelType(eff.fuelType);
+        setActiveSpecBaselineBurn(eff.baselineBurnRateLbsHr);
+        setActiveSpecHighHeatBurn(eff.highHeatBurnRateLbsHr);
+        setActiveSpecCapacity(eff.hopperCapacityLbs);
+        setActiveSpecArea(eff.cookingAreaSqIn);
+        setActiveSpecThermalRating(eff.thermalEfficiencyRating);
+        setActiveSpecGauge(eff.metalGaugeOrInsulation);
+        setActiveSpecDraft(eff.draftOrController);
+        setActiveSpecInitialHours(activeProfile.initialHours ?? 0);
+      }
     }
   }, [activeProfile]);
 
@@ -537,10 +742,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [newSmokerBrandOrBuilder, setNewSmokerBrandOrBuilder] = useState('');
   const [newSmokerCategory, setNewSmokerCategory] = useState('Vertical Pellet Smoker');
   const [newSmokerFuelType, setNewSmokerFuelType] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Pellets');
-  const [newSmokerBaselineBurn, setNewSmokerBaselineBurn] = useState<number>(1.20);
-  const [newSmokerHighHeatBurn, setNewSmokerHighHeatBurn] = useState<number>(2.50);
-  const [newSmokerHopperCapacity, setNewSmokerHopperCapacity] = useState<number>(20);
-  const [newSmokerCookingArea, setNewSmokerCookingArea] = useState<number>(800);
+  const [newSmokerBaselineBurn, setNewSmokerBaselineBurn] = useState<number | string>(1.20);
+  const [newSmokerHighHeatBurn, setNewSmokerHighHeatBurn] = useState<number | string>(2.50);
+  const [newSmokerHopperCapacity, setNewSmokerHopperCapacity] = useState<number | string>(20);
+  const [newSmokerCookingArea, setNewSmokerCookingArea] = useState<number | string>(800);
   const [newSmokerThermalRating, setNewSmokerThermalRating] = useState<'Extreme' | 'High' | 'Standard' | 'Moderate'>('High');
   const [newSmokerGauge, setNewSmokerGauge] = useState('11-Gauge Heavy Steel');
   const [newSmokerDraft, setNewSmokerDraft] = useState('PID Wi-Fi Controller');
@@ -567,10 +772,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     saveFederatedLearningConfig(federatedConfig);
+    triggerMasterVersionSync().catch(() => {});
   }, [federatedConfig]);
 
+  const fetchFederatedStatsWithAlias = (alias: string) => {
+    fetch(`/api/federated-learning/stats?pitmasterAlias=${encodeURIComponent(alias)}`)
+      .then((res) => res.json())
+      .then((data: FederatedPoolStats) => {
+        setPoolStats(data);
+        if (data && typeof data.userContributions === 'number') {
+          setFederatedConfig((prev) => {
+            if (prev.contributedCount !== data.userContributions) {
+              const updated = { ...prev, contributedCount: data.userContributions };
+              saveFederatedLearningConfig(updated);
+              return updated;
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
-    if (dataSubTab === 'federated') {
+    if (isOpen && activeTab === 'data' && dataSubTab === 'federated') {
       const pitmasterAlias = currentUser?.email || localAccount.email || localAccount.name || 'guest';
       const userEmail = currentUser?.email || localAccount.email;
       const hasAccount = !!(userEmail || (localAccount.name && localAccount.name !== 'Pitmaster Guest' && localAccount.name.trim() !== ''));
@@ -582,20 +807,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pitmasterAlias }),
         })
-          .then(() => fetch('/api/federated-learning/stats'))
-          .then((res) => res.json())
-          .then((data) => setPoolStats(data))
+          .then(() => fetchFederatedStatsWithAlias(pitmasterAlias))
           .catch(() => {});
       } else {
         // Otherwise run pre-load compliance sweep & fetch stats
         fetch('/api/federated-learning/purge-unverified', { method: 'POST' })
-          .then(() => fetch('/api/federated-learning/stats'))
-          .then((res) => res.json())
-          .then((data) => setPoolStats(data))
+          .then(() => fetchFederatedStatsWithAlias(pitmasterAlias))
           .catch(() => {});
       }
     }
-  }, [dataSubTab, federatedConfig.enabled, currentUser, localAccount]);
+  }, [isOpen, activeTab, dataSubTab, federatedConfig.enabled, currentUser, localAccount]);
 
   const toggleGranularPermission = (key: keyof import('../types').GranularDataSharingPermissions) => {
     const currentSharing = federatedConfig.granularSharing || DEFAULT_GRANULAR_SHARING;
@@ -620,7 +841,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleContributeCookLogs = async () => {
     const userEmail = currentUser?.email || localAccount.email;
     const hasAccount = !!(userEmail || (localAccount.name && localAccount.name !== 'Pitmaster Guest' && localAccount.name.trim() !== ''));
-    const pitmasterAlias = userEmail || localAccount.name || 'guest';
+    const pitmasterAlias = (userEmail || localAccount.name || 'verified_user').trim().toLowerCase();
 
     if (!hasAccount) {
       setContributionStatus({
@@ -642,19 +863,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const sharing = federatedConfig.granularSharing || DEFAULT_GRANULAR_SHARING;
 
       const anonymizedLogs = currentAppData.cookLogs.map((log) => ({
-        proteinType: sharing.shareProteinAndCuts ? (log.meatType || log.title || 'Beef') : '[Redacted by User Setting]',
-        proteinCut: sharing.shareProteinAndCuts ? (log.title || 'Brisket') : '[Redacted by User Setting]',
+        proteinType: sharing.shareProteinAndCuts ? (log.proteinType || 'Beef') : '[Redacted by User Setting]',
+        proteinCut: sharing.shareProteinAndCuts ? (log.proteinCut || log.title || 'Brisket') : '[Redacted by User Setting]',
         meatWeightLbs: sharing.shareMeatWeightAndDimensions ? (log.meatWeightLbs || 12.5) : undefined,
-        smokerType: sharing.shareSmokerSpecsAndMods ? (currentAppData.profile?.model || 'Pellet Smoker') : '[Redacted by User Setting]',
-        fuelType: sharing.shareFuelAndWoodBlends ? (log.woodBlend || 'Post Oak') : '[Redacted by User Setting]',
-        cookingTemp: sharing.shareThermalTempCurves ? (log.targetTemp || 225) : undefined,
-        stallTemp: sharing.shareThermalTempCurves ? (log.stallTemp || 165) : undefined,
+        smokerType: sharing.shareSmokerSpecsAndMods ? (log.smokerType || currentAppData.profile?.model || 'Pellet Smoker') : '[Redacted by User Setting]',
+        fuelType: sharing.shareFuelAndWoodBlends ? (log.fuelType || 'Post Oak') : '[Redacted by User Setting]',
+        cookingTemp: sharing.shareThermalTempCurves ? ((log.temperatureReadings?.[0] as any)?.pitTemp || 225) : undefined,
+        stallTemp: sharing.shareThermalTempCurves ? 165 : undefined,
         stallDurationHrs: sharing.shareThermalTempCurves ? 2.0 : undefined,
-        hoursLogged: sharing.shareThermalTempCurves ? (log.totalHours || 8) : undefined,
-        ratings: sharing.shareRatingsAndFlavorScores ? { overall: log.rating || 5, smokeFlavor: 5 } : undefined,
+        hoursLogged: sharing.shareThermalTempCurves ? (log.hoursLogged || 8) : undefined,
+        ratings: sharing.shareRatingsAndFlavorScores ? { overall: log.ratings?.overall || 5, smokeFlavor: log.ratings?.bark || 5 } : undefined,
         weatherZip: sharing.shareWeatherAndLocation ? (log.weatherConditions || 'Zipcode Shared') : undefined,
         rubRecipe: sharing.shareCustomRubRecipes ? log.seasoningRubs : undefined,
-        photoIncluded: sharing.shareCookPhotos ? !!log.photoUrls?.length : false,
+        photoIncluded: sharing.shareCookPhotos ? !!(log.photoUrl || log.photoUrls?.length) : false,
       }));
 
       const res = await fetch('/api/federated-learning/contribute', {
@@ -662,18 +883,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pitmasterAlias,
+          userEmail,
+          accountName: localAccount.name,
           hasAccount: true,
           termsAccepted: true,
+          anonymizeData: federatedConfig.anonymizeData,
           anonymizedLogs,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
-        const updatedCount = (federatedConfig.contributedCount || 0) + anonymizedLogs.length;
+        const syncedUserCount = typeof data.userContributions === 'number' ? data.userContributions : anonymizedLogs.length;
         const newConfig: FederatedLearningConfig = {
           ...federatedConfig,
-          contributedCount: updatedCount,
+          contributedCount: syncedUserCount,
           lastSyncedAt: new Date().toISOString(),
         };
         setFederatedConfig(newConfig);
@@ -681,13 +905,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         setContributionStatus({
           type: 'success',
-          text: `Contributed ${anonymizedLogs.length} cook log(s) to server pool! Total pool count: ${(data.totalPoolCount || 1547).toLocaleString()} cooks. (+${anonymizedLogs.length * 50} Pitmaster XP awarded)`,
+          text: `Contributed ${anonymizedLogs.length} cook log(s) to server pool! Total pool count: ${(data.totalPoolCount || anonymizedLogs.length).toLocaleString()} cooks. (+${anonymizedLogs.length * 50} Pitmaster XP awarded)`,
         });
 
-        fetch('/api/federated-learning/stats')
-          .then((r) => r.json())
-          .then((sData) => setPoolStats(sData))
-          .catch(() => {});
+        fetchFederatedStatsWithAlias(pitmasterAlias);
       } else {
         setContributionStatus({ type: 'error', text: data.error || 'Contribution failed' });
       }
@@ -729,10 +950,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           text: `Consent Revoked: Auto-sync for Charbot disabled and all logs purged until Terms of Service is accepted again.`,
         });
 
-        fetch('/api/federated-learning/stats')
-          .then((r) => r.json())
-          .then((sData) => setPoolStats(sData))
-          .catch(() => {});
+        fetchFederatedStatsWithAlias(pitmasterAlias);
       } else {
         setContributionStatus({ type: 'error', text: data.error || 'Revocation failed.' });
       }
@@ -829,8 +1047,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setAutoBackupStatus({ type: 'info', text: 'Executing daily automatic cloud backup...' });
 
     try {
-      if (accessToken && currentAppData) {
-        await saveToGoogleDrive(accessToken, currentAppData);
+      const token = accessToken || (await getAccessToken()) || '';
+      if (token && currentAppData) {
+        await saveToGoogleDrive(token, currentAppData);
       }
 
       const nowIso = new Date().toISOString();
@@ -846,10 +1065,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Google Drive Action: Backup Now
   const handleGoogleDriveBackup = async () => {
-    if (!hasUserAccount || !accessToken || !currentAppData) {
+    const token = accessToken || (await getAccessToken()) || '';
+    if (!currentAppData || !token) {
       setDriveActionStatus({
         type: 'error',
-        text: '🔒 User Account Required: Non-local cloud backups require an active signed-in user account. Please link Google Account below.',
+        text: '🔒 Google Drive Authorization Required: Please click "Sign in with Google" below to link Drive storage access.',
       });
       return;
     }
@@ -857,7 +1077,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDriveActionStatus({ type: 'info', text: 'Uploading backup to Google Drive...' });
 
     try {
-      const res = await saveToGoogleDrive(accessToken, currentAppData);
+      const res = await saveToGoogleDrive(token, currentAppData);
       setDriveActionStatus({
         type: 'success',
         text: `Google Drive backup complete! ${res.createdNew ? 'Created new file.' : 'Updated backup file.'}`,
@@ -871,10 +1091,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Google Drive Action: Restore Now
   const handleGoogleDriveRestore = async () => {
-    if (!hasUserAccount || !accessToken) {
+    const token = accessToken || (await getAccessToken()) || '';
+    if (!token) {
       setDriveActionStatus({
         type: 'error',
-        text: '🔒 User Account Required: Please sign in with Google Account first.',
+        text: '🔒 Google Drive Authorization Required: Please click "Sign in with Google" below to link Drive storage access.',
       });
       return;
     }
@@ -882,7 +1103,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDriveActionStatus({ type: 'info', text: 'Fetching backup from Google Drive...' });
 
     try {
-      const data = await loadFromGoogleDrive(accessToken);
+      const data = await loadFromGoogleDrive(token);
       if (data && onRestoreData) {
         const restoredAccount = data.userAccount || data.userProfile;
         if (restoredAccount) {
@@ -1237,8 +1458,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <Settings className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white leading-tight">Settings & Data Hub</h2>
-              <p className="text-xs text-zinc-400 mt-0.5 font-medium">Accounts, multi-destination backups, theme & probes</p>
+              <h2 className="text-lg font-bold text-white leading-tight">Settings</h2>
+              <p className="text-xs text-zinc-400 mt-0.5 font-medium">Manage accounts, backups, themes, and smoker hardware.</p>
             </div>
           </div>
           <button
@@ -1275,7 +1496,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Bell className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Alerts</span>
+            <span className="truncate">Alerts & Amazon</span>
           </button>
 
           <button
@@ -1308,33 +1529,125 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* TAB 1: APPEARANCE & DISPLAY */}
         {activeTab === 'appearance' && (
           <div className="space-y-3 animate-fade-in">
-            {/* Setting: Temperature Scale */}
-            <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 flex items-center justify-between">
-              <div className="flex items-center space-x-2.5 pr-3">
-                <Thermometer className="w-4 h-4 text-orange-400 shrink-0" />
+            {/* Automated Responsive Screen Calibration Indicator */}
+            <div className="bg-[#1e1e24] border border-[#2e2e38] rounded-xl p-3.5 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 shrink-0">
+                  <Maximize2 className="w-4 h-4" />
+                </div>
                 <div>
-                  <h4 className="text-xs sm:text-sm font-bold text-white">Temperature Scale</h4>
-                  <p className="text-[11px] text-zinc-400">Fahrenheit (°F) or Celsius (°C)</p>
+                  <h4 className="text-xs sm:text-sm font-bold text-white flex items-center space-x-2">
+                    <span>Automated Screen & CSS Optimizer</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                      ACTIVE
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-zinc-400">
+                    Automatically measures screen size and adapts grid layout & touch targets for all device screens.
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center bg-[#1a1a1a] p-1 rounded-lg border border-[#2a2a2a]">
+            </div>
+
+            {/* Setting: Global Imperial vs. Metric System Toggle */}
+            <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-4 space-y-3 shadow-md">
+              <div className="flex items-center justify-between pb-2 border-b border-[#2e2e2e]">
+                <div className="flex items-center space-x-2.5">
+                  <Globe className="w-5 h-5 text-orange-400 shrink-0" />
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-extrabold text-white">Global Unit System (Imperial vs. Metric)</h4>
+                    <p className="text-[11px] text-zinc-400">Controls temperature, meat/fuel weight, dimensions & liquid volume across all modules</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
+                  Active: {tempUnit === 'F' ? 'US Imperial (°F, lbs, in)' : 'Metric System (°C, kg, cm)'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
-                  onClick={tempUnit === 'C' ? onToggleTempUnit : undefined}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                    tempUnit === 'F' ? 'bg-orange-500 text-zinc-950 shadow-sm' : 'text-zinc-400 hover:text-white'
+                  onClick={() => {
+                    if (tempUnit !== 'F') onToggleTempUnit();
+                    localStorage.setItem('global_unit_system', 'imperial');
+                    window.dispatchEvent(new Event('unitSystemChanged'));
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    tempUnit === 'F'
+                      ? 'bg-gradient-to-r from-orange-500/20 via-amber-500/15 to-transparent border-orange-500 text-white shadow-md'
+                      : 'bg-[#1a1a1a] hover:bg-[#222222] border-[#2e2e2e] text-zinc-400'
                   }`}
                 >
-                  °F
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>🇺🇸 Imperial System</span>
+                      {tempUnit === 'F' && <Check className="w-3.5 h-3.5 text-orange-400" />}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">
+                      °F Temp • lbs Weight • in Size • gal Liquid
+                    </div>
+                  </div>
                 </button>
+
                 <button
                   type="button"
-                  onClick={tempUnit === 'F' ? onToggleTempUnit : undefined}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                    tempUnit === 'C' ? 'bg-orange-500 text-zinc-950 shadow-sm' : 'text-zinc-400 hover:text-white'
+                  onClick={() => {
+                    if (tempUnit !== 'C') onToggleTempUnit();
+                    localStorage.setItem('global_unit_system', 'metric');
+                    window.dispatchEvent(new Event('unitSystemChanged'));
+                  }}
+                  className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between ${
+                    tempUnit === 'C'
+                      ? 'bg-gradient-to-r from-orange-500/20 via-amber-500/15 to-transparent border-orange-500 text-white shadow-md'
+                      : 'bg-[#1a1a1a] hover:bg-[#222222] border-[#2e2e2e] text-zinc-400'
                   }`}
                 >
-                  °C
+                  <div className="space-y-0.5">
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>🌐 Metric System</span>
+                      {tempUnit === 'C' && <Check className="w-3.5 h-3.5 text-orange-400" />}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">
+                      °C Temp • kg Weight • cm Size • L Liquid
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* Apply Unit System to Pitmaster Account Profile Button */}
+              <div className="pt-2.5 border-t border-[#2e2e2e] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-[11px] text-zinc-300 font-mono">
+                  Sync & apply selected system ({tempUnit === 'F' ? 'US Imperial °F / lbs' : 'Metric System °C / kg'}) directly to Account Profile
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selectedSys = tempUnit === 'C' ? 'metric' : 'imperial';
+                    localStorage.setItem('global_unit_system', selectedSys);
+                    try {
+                      const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+                      const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+                      acc.unitSystem = selectedSys;
+
+                      // Convert account fuel on hand to matching unit
+                      if (acc.fuelOnHand) {
+                        acc.fuelOnHand = formatFuelOnHandWeight(acc.fuelOnHand, tempUnit);
+                        setAccountFuelOnHandInput(acc.fuelOnHand);
+                      }
+
+                      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                      setLocalAccount(acc);
+                      if (profile && onUpdateProfile) {
+                        onUpdateProfile({ ...profile, fuelOnHand: acc.fuelOnHand || profile.fuelOnHand });
+                      }
+                    } catch (e) {}
+                    window.dispatchEvent(new Event('unitSystemChanged'));
+                    alert(`✅ Global Unit System (${tempUnit === 'F' ? 'US Imperial (°F, lbs)' : 'Metric System (°C, kg)'}) applied to Pitmaster Account!`);
+                  }}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-extrabold text-xs rounded-lg transition-all cursor-pointer flex items-center justify-center space-x-1.5 shrink-0 shadow"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  <span>Apply to Account</span>
                 </button>
               </div>
             </div>
@@ -1550,6 +1863,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* TAB 3: CLOUD & PROBES */}
         {activeTab === 'cloud' && (
           <div className="space-y-3 animate-fade-in">
+            {/* Setting: Auto-Sync New Cook Logs */}
+            <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5 pr-3">
+                <Cloud className={`w-4 h-4 shrink-0 ${autoSyncNewCooks ? 'text-orange-400' : 'text-zinc-500'}`} />
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-white">Auto-Sync New Cook Logs</h4>
+                  <p className="text-[11px] text-zinc-400">Automatically upload new smoke entries to cloud server on save (or save locally to account when disabled)</p>
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={autoSyncNewCooks}
+                onChange={onToggleAutoSyncNewCooks || (() => {})}
+                label="Toggle Auto-Sync New Cooks"
+              />
+            </div>
+
             {/* Setting: Auto-Sync Drive */}
             <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 flex items-center justify-between">
               <div className="flex items-center space-x-2.5 pr-3">
@@ -1564,37 +1893,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={onToggleAutoSync}
                 label="Toggle Auto-Sync Drive"
               />
-            </div>
-
-            {/* Setting: Bluetooth Hub Button */}
-            <div className="bg-[#242424] border border-[#2a2a2a] rounded-xl p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <Bluetooth className="w-4 h-4 text-blue-400 shrink-0 animate-pulse" />
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-white">Wireless Probe Hub</h4>
-                    <p className="text-[11px] text-zinc-400">MEATER, ThermoWorks & Bluetooth Probes</p>
-                  </div>
-                </div>
-                <span className="text-[10px] font-mono font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-md">
-                  Ready
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenBluetoothModal();
-                }}
-                className="w-full py-2 px-3 bg-blue-500/15 hover:bg-blue-500/25 border border-blue-500/30 text-blue-300 font-bold text-xs rounded-xl flex items-center justify-between transition-all cursor-pointer group shadow-sm"
-              >
-                <div className="flex items-center space-x-2">
-                  <Bluetooth className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Open Wireless Probe Hub</span>
-                </div>
-                <ChevronRight className="w-4 h-4 text-blue-400 group-hover:translate-x-0.5 transition-transform" />
-              </button>
             </div>
 
             {/* Setting: Google Drive Management */}
@@ -1641,17 +1939,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
             </div>
 
-            {/* Setting: Amazon Alexa Cloud Sync & Voice Controls (Collapsible Window with Toggles) */}
-            <div className="pt-2">
-              <PushAndAlexaHub
-                activeCook={currentAppData?.cookLogs?.[0]}
-                smokerProfile={profile || currentAppData?.profile}
-                tempUnit={tempUnit}
-                isCollapsible={true}
-                defaultOpen={true}
-                titleOverride="Amazon Alexa Cloud Sync & Voice Controls"
-              />
-            </div>
+
           </div>
         )}
 
@@ -1674,6 +1962,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setDataSubTab('master_sync')}
+                className={`flex-1 py-2 px-2 rounded-lg text-[10px] sm:text-[11px] font-bold flex items-center justify-center space-x-1 transition-all cursor-pointer whitespace-nowrap ${
+                  dataSubTab === 'master_sync'
+                    ? 'bg-orange-500 text-zinc-950 font-black shadow-md'
+                    : 'text-zinc-400 hover:text-white hover:bg-[#1a1a1a]'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                <span className="truncate">2. Web Master Sync</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setDataSubTab('smokers')}
                 className={`flex-1 py-2 px-2 rounded-lg text-[10px] sm:text-[11px] font-bold flex items-center justify-center space-x-1 transition-all cursor-pointer whitespace-nowrap ${
                   dataSubTab === 'smokers'
@@ -1682,7 +1982,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Flame className="w-3.5 h-3.5 shrink-0 text-orange-400" />
-                <span className="truncate">2. Smoker Specs</span>
+                <span className="truncate">3. Smoker Specs</span>
               </button>
               <button
                 type="button"
@@ -1694,7 +1994,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Cloud className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">3. Cloud Sync</span>
+                <span className="truncate">4. Cloud Backup</span>
               </button>
               <button
                 type="button"
@@ -1706,7 +2006,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Brain className="w-3.5 h-3.5 shrink-0 text-purple-400" />
-                <span className="truncate">4. AI Federated</span>
+                <span className="truncate">5. AI Federated</span>
               </button>
               <button
                 type="button"
@@ -1718,13 +2018,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <HardDrive className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">5. Local & Reset</span>
+                <span className="truncate">6. Local & Reset</span>
               </button>
             </div>
 
+            {/* SUB-TAB 2: MASTER WEB VERSION SYNCHRONIZATION */}
+            {dataSubTab === 'master_sync' && (
+              <div className="space-y-3.5 animate-fade-in">
+                <MasterVersionSyncCard />
+              </div>
+            )}
+
             {/* SUB-TAB 1: USER ACCOUNTS, MULTI-RIG FLEET & COLLAPSIBLE SETTINGS */}
             {dataSubTab === 'account' && (
-              <div className="space-y-3">
+              <ErrorBoundary fallbackTitle="User Account Settings">
+                <div className="space-y-3">
                 {/* Header & Server Hosted Indicator */}
                 <div className="flex items-center justify-between p-3 bg-[#1c1c1c] border border-[#2a2a2a] rounded-xl">
                   <div className="flex items-center space-x-2.5">
@@ -1740,7 +2048,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </span>
                       </h4>
                       <p className="text-[11px] text-zinc-400">
-                        {localAccount.name} ({localAccount.email}) • {localAccount.rigs?.length || 1} Rig(s) Linked
+                        {localAccount?.name || 'Pitmaster Guest'} ({localAccount?.email || 'Guest Account'}) • {localAccount?.rigs?.length || 1} Rig(s) Linked
                       </p>
                     </div>
                   </div>
@@ -1781,7 +2089,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <UserIcon className="w-4 h-4 text-orange-400" />
                       <div className="text-left">
                         <span className="text-xs font-bold text-white block">1. User Account Profile & Pitmaster Credentials</span>
-                        <span className="text-[10px] text-zinc-400 font-mono">{localAccount.name} • {localAccount.title}</span>
+                        <span className="text-[10px] text-zinc-400 font-mono">{localAccount?.name || 'Pitmaster'} • {localAccount?.title || 'Guest Pitmaster'}</span>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -1807,7 +2115,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <img src={currentUser.photoURL} alt="User" className="w-9 h-9 rounded-full border border-orange-500/50 object-cover" referrerPolicy="no-referrer" />
                             ) : (
                               <div className="w-9 h-9 rounded-full bg-orange-500/20 border border-orange-500/40 text-orange-400 font-bold flex items-center justify-center text-sm">
-                                {(currentUser.displayName || currentUser.email || 'P')[0].toUpperCase()}
+                                {(currentUser.displayName || currentUser.email || 'P')[0]?.toUpperCase() || 'P'}
                               </div>
                             )}
                             <div className="truncate">
@@ -1817,7 +2125,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                           <button
                             type="button"
-                            onClick={onLogout}
+                            onClick={() => {
+                              if (onLogout) onLogout();
+                              onClose();
+                            }}
                             className="ml-2 px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
                           >
                             <LogOut className="w-3 h-3" />
@@ -1827,29 +2138,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       ) : (
                         <div className="space-y-2.5">
                           {!isEditingAccount ? (
-                            <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
+                            <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                               <div className="flex items-center space-x-3 truncate">
-                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-zinc-950 font-black flex items-center justify-center text-sm shrink-0">
-                                  {localAccount.name[0]?.toUpperCase() || 'P'}
+                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-zinc-950 font-black flex items-center justify-center text-sm shrink-0 shadow-md">
+                                  {(localAccount?.name || 'Pitmaster')[0]?.toUpperCase() || 'P'}
                                 </div>
                                 <div className="truncate">
                                   <div className="flex items-center space-x-2">
-                                    <p className="text-xs font-bold text-white truncate">{localAccount.name}</p>
+                                    <p className="text-xs font-bold text-white truncate">{localAccount?.name || 'Pitmaster'}</p>
                                     <span className="text-[9px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.2 rounded">
-                                      {localAccount.title}
+                                      {localAccount?.title || 'Guest Pitmaster'}
                                     </span>
                                   </div>
-                                  <p className="text-[11px] text-zinc-400 font-mono truncate">{localAccount.email}</p>
+                                  <p className="text-[11px] text-zinc-400 font-mono truncate">{localAccount?.email || 'No email set'}</p>
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => setIsEditingAccount(true)}
-                                className="px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] border border-[#3a3a3a] text-zinc-200 font-bold text-[11px] rounded-lg flex items-center space-x-1 shrink-0 cursor-pointer"
-                              >
-                                <Edit3 className="w-3 h-3 text-orange-400" />
-                                <span>Edit Profile</span>
-                              </button>
+                              <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsEditingAccount(true)}
+                                  className="px-2.5 py-1.5 bg-[#282828] hover:bg-[#323232] border border-[#3a3a3a] text-zinc-200 font-bold text-[11px] rounded-lg flex items-center space-x-1 cursor-pointer"
+                                >
+                                  <Edit3 className="w-3 h-3 text-orange-400" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (onLogout) onLogout();
+                                    onClose();
+                                  }}
+                                  className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-[11px] rounded-lg flex items-center space-x-1 cursor-pointer"
+                                  title="Log out active Pitmaster credentials"
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  <span>Log Out</span>
+                                </button>
+                              </div>
                             </div>
                           ) : (
                             <form onSubmit={handleSaveAccountEdits} className="bg-[#1e1e1e] border border-orange-500/30 rounded-xl p-3 space-y-2.5">
@@ -1876,7 +2201,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     value={editEmail}
                                     onChange={(e) => setEditEmail(e.target.value)}
                                     className={`w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-orange-500 font-mono ${!!currentUser ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                    placeholder="e.g. jonathanblunt1214@gmail.com"
+                                    placeholder="e.g. pitmaster@example.com"
                                     required
                                     disabled={!!currentUser}
                                   />
@@ -1910,6 +2235,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               </div>
                             </form>
                           )}
+
+                          {/* REMEMBER USER ACCOUNT & CREDENTIALS TOGGLE */}
+                          <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3 flex items-center justify-between">
+                            <div className="flex items-center space-x-2.5">
+                              <Lock className={`w-4 h-4 ${(localAccount?.rememberMe !== false) ? 'text-emerald-400' : 'text-amber-400'}`} />
+                              <div>
+                                <span className="text-xs font-bold text-white block">Remember User Account on Device</span>
+                                <span className="text-[10px] text-zinc-400 font-mono">
+                                  {localAccount?.rememberMe !== false
+                                    ? '🔒 Persistent Device Memory: Auto sign-in enabled'
+                                    : '⏱️ Session Only: Session expires on tab close'}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedRemember = !(localAccount?.rememberMe !== false);
+                                const updatedAccount = { ...localAccount, rememberMe: updatedRemember };
+                                setLocalAccount(updatedAccount);
+                                saveLocalUserProfile(updatedAccount);
+                                saveActiveUserSession(
+                                  {
+                                    id: updatedAccount.id || `user-${Date.now()}`,
+                                    email: updatedAccount.email || '',
+                                    name: updatedAccount.name || 'Pitmaster',
+                                    title: updatedAccount.title || 'Pitmaster',
+                                    provider: 'email',
+                                    rememberMe: updatedRemember,
+                                    isMasterAdmin: (updatedAccount.email || '').toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase(),
+                                    loggedInAt: new Date().toISOString(),
+                                  },
+                                  updatedRemember
+                                );
+                              }}
+                              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                localAccount?.rememberMe !== false ? 'bg-orange-500' : 'bg-zinc-700'
+                              }`}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                  localAccount?.rememberMe !== false ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
 
                           {/* USER PITMASTER ACCOUNT LEVEL & MASTERY CARD */}
                           {(() => {
@@ -1957,6 +2328,393 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               </div>
                             );
                           })()}
+
+                          {/* ACCOUNT-LINKED COOK & FUEL LOGS CARD */}
+                          {(() => {
+                            const cLogs = currentAppData?.cookLogs || [];
+                            const fLogs = currentAppData?.fuelLogs || [];
+                            const userEmailLower = (localAccount?.email || '').trim().toLowerCase();
+
+                            const linkedCookCount = userEmailLower
+                              ? cLogs.filter((c) => c && c.userEmail && c.userEmail.trim().toLowerCase() === userEmailLower).length
+                              : cLogs.length;
+                            const linkedFuelCount = userEmailLower
+                              ? fLogs.filter((f) => f && f.userEmail && f.userEmail.trim().toLowerCase() === userEmailLower).length
+                              : fLogs.length;
+                            const unlinkedCooks = Math.max(0, cLogs.length - linkedCookCount);
+                            const unlinkedFuel = Math.max(0, fLogs.length - linkedFuelCount);
+
+                            const handleLinkAllLogsToAccount = () => {
+                              const updatedCooks = cLogs.map((c) => ({
+                                ...c,
+                                userEmail: localAccount?.email || '',
+                                userId: localAccount?.id || localAccount?.email || 'guest',
+                                pitmasterAlias: localAccount?.name || 'Pitmaster',
+                              }));
+                              const updatedFuel = fLogs.map((f) => ({
+                                ...f,
+                                userEmail: localAccount?.email || '',
+                                userId: localAccount?.id || localAccount?.email || 'guest',
+                              }));
+
+                              if (onRestoreData && currentAppData) {
+                                onRestoreData({
+                                  ...currentAppData,
+                                  cookLogs: updatedCooks,
+                                  fuelLogs: updatedFuel,
+                                });
+                              }
+                              alert(`🔥 Successfully linked all ${cLogs.length} Cook Logs & ${fLogs.length} Fuel Restock Logs to Pitmaster Account: ${localAccount?.email || 'Guest'}`);
+                            };
+
+                            return (
+                              <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3.5 space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center space-x-2">
+                                    <FileText className="w-4 h-4 text-orange-400" />
+                                    <div>
+                                      <h4 className="text-xs font-bold text-white">Account-Linked Cook & Fuel Logs</h4>
+                                      <p className="text-[10px] text-zinc-400">Bind all historical smoke sessions and pellet inventory logs to {localAccount?.email || 'your account'}</p>
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                                    {linkedCookCount + linkedFuelCount} / {cLogs.length + fLogs.length} Linked
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                  <div className="bg-[#141416] border border-[#282828] p-2.5 rounded-lg flex items-center justify-between">
+                                    <div>
+                                      <span className="text-[10px] text-zinc-400 block font-medium">Cook Logs</span>
+                                      <span className="font-mono font-bold text-white text-sm">{linkedCookCount} / {cLogs.length}</span>
+                                    </div>
+                                    <Flame className="w-4 h-4 text-orange-400" />
+                                  </div>
+
+                                  <div className="bg-[#141416] border border-[#282828] p-2.5 rounded-lg flex items-center justify-between">
+                                    <div>
+                                      <span className="text-[10px] text-zinc-400 block font-medium">Fuel Restock Logs</span>
+                                      <span className="font-mono font-bold text-amber-300 text-sm">{linkedFuelCount} / {fLogs.length}</span>
+                                    </div>
+                                    <Flame className="w-4 h-4 text-amber-400" />
+                                  </div>
+                                </div>
+
+                                {(unlinkedCooks > 0 || unlinkedFuel > 0) && (
+                                  <div className="pt-1 flex items-center justify-between">
+                                    <span className="text-[10px] text-amber-400 font-mono">
+                                      ⚠️ {unlinkedCooks} unlinked cook log(s) and {unlinkedFuel} fuel log(s) found
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={handleLinkAllLogsToAccount}
+                                      className="px-2.5 py-1 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-[10px] rounded-lg flex items-center space-x-1 cursor-pointer"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                      <span>Link All Logs To Account</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                          {/* ACCOUNT FUEL ON HAND METRIC CARD */}
+                          <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-3.5 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-2">
+                                <Scale className="w-4 h-4 text-amber-400" />
+                                <div>
+                                  <h4 className="text-xs font-bold text-white">Fuel On Hand (Account Metric)</h4>
+                                  <p className="text-[10px] text-zinc-400">Total fuel inventory associated with your pitmaster account</p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                                Account Global
+                              </span>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type="text"
+                                  value={accountFuelOnHandInput}
+                                  onChange={(e) => setAccountFuelOnHandInput(e.target.value)}
+                                  placeholder="e.g. 120 lbs"
+                                  className="w-full bg-[#121216] border border-[#333] focus:border-amber-500 text-amber-400 font-mono font-bold text-sm rounded-xl px-3 py-2 focus:outline-none"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = { ...localAccount, fuelOnHand: accountFuelOnHandInput };
+                                  setLocalAccount(updated);
+                                  saveLocalUserProfile(updated);
+                                  if (profile && onUpdateProfile) {
+                                    onUpdateProfile({ ...profile, fuelOnHand: accountFuelOnHandInput });
+                                  }
+                                  alert(`✅ Account Fuel On Hand updated to: ${accountFuelOnHandInput}`);
+                                }}
+                                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                <span>Save Fuel</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* MANUAL HOURS OVERRIDE & PROFILE UPLOAD CARD */}
+                          <div className="bg-[#1e1e24] border border-[#33333d] rounded-xl p-4 space-y-4 text-zinc-100 relative">
+                            <div className="flex items-center justify-between border-b border-[#2a2a35] pb-3">
+                              <div className="flex items-center space-x-2">
+                                <div className="p-2 bg-orange-500/10 rounded-lg text-orange-400 border border-orange-500/20">
+                                  <Edit3 className="w-5 h-5 text-orange-400" />
+                                </div>
+                                <div>
+                                  <h3 className="text-sm sm:text-base font-bold text-white leading-tight">
+                                    Manual Hours Override & Profile Upload
+                                  </h3>
+                                  <p className="text-[10px] sm:text-xs text-zinc-400 font-mono">
+                                    Override operating hours and sync uploaded JSON profiles across your fleet
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Select Rig from Account Fleet */}
+                            <div className="space-y-1.5">
+                              <label className="text-xs font-bold text-zinc-300 block font-mono">Select Target Smoker Rig:</label>
+                              <select
+                                value={overrideSelectedRigId}
+                                onChange={(e) => {
+                                  const selectedId = e.target.value;
+                                  setOverrideSelectedRigId(selectedId);
+                                  const target = (localAccount.rigs || []).find((r) => r.id === selectedId) || profile;
+                                  if (target) {
+                                    setOverrideHoursInput(overrideMode === 'total' ? (target.currentHours || 0).toFixed(2) : (target.initialHours || 0).toFixed(2));
+                                  }
+                                }}
+                                className="w-full bg-[#121216] border border-[#333] text-white text-xs font-mono font-bold rounded-xl px-3 py-2 focus:outline-none focus:border-orange-500"
+                              >
+                                {(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)).map((r) => (
+                                  <option key={r.id} value={r.id}>
+                                    {r.name || 'Smoker Rig'} ({r.model || 'Custom'}) — Current: {(r.currentHours || 0).toFixed(1)}h | Baseline: {(r.initialHours || 0).toFixed(1)}h
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Mode Switcher */}
+                            <div className="grid grid-cols-2 gap-2 bg-[#121216] p-1 rounded-xl border border-[#262630]">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOverrideMode('total');
+                                  const target = (localAccount.rigs || []).find((r) => r.id === overrideSelectedRigId) || profile;
+                                  if (target) setOverrideHoursInput((target.currentHours || 0).toFixed(2));
+                                }}
+                                className={`py-2 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                  overrideMode === 'total'
+                                    ? 'bg-orange-500 text-zinc-950 shadow-md'
+                                    : 'text-zinc-400 hover:text-zinc-200'
+                                }`}
+                              >
+                                Total Operating Hours
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOverrideMode('baseline');
+                                  const target = (localAccount.rigs || []).find((r) => r.id === overrideSelectedRigId) || profile;
+                                  if (target) setOverrideHoursInput((target.initialHours || 0).toFixed(2));
+                                }}
+                                className={`py-2 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                  overrideMode === 'baseline'
+                                    ? 'bg-orange-500 text-zinc-950 shadow-md'
+                                    : 'text-zinc-400 hover:text-zinc-200'
+                                }`}
+                              >
+                                Pit Baseline Hours
+                              </button>
+                            </div>
+
+                            {/* Input & Stepper Controls */}
+                            <div className="space-y-3 bg-[#121216] p-3.5 rounded-xl border border-[#2a2a35]">
+                              <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-300 block font-mono">
+                                {overrideMode === 'total' ? 'Exact Total Hours Override:' : 'Pit Initial Baseline Hours:'}
+                              </label>
+
+                              <div className="flex items-center space-x-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    max="50000"
+                                    value={overrideHoursInput}
+                                    onChange={(e) => setOverrideHoursInput(e.target.value)}
+                                    className="w-full bg-[#0d0d10] border border-[#333340] focus:border-orange-500 text-orange-400 font-mono font-extrabold text-xl rounded-xl px-3 py-2 focus:outline-none"
+                                  />
+                                  <span className="absolute right-3 top-2.5 font-mono text-xs text-zinc-400 font-bold pointer-events-none">
+                                    hrs
+                                  </span>
+                                </div>
+
+                                {/* Quick adjustments */}
+                                <div className="grid grid-cols-2 gap-1 shrink-0 font-mono text-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverrideHoursInput(Math.max(0, (parseFloat(overrideHoursInput) || 0) - 10).toFixed(1))}
+                                    className="px-2 py-1 bg-[#242430] hover:bg-[#2e2e3e] text-zinc-300 rounded border border-[#383848] cursor-pointer"
+                                  >
+                                    -10h
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverrideHoursInput(((parseFloat(overrideHoursInput) || 0) + 10).toFixed(1))}
+                                    className="px-2 py-1 bg-[#242430] hover:bg-[#2e2e3e] text-zinc-300 rounded border border-[#383848] cursor-pointer"
+                                  >
+                                    +10h
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverrideHoursInput(Math.max(0, (parseFloat(overrideHoursInput) || 0) - 1).toFixed(1))}
+                                    className="px-2 py-1 bg-[#242430] hover:bg-[#2e2e3e] text-zinc-300 rounded border border-[#383848] cursor-pointer"
+                                  >
+                                    -1h
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOverrideHoursInput(((parseFloat(overrideHoursInput) || 0) + 1).toFixed(1))}
+                                    className="px-2 py-1 bg-[#242430] hover:bg-[#2e2e3e] text-zinc-300 rounded border border-[#383848] cursor-pointer"
+                                  >
+                                    +1h
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Sync Feedback Alert */}
+                            {overrideSyncFeedbackMsg && (
+                              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-mono flex items-center space-x-2">
+                                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <span>{overrideSyncFeedbackMsg}</span>
+                              </div>
+                            )}
+
+                            {/* Actions: Apply Override & Upload Profile JSON */}
+                            <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2 border-t border-[#2a2a35]">
+                              <input
+                                type="file"
+                                ref={profileFileInputRef}
+                                accept=".json"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = (event) => {
+                                    try {
+                                      const parsed = JSON.parse(event.target?.result as string);
+                                      if (parsed && (parsed.name || parsed.model || parsed.smokerType)) {
+                                        const loadedProfile: SmokerProfile = {
+                                          ...profile,
+                                          ...parsed,
+                                          id: parsed.id || `rig-${Date.now()}`,
+                                        };
+                                        const existingRigs = localAccount.rigs || [];
+                                        const updatedRigs = existingRigs.some((r) => r.id === loadedProfile.id)
+                                          ? existingRigs.map((r) => (r.id === loadedProfile.id ? loadedProfile : r))
+                                          : [...existingRigs, loadedProfile];
+
+                                        const updatedAccount = {
+                                          ...localAccount,
+                                          rigs: updatedRigs,
+                                          activeRigId: loadedProfile.id,
+                                        };
+                                        setLocalAccount(updatedAccount);
+                                        saveLocalUserProfile(updatedAccount);
+                                        if (onUpdateProfile) onUpdateProfile(loadedProfile);
+                                        setOverrideSyncFeedbackMsg(`✅ Loaded profile "${loadedProfile.name || loadedProfile.model}" into account fleet!`);
+                                      } else {
+                                        alert('⚠️ Invalid Smoker Profile JSON format.');
+                                      }
+                                    } catch (err) {
+                                      alert('⚠️ Failed to parse profile JSON file.');
+                                    }
+                                  };
+                                  reader.readAsText(file);
+                                }}
+                              />
+
+                              <button
+                                type="button"
+                                onClick={() => profileFileInputRef.current?.click()}
+                                disabled={isOverrideSyncing}
+                                className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold bg-[#262630] hover:bg-[#30303e] text-orange-400 border border-orange-500/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <CloudUpload className="w-3.5 h-3.5" />
+                                Upload Profile (.json)
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const val = parseFloat(overrideHoursInput);
+                                  if (isNaN(val) || val < 0) return;
+                                  setIsOverrideSyncing(true);
+
+                                  const targetId = overrideSelectedRigId || localAccount.activeRigId || profile?.id;
+                                  const currentRigs = localAccount.rigs || [profile].filter(Boolean);
+
+                                  const updatedRigs = currentRigs.map((r) => {
+                                    if (r.id === targetId || currentRigs.length === 1) {
+                                      let newInit = r.initialHours || 0;
+                                      let newCurr = r.currentHours || 0;
+                                      if (overrideMode === 'total') {
+                                        newCurr = val;
+                                      } else {
+                                        newInit = val;
+                                      }
+                                      return { ...r, initialHours: newInit, currentHours: newCurr };
+                                    }
+                                    return r;
+                                  });
+
+                                  const updatedAccount = { ...localAccount, rigs: updatedRigs };
+                                  setLocalAccount(updatedAccount);
+                                  saveLocalUserProfile(updatedAccount);
+
+                                  const activeUpdated = updatedRigs.find((r) => r.id === targetId) || updatedRigs[0];
+                                  if (activeUpdated && onUpdateProfile) {
+                                    onUpdateProfile(activeUpdated);
+                                  }
+
+                                  setTimeout(() => {
+                                    setIsOverrideSyncing(false);
+                                    setOverrideSyncFeedbackMsg(`✅ Operating hours updated to ${val.toFixed(2)} hrs and synced to profile!`);
+                                    setTimeout(() => setOverrideSyncFeedbackMsg(null), 3000);
+                                  }, 300);
+                                }}
+                                disabled={isOverrideSyncing}
+                                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold bg-orange-500 hover:bg-orange-600 text-zinc-950 shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98"
+                              >
+                                {isOverrideSyncing ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-950" />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5 text-zinc-950" />
+                                )}
+                                Apply Hours Override
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* CharGPT Profile Account Linkage Card */}
+                          <CharGPTProfileLinkCard
+                            userAccount={localAccount}
+                            onUpdateUserAccount={(updated) => setLocalAccount(updated)}
+                            onSyncServer={handleSyncWithServer}
+                          />
                         </div>
                       )}
                     </div>
@@ -2011,25 +2769,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </div>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsAddingRig(true)}
-                          className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs rounded-lg flex items-center space-x-1 transition-all cursor-pointer shrink-0 shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>+ Add Smoker Rig</span>
-                        </button>
+                        <div className="flex items-center space-x-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleClearRigSettings}
+                            className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 font-bold text-xs rounded-lg flex items-center space-x-1.5 transition-all cursor-pointer shrink-0 shadow-sm"
+                            title="Clear active smoker rig specification inputs and reset to baseline"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                            <span>Clear Rig Settings</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAddingRig(true);
+                              setNewRigHopper('0');
+                              setNewRigBowlCapacity('0');
+                            }}
+                            className="px-3 py-1.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-zinc-950 font-black text-xs rounded-lg flex items-center space-x-1 transition-all cursor-pointer shrink-0 shadow-sm"
+                          >
+                            <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                            <span>+ Add Smoker Rig</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* List of Account Linked Smoker Rigs */}
                       <div className="space-y-2">
                         <h5 className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 font-mono flex items-center justify-between">
                           <span>Account Smoker Fleet:</span>
-                          <span className="text-zinc-500">{localAccount.rigs?.length || 1} linked smoker profile(s)</span>
+                          <span className="text-zinc-500">{localAccount.rigs?.length || 0} linked smoker profile(s)</span>
                         </h5>
 
                         <div className="grid grid-cols-1 gap-2">
-                          {(localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile]).map((rigItem) => {
+                          {(!localAccount.rigs || localAccount.rigs.length === 0) && (
+                            <div className="bg-[#18181c] border border-[#2a2a35] rounded-xl p-4 text-center">
+                              <Flame className="w-5 h-5 text-orange-400/70 mx-auto mb-1.5" />
+                              <p className="text-xs font-bold text-white">Account Collection Blank</p>
+                              <p className="text-[11px] text-zinc-400 mt-0.5">No smokers currently registered. Select or build a smoker profile below to add it to your fleet.</p>
+                            </div>
+                          )}
+
+                          {(localAccount.rigs || []).map((rigItem) => {
                             const isActive = (localAccount.activeRigId === rigItem.id) || (profile?.id === rigItem.id) || (effectiveSpecs.displayName === rigItem.name);
                             const isEditingThis = editingRigId === rigItem.id;
 
@@ -2046,7 +2828,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                                     <div className="space-y-1">
                                       <div className="flex items-center space-x-2">
-                                        <span className="text-xs font-bold text-white">{rigItem.name}</span>
+                                        <span className="text-xs font-bold text-white">
+                                          {rigItem.name && rigItem.name.trim() !== '' ? rigItem.name : 'Unassigned Smoker (No Smoker Selected)'}
+                                        </span>
                                         {isActive ? (
                                           <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.2 rounded font-mono font-bold">
                                             Active Pit
@@ -2057,12 +2841,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                           </span>
                                         )}
                                       </div>
-                                      <div className="text-[11px] text-zinc-400 font-mono flex items-center space-x-3">
-                                        <span>{rigItem.smokerType}</span>
+                                      <div className="text-[11px] text-zinc-400 font-mono flex items-center space-x-2 flex-wrap">
+                                        <span>{rigItem.smokerType || 'Unassigned Type'}</span>
                                         <span>•</span>
-                                        <span>{rigItem.fuelType}</span>
+                                        <span>{rigItem.fuelType || 'Pellets'}</span>
                                         <span>•</span>
-                                        <span>{rigItem.pelletHopperCapacityLbs || 20} lbs Hopper</span>
+                                        <span>
+                                          {rigItem.pelletHopperCapacityLbs > 0
+                                            ? `${rigItem.pelletHopperCapacityLbs} lbs Hopper`
+                                            : (rigItem.bowlCapacityLbs || 0) > 0
+                                            ? `${rigItem.bowlCapacityLbs} lbs Bowl`
+                                            : '0 lbs Hopper (Unselected)'}
+                                        </span>
                                         <span>•</span>
                                         <span className="text-orange-400 font-bold">{rigItem.currentHours || rigItem.initialHours || 0} hrs</span>
                                       </div>
@@ -2089,7 +2879,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                           setEditingRigId(rigItem.id);
                                           setEditRigName(rigItem.name);
                                           setEditRigHours(String(rigItem.initialHours || 0));
-                                          setEditRigHopper(String(rigItem.pelletHopperCapacityLbs || 20));
+                                          setEditRigHopper(String(rigItem.pelletHopperCapacityLbs || 0));
+                                          setEditRigBowlCapacity(String(rigItem.bowlCapacityLbs || 0));
                                         }}
                                         className="px-2 py-1.5 bg-[#2a2a2a] hover:bg-[#333] border border-[#3a3a3a] text-zinc-300 font-bold text-[11px] rounded-lg cursor-pointer"
                                       >
@@ -2121,7 +2912,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 ) : (
                                   /* Inline Rig Edit Form */
                                   <div className="space-y-2 p-2 bg-[#121212] rounded-lg border border-orange-500/30 text-xs">
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                                       <div>
                                         <label className="block text-[9px] text-zinc-400 font-bold uppercase mb-0.5">Rig Name</label>
                                         <input
@@ -2150,6 +2941,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                           className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-xs"
                                         />
                                       </div>
+                                      <div>
+                                        <label className="block text-[9px] text-zinc-400 font-bold uppercase mb-0.5">Bowl Cap (lbs)</label>
+                                        <input
+                                          type="number"
+                                          value={editRigBowlCapacity}
+                                          onChange={(e) => setEditRigBowlCapacity(e.target.value)}
+                                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white font-mono text-xs"
+                                        />
+                                      </div>
                                     </div>
                                     <div className="flex justify-end space-x-2 pt-1">
                                       <button
@@ -2168,7 +2968,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                                 ...r,
                                                 name: editRigName.trim() || r.name,
                                                 initialHours: parseFloat(editRigHours) || 0,
-                                                pelletHopperCapacityLbs: parseFloat(editRigHopper) || 20,
+                                                pelletHopperCapacityLbs: parseFloat(editRigHopper) || 0,
+                                                bowlCapacityLbs: parseFloat(editRigBowlCapacity) || 0,
                                               };
                                             }
                                             return r;
@@ -2207,7 +3008,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               fuelType: newRigFuel,
                               initialHours: parseFloat(newRigHours) || 0,
                               currentHours: parseFloat(newRigHours) || 0,
-                              pelletHopperCapacityLbs: parseFloat(newRigHopper) || 20,
+                              pelletHopperCapacityLbs: parseFloat(newRigHopper) || 0,
+                              bowlCapacityLbs: parseFloat(newRigBowlCapacity) || 0,
                               maintenanceTasks: [],
                               appliedModIds: [],
                               appliedMods: [],
@@ -2243,16 +3045,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           {/* Quick Preset Selector */}
                           <div>
                             <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-1">Select Preset Manufacturer Model</label>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1">
                               {[
-                                { name: 'Pit Boss Copperhead 5', model: 'Copperhead 5-Series', type: 'Vertical Pellet Smoker', fuel: 'Pellets', hopper: 60 },
-                                { name: 'Traeger Timberline 1300', model: 'Timberline 1300', type: 'Pellet Grill / Smoker', fuel: 'Pellets', hopper: 24 },
-                                { name: 'Yoder YS640s Competition', model: 'YS640s', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 20 },
-                                { name: 'Camp Chef Woodwind 36', model: 'Woodwind WiFi 36', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 22 },
-                                { name: 'Recteq RT-700 Bull', model: 'RT-700', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 40 },
-                                { name: 'Kamado Joe Big Joe III', model: 'Big Joe III', type: 'Kamado Ceramic Cooker', fuel: 'Charcoal', hopper: 12 },
-                                { name: 'Weber Smokey Mountain 22"', model: 'WSM 22"', type: 'Water Smoker / Bullet', fuel: 'Charcoal', hopper: 15 },
-                                { name: 'Custom Offset Trailer', model: 'Custom Build', type: 'Custom Reverse Flow Offset', fuel: 'Wood Splits', hopper: 50 },
+                                { name: '⬜ Blank Template', model: 'Custom Build', type: 'Custom Smoker Rig', fuel: 'Wood Splits', hopper: 0, bowl: 0 },
+                                { name: 'Pit Boss Copperhead 5', model: 'Copperhead 5-Series', type: 'Vertical Pellet Smoker', fuel: 'Pellets', hopper: 60, bowl: 0 },
+                                { name: 'Traeger Timberline 1300', model: 'Timberline 1300', type: 'Pellet Grill / Smoker', fuel: 'Pellets', hopper: 24, bowl: 0 },
+                                { name: 'Yoder YS640s Competition', model: 'YS640s', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 20, bowl: 0 },
+                                { name: 'Camp Chef Woodwind 36', model: 'Woodwind WiFi 36', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 22, bowl: 0 },
+                                { name: 'Recteq RT-700 Bull', model: 'RT-700', type: 'Pellet Smoker / Grill', fuel: 'Pellets', hopper: 40, bowl: 0 },
+                                { name: 'Kamado Joe Big Joe III', model: 'Big Joe III', type: 'Kamado Ceramic Cooker', fuel: 'Charcoal', hopper: 0, bowl: 12 },
+                                { name: 'Weber Smokey Mountain 22"', model: 'WSM 22"', type: 'Water Smoker / Bullet', fuel: 'Charcoal', hopper: 0, bowl: 15 },
+                                { name: 'Custom Offset Trailer', model: 'Custom Build', type: 'Custom Reverse Flow Offset', fuel: 'Wood Splits', hopper: 0, bowl: 0 },
                               ].map((preset) => (
                                 <button
                                   key={preset.name}
@@ -2263,6 +3066,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     setNewRigType(preset.type);
                                     setNewRigFuel(preset.fuel as any);
                                     setNewRigHopper(String(preset.hopper));
+                                    setNewRigBowlCapacity(String(preset.bowl));
+
+                                    // Automatically convert manufacturer capacity to account metric
+                                    const effectiveCapLbs = preset.bowl > 0 ? preset.bowl : preset.hopper;
+                                    if (effectiveCapLbs > 0) {
+                                      try {
+                                        const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+                                        const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+                                        acc.fuelOnHand = `${effectiveCapLbs} lbs`;
+                                        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                                        setLocalAccount(acc);
+                                        setAccountFuelOnHandInput(`${effectiveCapLbs} lbs`);
+                                      } catch (e) {}
+                                    }
                                   }}
                                   className="p-1.5 bg-[#1a1a1a] hover:bg-orange-500/20 border border-[#2a2a2a] hover:border-orange-500/40 rounded text-[10px] font-medium text-zinc-300 text-left truncate cursor-pointer"
                                 >
@@ -2335,6 +3152,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 type="number"
                                 value={newRigHopper}
                                 onChange={(e) => setNewRigHopper(e.target.value)}
+                                placeholder="0"
+                                className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-0.5">Firebox / Charcoal Bowl Capacity (lbs)</label>
+                              <input
+                                type="number"
+                                value={newRigBowlCapacity}
+                                onChange={(e) => setNewRigBowlCapacity(e.target.value)}
+                                placeholder="0"
                                 className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2.5 py-1.5 text-white font-mono"
                               />
                             </div>
@@ -2344,24 +3172,123 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <button
                               type="button"
                               onClick={() => setIsAddingRig(false)}
-                              className="px-3 py-1.5 bg-[#282828] hover:bg-[#323232] text-zinc-300 font-bold text-xs rounded-lg"
+                              className="px-3 py-1.5 bg-[#2a2a2a] hover:bg-[#333] text-zinc-300 font-bold text-xs rounded-lg cursor-pointer"
                             >
                               Cancel
                             </button>
                             <button
                               type="submit"
-                              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-lg flex items-center space-x-1"
+                              className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-lg cursor-pointer"
                             >
-                              <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                              <span>Link Rig to Account</span>
+                              Add Rig to Fleet
                             </button>
                           </div>
                         </form>
                       )}
+
+                      {/* Select Active CharGPT AI Pitmaster Persona & Auto-Detect Section */}
+                      <div className="pt-3 border-t border-[#2a2a38] space-y-3">
+                        <div className="p-3.5 bg-[#121218] border border-orange-500/30 rounded-xl space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#242432] pb-2.5">
+                            <div>
+                              <h6 className="text-xs font-extrabold text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
+                                <Bot className="w-4 h-4 text-orange-400" />
+                                <span>Select Active CharGPT Persona</span>
+                              </h6>
+                              <p className="text-[10px] text-zinc-400 font-sans mt-0.5">
+                                Choose your AI Pitmaster persona or run automatic cook log analysis to auto-detect the persona matching your cook style.
+                              </p>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleAutoDetectPersonaFromLogs}
+                              className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-zinc-950 font-black text-xs rounded-lg flex items-center space-x-1.5 cursor-pointer shrink-0 shadow-md transition-all"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
+                              <span>✨ Auto-Detect Persona (Log Analysis)</span>
+                            </button>
+                          </div>
+
+                          {personaDetectionNotice && (
+                            <div className="p-2.5 bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs font-mono rounded-lg flex items-start gap-2 animate-fade-in">
+                              <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                              <div>
+                                <div className="font-bold text-amber-300">
+                                  ✨ Auto-Detected Active Persona: "{personaDetectionNotice.persona}"
+                                </div>
+                                <div className="text-[11px] text-amber-200/80 mt-0.5">
+                                  {personaDetectionNotice.explanation}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {[
+                              { name: 'Master Pitmaster', desc: 'All-around balanced expert', icon: '👑' },
+                              { name: 'Texas Offset Specialist', desc: 'Post oak low & slow brisket', icon: '🤠' },
+                              { name: 'Competition BBQ Judge', desc: 'KCBS scores & tenderness', icon: '🏆' },
+                              { name: 'Thermal Chemist & Science', desc: 'Stall math & thermodynamics', icon: '🧪' },
+                              { name: 'Kansas City Pit Master', desc: 'Sweet glazes, ribs & burnt ends', icon: '🍖' },
+                            ].map((p) => {
+                              const isSelected = (localAccount.charGPTPersona || 'Master Pitmaster') === p.name;
+                              return (
+                                <button
+                                  key={p.name}
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = { ...localAccount, charGPTPersona: p.name as any };
+                                    setLocalAccount(updated);
+                                    saveLocalUserProfile(updated);
+                                    setServerSyncStatus({ type: 'success', text: `✨ Set active CharGPT Persona to "${p.name}"` });
+                                    setTimeout(() => setServerSyncStatus(null), 3000);
+                                  }}
+                                  className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between min-h-[64px] ${
+                                    isSelected
+                                      ? 'bg-orange-500/20 border-orange-500 text-white shadow-md'
+                                      : 'bg-[#181822] hover:bg-[#20202d] border-[#2a2a3a] text-zinc-400 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[13px]">{p.icon}</span>
+                                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-orange-400"></span>}
+                                  </div>
+                                  <div className="mt-1">
+                                    <span className={`text-[11px] font-bold block leading-tight ${isSelected ? 'text-orange-400' : 'text-zinc-200'}`}>
+                                      {p.name}
+                                    </span>
+                                    <span className="text-[9px] text-zinc-500 block leading-tight mt-0.5">{p.desc}</span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Smoker Unit Profile Chart & Per-Smoker Analysis Split */}
+                      <div className="pt-3">
+                        <SmokerUnitProfileChart
+                          rigs={localAccount.rigs && localAccount.rigs.length > 0 ? localAccount.rigs : [profile].filter(Boolean)}
+                          profile={profile}
+                          activeRigId={localAccount.activeRigId || profile?.id}
+                          cookLogs={currentAppData?.cookLogs || []}
+                          fuelLogs={currentAppData?.fuelLogs || []}
+                          onUpdatePitBaseline={handleUpdatePitBaseline}
+                          onSelectActiveRig={(rigId) => {
+                            setLocalAccount((prev) => ({ ...prev, activeRigId: rigId }));
+                            const targetRig = (localAccount.rigs || []).find((r) => r.id === rigId);
+                            if (targetRig && onUpdateProfile) onUpdateProfile(targetRig);
+                            handleSyncWithServer();
+                          }}
+                          onOpenCustomSmokerModal={onOpenCustomSmokerModal}
+                        />
+                      </div>
                     </div>
                   )}
-                </div>
 
+                </div>
                 {/* ============================================================
                     COLLAPSIBLE ACCORDION 3: INITIAL RUNTIME HOURS & BASELINE (GLOBAL FLEET VIEW)
                 ============================================================ */}
@@ -2605,9 +3532,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
                   )}
-                </div>
 
                 {/* ============================================================
+                </div>
                     COLLAPSIBLE ACCORDION 4: MASTER ADMIN & DEV CONTROLS
                 ============================================================ */}
                 {isAdminUser(currentUser?.email || localAccount.email) && (
@@ -2732,7 +3659,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   )}
                 </div>
               </div>
-            )}
+              </div>
+            </ErrorBoundary>
+          )}
 
             {/* SUB-TAB 2: SMOKER SPECIFICATIONS & GLOBAL PIT SETTINGS */}
             {dataSubTab === 'smokers' && (
@@ -2808,11 +3737,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {!isSpecsFormExpanded && (
                     <div className="text-xs text-zinc-300 font-mono bg-[#181818] p-3 rounded-lg border border-[#333] flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <span className="text-white font-bold">{activeSpecName}</span> ({activeSpecBrand}) — <span className="text-orange-400">{activeSpecCategory}</span>
+                        <span className="text-white font-bold">{activeSpecName || 'None Selected'}</span> ({activeSpecBrand || 'None Selected'}) — <span className="text-orange-400">{activeSpecCategory || 'None Selected'}</span>
+                        <div className="text-zinc-400 text-[10px] mt-0.5">
+                          Burn: {activeSpecBaselineBurn} lbs/hr @ 225°F | Hopper: {activeSpecCapacity} lbs | Area: {activeSpecArea} sq in
+                        </div>
                       </div>
-                      <span className="text-zinc-400 text-[10px]">
-                        Burn: {activeSpecBaselineBurn} lbs/hr @ 225°F | Hopper: {activeSpecCapacity} lbs | Area: {activeSpecArea} sq in
-                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!activeProfile || !onUpdateProfile) return;
+                          const cleanProfile: SmokerProfile = {
+                            ...activeProfile,
+                            name: '',
+                            model: '',
+                            smokerType: '' as any,
+                            fuelType: 'Pellets',
+                            pelletHopperCapacityLbs: 0,
+                            customSpecs: undefined,
+                            manufacturerSpecs: undefined,
+                            modifications: [],
+                            activeBlendComponents: undefined,
+                          };
+                          onUpdateProfile(cleanProfile);
+                          setActiveSpecName('');
+                          setActiveSpecBrand('');
+                          setActiveSpecCategory('');
+                          setActiveSpecFuelType('Pellets');
+                          setActiveSpecBaselineBurn(1.20);
+                          setActiveSpecHighHeatBurn(2.50);
+                          setActiveSpecCapacity('');
+                          setActiveSpecArea(0);
+                          setActiveSpecThermalRating('Medium');
+                          setActiveSpecGauge('');
+                          setActiveSpecDraft('');
+                        }}
+                        className="px-2.5 py-1 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 text-[11px] font-bold rounded-lg transition-all flex items-center space-x-1 cursor-pointer shrink-0"
+                        title="Clear active smoker specifications"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-400" />
+                        <span>Clear Specs</span>
+                      </button>
                     </div>
                   )}
 
@@ -2829,6 +3794,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         e.preventDefault();
                         if (!activeProfile || !onUpdateProfile) return;
 
+                        const bowlCap = Number(activeSpecBowlCapacity) || 0;
+                        const hopperCap = Number(activeSpecCapacity) || 0;
+
                         if (activeProfile.isCustomBuilt && activeProfile.customSpecs) {
                           const updatedCustom: CustomSmokerSpec = {
                             ...activeProfile.customSpecs,
@@ -2837,7 +3805,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             smokerType: activeSpecCategory,
                             fuelType: activeSpecFuelType,
                             baselineBurnRateLbsHr: Number(activeSpecBaselineBurn) || 1.25,
-                            hopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            hopperCapacityLbs: hopperCap,
                             chamberVolumeSqIn: Number(activeSpecArea) || 800,
                             metalGauge: activeSpecGauge,
                             draftType: activeSpecDraft,
@@ -2851,7 +3819,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             model: activeSpecBrand,
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
-                            pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            pelletHopperCapacityLbs: hopperCap,
+                            bowlCapacityLbs: bowlCap,
                             initialHours: newInitial,
                             currentHours: Number((newInitial + totalLogged).toFixed(2)),
                             customSpecs: updatedCustom,
@@ -2865,7 +3834,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             fuelType: activeSpecFuelType,
                             factoryBaselineBurnRateLbsHr: Number(activeSpecBaselineBurn) || 1.20,
                             factoryHighHeatBurnRateLbsHr: Number(activeSpecHighHeatBurn) || 2.50,
-                            hopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            hopperCapacityLbs: hopperCap,
                             cookingAreaSqIn: Number(activeSpecArea) || 800,
                             thermalEfficiencyRating: activeSpecThermalRating,
                             insulationType: activeSpecGauge,
@@ -2880,7 +3849,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             model: activeSpecName,
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
-                            pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            pelletHopperCapacityLbs: hopperCap,
+                            bowlCapacityLbs: bowlCap,
                             initialHours: newInitial,
                             currentHours: Number((newInitial + totalLogged).toFixed(2)),
                             manufacturerSpecs: updatedMfg,
@@ -2895,27 +3865,86 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             model: activeSpecBrand,
                             smokerType: activeSpecCategory as any,
                             fuelType: activeSpecFuelType,
-                            pelletHopperCapacityLbs: Number(activeSpecCapacity) || 20,
+                            pelletHopperCapacityLbs: hopperCap,
+                            bowlCapacityLbs: bowlCap,
                             initialHours: newInitial,
                             currentHours: Number((newInitial + totalLogged).toFixed(2)),
                           });
+                        }
+
+                        // Auto convert manufacturer / spec capacity to account metric
+                        const effectiveCap = bowlCap > 0 ? bowlCap : hopperCap;
+                        if (effectiveCap > 0) {
+                          try {
+                            const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+                            const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+                            acc.fuelOnHand = `${effectiveCap} lbs`;
+                            localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                            setLocalAccount(acc);
+                            setAccountFuelOnHandInput(`${effectiveCap} lbs`);
+                          } catch (e) {}
                         }
 
                         setSmokerSpecSaveStatus('✨ Active Smoker Specifications updated globally! All app calculations refreshed.');
                         setTimeout(() => setSmokerSpecSaveStatus(null), 4000);
                       }} className="space-y-3">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                              Smoker Name / Model
+                          <div className="relative col-span-1 sm:col-span-2">
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1 flex items-center justify-between">
+                              <span>Smoker Name / Model</span>
+                              <span className="text-[10px] text-orange-400 font-semibold font-mono">Type to search database for auto-populate</span>
                             </label>
-                            <input
-                              type="text"
-                              value={activeSpecName}
-                              onChange={(e) => setActiveSpecName(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                              placeholder="e.g. Texas 500gal Offset or Ironwood 885"
-                            />
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={activeSpecName}
+                                onChange={(e) => handleSmokerNameInputChange(e.target.value)}
+                                onFocus={() => setShowSmokerSuggestions(true)}
+                                className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                                placeholder="Type smoker name (e.g., Traeger, Yoder, Pit Boss, Oklahoma Joe, Highland, Recteq...)"
+                              />
+                              <Search className="w-3.5 h-3.5 text-orange-400 absolute right-3 top-2.5 pointer-events-none" />
+                            </div>
+
+                            {/* Database Search Suggestions Dropdown Overlay */}
+                            {showSmokerSuggestions && matchingDatabaseSmokers.length > 0 && (
+                              <div className="absolute z-50 left-0 right-0 mt-1 bg-[#1c1c1c] border border-orange-500/40 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
+                                <div className="px-3 py-1.5 bg-[#252525] border-b border-[#333] text-[10px] font-bold text-orange-400 uppercase tracking-wider flex justify-between items-center">
+                                  <span>Database Match Suggestions ({matchingDatabaseSmokers.length})</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowSmokerSuggestions(false)}
+                                    className="text-zinc-400 hover:text-white text-xs px-1"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                                {matchingDatabaseSmokers.map((smoker) => (
+                                  <button
+                                    key={smoker.id}
+                                    type="button"
+                                    onClick={() => autoPopulateFromDatabaseMatch(smoker)}
+                                    className="w-full text-left px-3 py-2 hover:bg-orange-500/15 transition-all border-b border-[#2a2a2a] last:border-b-0 flex items-center justify-between group cursor-pointer"
+                                  >
+                                    <div>
+                                      <div className="text-xs font-bold text-white group-hover:text-orange-400 flex items-center space-x-1.5">
+                                        <span>{smoker.brandModel}</span>
+                                      </div>
+                                      <div className="text-[10px] text-zinc-400 flex items-center space-x-2 mt-0.5">
+                                        <span className="text-orange-300 font-mono font-semibold">{smoker.fuelType}</span>
+                                        <span>•</span>
+                                        <span>{smoker.category}</span>
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0 ml-2">
+                                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-bold">
+                                        {smoker.factoryBaselineBurnRateLbsHr} lbs/hr
+                                      </span>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
 
                           <div>
@@ -2926,8 +3955,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={activeSpecBrand}
                               onChange={(e) => setActiveSpecBrand(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                              placeholder="e.g. Lone Star Grillz / Traeger / Yoder"
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="e.g. Traeger / Lone Star Grillz / Yoder"
                             />
                           </div>
 
@@ -2940,7 +3969,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onChange={(e) => setActiveSpecCategory(e.target.value)}
                               className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
                             >
+                              <option value="">Select Smoker Category...</option>
+                              <option value="Stick-Burning Offset Wood Smoker">Stick-Burning Offset Wood Smoker</option>
+                              <option value="Gas / Propane Smoker">Gas / Propane Smoker</option>
+                              <option value="Pellet Smoker / Grill">Pellet Smoker / Grill</option>
                               <option value="Vertical Pellet Smoker">Vertical Pellet Smoker / Grill</option>
+                              <option value="Charcoal & Kamado Smoker">Charcoal & Kamado Smoker</option>
+                              <option value="Electric Cabinet Smoker">Electric Cabinet Smoker</option>
                               <option value="Reverse Flow Offset">Reverse Flow Offset Smoker</option>
                               <option value="Traditional Offset Pipe">Traditional Offset Pipe Smoker</option>
                               <option value="Gravity Feed Charcoal Cabinet">Gravity Feed Charcoal Cabinet</option>
@@ -2961,6 +3996,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onChange={(e) => setActiveSpecFuelType(e.target.value as any)}
                               className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
                             >
+                              <option value="">Select Primary Fuel Source...</option>
                               <option value="Pellets">Hardwood Pellets</option>
                               <option value="Wood Splits">Wood Splits / Logs</option>
                               <option value="Charcoal">Lump Charcoal & Briquettes</option>
@@ -2979,9 +4015,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               min="0"
                               max="10000"
                               value={activeSpecInitialHours}
-                              onChange={(e) => setActiveSpecInitialHours(parseFloat(e.target.value) || 0)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
-                              placeholder="0.0 (Enter previous hours)"
+                              onChange={(e) => setActiveSpecInitialHours(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="0.0"
                             />
                           </div>
 
@@ -2991,12 +4027,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </label>
                             <input
                               type="number"
-                              step="0.05"
-                              min="0.1"
-                              max="10"
+                              step="0.01"
+                              min="0.01"
+                              max="20"
                               value={activeSpecBaselineBurn}
-                              onChange={(e) => setActiveSpecBaselineBurn(parseFloat(e.target.value) || 1.2)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              onChange={(e) => setActiveSpecBaselineBurn(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="0.01"
                             />
                           </div>
 
@@ -3007,25 +4044,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <input
                               type="number"
                               step="0.1"
-                              min="0.2"
-                              max="20"
+                              min="0"
+                              max="30"
                               value={activeSpecHighHeatBurn}
-                              onChange={(e) => setActiveSpecHighHeatBurn(parseFloat(e.target.value) || 2.5)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              onChange={(e) => setActiveSpecHighHeatBurn(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="0.00"
                             />
                           </div>
 
                           <div>
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                              Hopper / Firebox Capacity (lbs)
+                              Fuel Hopper Capacity (lbs)
                             </label>
                             <input
                               type="number"
-                              min="1"
-                              max="200"
+                              min="0"
+                              max="500"
                               value={activeSpecCapacity}
-                              onChange={(e) => setActiveSpecCapacity(parseInt(e.target.value) || 20)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              onChange={(e) => setActiveSpecCapacity(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="0"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1 flex items-center justify-between">
+                              <span>Firebox / Charcoal Bowl Capacity (lbs)</span>
+                              <span className="text-[9px] text-zinc-400 font-mono font-normal">System Weight Metric</span>
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="500"
+                              value={activeSpecBowlCapacity}
+                              onChange={(e) => setActiveSpecBowlCapacity(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-amber-300 font-mono font-bold text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-amber-500 placeholder-zinc-600"
+                              placeholder="0"
                             />
                           </div>
 
@@ -3035,11 +4090,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </label>
                             <input
                               type="number"
-                              min="100"
+                              min="0"
                               max="10000"
                               value={activeSpecArea}
-                              onChange={(e) => setActiveSpecArea(parseInt(e.target.value) || 800)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              onChange={(e) => setActiveSpecArea(e.target.value)}
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
+                              placeholder="0"
                             />
                           </div>
 
@@ -3052,6 +4108,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onChange={(e) => setActiveSpecThermalRating(e.target.value as any)}
                               className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
                             >
+                              <option value="">Select Thermal Rating...</option>
                               <option value="Extreme">Extreme Thermal Mass (Ceramic / 1/4" Plate)</option>
                               <option value="High">High (Double Wall Insulated)</option>
                               <option value="Standard">Standard (Single Wall Heavy Steel)</option>
@@ -3067,24 +4124,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={activeSpecGauge}
                               onChange={(e) => setActiveSpecGauge(e.target.value)}
-                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                              className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder-zinc-600"
                               placeholder="e.g. 1/4 inch Steel Plate or Double-Wall Stainless"
                             />
                           </div>
                         </div>
 
-                        <div className="pt-2 flex items-center justify-between">
+                        <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
                           <div className="text-[11px] text-zinc-400 flex items-center space-x-1.5">
                             <Info className="w-3.5 h-3.5 text-orange-400 shrink-0" />
                             <span>Changes take effect instantly across all cook logs, fuel estimates & AI tools.</span>
                           </div>
-                          <button
-                            type="submit"
-                            className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
-                          >
-                            <Save className="w-4 h-4" />
-                            <span>Save Active Specifications</span>
-                          </button>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!activeProfile || !onUpdateProfile) return;
+                                const cleanProfile: SmokerProfile = {
+                                  ...activeProfile,
+                                  name: '',
+                                  model: '',
+                                  smokerType: '' as any,
+                                  fuelType: 'Pellets',
+                                  pelletHopperCapacityLbs: 0,
+                                  customSpecs: undefined,
+                                  manufacturerSpecs: undefined,
+                                  modifications: [],
+                                  activeBlendComponents: undefined,
+                                };
+                                onUpdateProfile(cleanProfile);
+                                setActiveSpecName('');
+                                setActiveSpecBrand('');
+                                setActiveSpecCategory('');
+                                setActiveSpecFuelType('Pellets');
+                                setActiveSpecBaselineBurn(1.20);
+                                setActiveSpecHighHeatBurn(2.50);
+                                setActiveSpecCapacity('');
+                                setActiveSpecArea(0);
+                                setActiveSpecThermalRating('Medium');
+                                setActiveSpecGauge('');
+                                setActiveSpecDraft('');
+                              }}
+                              className="px-3 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 font-bold text-xs rounded-xl transition-all flex items-center space-x-1.5 cursor-pointer"
+                              title="Clear active smoker specifications"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                              <span>Clear Specs</span>
+                            </button>
+                            <button
+                              type="submit"
+                              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
+                            >
+                              <Save className="w-4 h-4" />
+                              <span>Save Active Specifications</span>
+                            </button>
+                          </div>
                         </div>
                       </form>
                     </>
@@ -3349,11 +4443,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </label>
                           <input
                             type="number"
-                            step="0.05"
-                            min="0.1"
+                            step="0.01"
+                            min="0.01"
                             max="10"
                             value={newSmokerBaselineBurn}
-                            onChange={(e) => setNewSmokerBaselineBurn(parseFloat(e.target.value) || 1.2)}
+                            onChange={(e) => setNewSmokerBaselineBurn(e.target.value)}
                             className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
                           />
                         </div>
@@ -3367,7 +4461,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             min="1"
                             max="200"
                             value={newSmokerHopperCapacity}
-                            onChange={(e) => setNewSmokerHopperCapacity(parseInt(e.target.value) || 20)}
+                            onChange={(e) => setNewSmokerHopperCapacity(e.target.value)}
                             className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-mono text-xs rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500"
                           />
                         </div>
@@ -3441,6 +4535,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           Burn Rate: {effectiveSpecs.baselineBurnRateLbsHr} lbs/hr | Capacity: {effectiveSpecs.hopperCapacityLbs} lbs
                         </div>
                       </div>
+
+                      {/* Empty state for deployment when no custom/mfg specs saved */}
+                      {savedCustomSmokersList.length === 0 && savedManufacturerSmokersList.length === 0 && (
+                        <div className="p-3 bg-[#121212] border border-[#2a2a2a] rounded-xl text-center space-y-1 flex flex-col items-center justify-center min-h-[90px]">
+                          <Building2 className="w-4 h-4 text-orange-400/80 mb-0.5" />
+                          <p className="text-xs font-bold text-white">Collection Cleared for Deployment</p>
+                          <p className="text-[10px] text-zinc-400">No saved custom builds or manufacturer specs in switcher. Build or save a custom smoker to populate your collection.</p>
+                        </div>
+                      )}
 
                       {/* Saved Custom Smokers */}
                       {savedCustomSmokersList.map((custom) => {
@@ -3525,9 +4628,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
-            {/* SUB-TAB 2: CLOUD SYNC & AUTO-BACKUP */}
+            {/* SUB-TAB 4: CLOUD SYNC & AUTO-BACKUP */}
             {dataSubTab === 'cloud' && (
               <div className="space-y-3">
+                {/* MASTER WEB VERSION SYNC PANEL */}
+                <MasterVersionSyncCard />
+
+
+
                 {/* Requirement Alert Banner */}
                 <div className="bg-[#1e1e1e] border border-amber-500/30 rounded-xl p-3 text-[11px] text-amber-200/90 flex items-start space-x-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -3738,7 +4846,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         type="email"
                         value={oneDriveEmailInput}
                         onChange={(e) => setOneDriveEmailInput(e.target.value)}
-                        placeholder="e.g. jonathanblunt1214@outlook.com"
+                        placeholder="e.g. pitmaster@outlook.com"
                         className="w-full bg-[#121212] border border-[#2a2a2a] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
                         required
                       />
@@ -3821,7 +4929,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <span>Live Community Server Pool Stats</span>
                       </span>
                       <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded font-bold">
-                        {poolStats?.federatedAccuracyRating || '98.6%'} Accuracy
+                        {poolStats?.federatedAccuracyRating || '0.0%'} Accuracy
                       </span>
                     </div>
 
@@ -3829,13 +4937,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="bg-[#121212] p-2 rounded-lg border border-[#2a2a2a]">
                         <span className="text-[10px] text-zinc-400 block font-mono">Total Server Pool Cooks</span>
                         <span className="text-sm font-bold text-white font-mono">
-                          {poolStats ? (poolStats.totalContributions || 1542).toLocaleString() : '1,542'} cooks
+                          {poolStats ? (poolStats.totalContributions || 0).toLocaleString() : '0'} cooks
                         </span>
                       </div>
                       <div className="bg-[#121212] p-2 rounded-lg border border-[#2a2a2a]">
-                        <span className="text-[10px] text-zinc-400 block font-mono">My Contributions</span>
+                        <span className="text-[10px] text-zinc-400 block font-mono">My Contributions (Synced)</span>
                         <span className="text-sm font-bold text-purple-300 font-mono">
-                          {federatedConfig.contributedCount || 0} logs
+                          {(poolStats?.userContributions !== undefined ? poolStats.userContributions : (federatedConfig.contributedCount || 0)).toLocaleString()} logs
                         </span>
                       </div>
                     </div>
@@ -3844,18 +4952,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="flex justify-between text-zinc-300">
                         <span className="text-zinc-400">Top Community Wood Blend:</span>
                         <span className="font-bold text-amber-300">
-                          {poolStats?.topPelletBlends?.[0]?.blend || 'Post Oak & Pecan (60/40)'}
+                          {poolStats?.topPelletBlends?.[0]?.blend || 'Awaiting pool data'}
                         </span>
                       </div>
                       <div className="flex justify-between text-zinc-300">
                         <span className="text-zinc-400">Avg Brisket Stall Temp:</span>
                         <span className="font-bold text-orange-300">
-                          {poolStats?.averageStalls?.[0]?.stallTemp || '163°F - 171°F'}
+                          {poolStats?.averageStalls?.[0]?.stallTemp || 'Awaiting pool data'}
                         </span>
                       </div>
                       <div className="flex justify-between text-zinc-300">
                         <span className="text-zinc-400">Model Accuracy Rating:</span>
-                        <span className="font-mono text-purple-300">{poolStats?.federatedAccuracyRating || '98.6%'}</span>
+                        <span className="font-mono text-purple-300">{poolStats?.federatedAccuracyRating || '0.0%'}</span>
                       </div>
                     </div>
                   </div>
@@ -4023,118 +5131,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
 
-                {/* MEMORY USAGE & STORAGE EFFICIENCY OPTIMIZER */}
-                <div className="bg-gradient-to-r from-emerald-950/30 via-[#242424] to-teal-950/20 border border-emerald-500/30 rounded-xl p-3.5 space-y-3 shadow-md">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#2a2a2a]">
-                    <div className="flex items-center space-x-2">
-                      <HardDrive className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <div>
-                        <h4 className="text-xs sm:text-sm font-extrabold text-white">Browser Storage & RAM Optimization</h4>
-                        <p className="text-[11px] text-zinc-400">Zero-overhead local storage compression & memory caching</p>
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
-                      {storageStats.usedFormatted} / ~5 MB ({storageStats.percentUsed}%)
-                    </span>
-                  </div>
-
-                  {/* Meter Bar */}
-                  <div className="space-y-1">
-                    <div className="w-full h-2 bg-[#121212] rounded-full overflow-hidden border border-[#2a2a2a]">
-                      <div
-                        className={`h-full transition-all duration-500 ${
-                          storageStats.percentUsed > 80
-                            ? 'bg-red-500'
-                            : storageStats.percentUsed > 50
-                            ? 'bg-amber-500'
-                            : 'bg-emerald-500'
-                        }`}
-                        style={{ width: `${Math.max(2, storageStats.percentUsed)}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-[10px] font-mono text-zinc-400">
-                      <span>Quota Used: {storageStats.usedFormatted}</span>
-                      <span>Estimated Available: ~5.00 MB</span>
-                    </div>
-                  </div>
-
-                  {/* Breakdown */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
-                    {storageStats.breakdown.map((item) => (
-                      <div key={item.key} className="p-2 bg-[#121212] rounded-lg border border-[#2a2a2a] flex items-center justify-between">
-                        <span className="text-zinc-300 truncate font-semibold mr-2">{item.label}</span>
-                        <span className="text-emerald-400 font-mono font-bold shrink-0">{item.formatted}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {compactStatus && (
-                    <div className="text-[11px] p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded-lg flex items-center space-x-1.5 font-mono">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>{compactStatus}</span>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-[#2a2a2a] space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h5 className="text-xs font-bold text-white flex items-center space-x-1.5">
-                          <span>Auto-Clear Cached Data Interval</span>
-                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded font-bold">
-                            Mobile Optimization
-                          </span>
-                        </h5>
-                        <p className="text-[10px] text-zinc-400">
-                          Automatically purges stale price caches and oversized chat histories to maintain optimal smartphone performance.
-                        </p>
-                      </div>
-                      <select
-                        value={autoClearInterval}
-                        onChange={(e) => handleAutoClearIntervalChange(e.target.value as AutoClearIntervalOption)}
-                        className="bg-[#121212] border border-[#2a2a2a] text-xs font-bold text-orange-400 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
-                      >
-                        <option value="7_days">Every 7 Days</option>
-                        <option value="30_days">Every 30 Days (Recommended)</option>
-                        <option value="90_days">Every 90 Days</option>
-                        <option value="never">Disabled (Never)</option>
-                      </select>
-                    </div>
-
-                    <div className="p-2 bg-[#121212] rounded-lg border border-[#2a2a2a] flex items-center justify-between text-[11px] font-mono">
-                      <span className="text-zinc-400">Next Scheduled Auto-Purge:</span>
-                      <span className="text-emerald-400 font-bold">{nextAutoClearDate}</span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const res = executeCacheClear();
-                        setStorageStats(getStorageStats());
-                        setCompactStatus(res.message);
-                        setNextAutoClearDate(getNextAutoClearDateFormatted());
-                        setTimeout(() => setCompactStatus(null), 4000);
-                      }}
-                      className="w-full py-2 px-3 bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-1.5"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-                      <span>Clear Cached Data Now (Reclaim Space)</span>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const res = compactAndOptimizeStorage();
-                      setStorageStats(getStorageStats());
-                      setCompactStatus(`Storage compacted! Reclaimed ${res.freedFormatted} of browser memory.`);
-                      setTimeout(() => setCompactStatus(null), 3500);
-                    }}
-                    className="w-full py-2 px-3 bg-emerald-500 hover:bg-emerald-600 text-zinc-950 font-black text-xs rounded-xl transition-all cursor-pointer shadow-md flex items-center justify-center space-x-1.5"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Run 1-Click Storage & Memory Compression</span>
-                  </button>
-                </div>
+                {/* AUTOMATED SCREEN, CSS & BROWSER STORAGE/RAM OPTIMIZER */}
+                <ScreenOptimizerCard
+                  onShowToast={(msg) => {
+                    setLocalActionStatus({ type: 'success', text: msg });
+                    setTimeout(() => setLocalActionStatus(null), 4000);
+                  }}
+                />
 
                 {/* RESET SAMPLE DATA */}
               </div>

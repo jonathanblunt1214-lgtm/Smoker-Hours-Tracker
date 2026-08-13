@@ -25,8 +25,8 @@ export function getLatestSupportedFirmware(device?: ThermometerDeviceDef | null)
   if (device.latestFirmware) return device.latestFirmware;
   
   switch (device.id) {
-    case 'meat-minder-pro':
-      return 'v3.2.0-BLE';
+    case 'togrill-app-bridge':
+      return 'v3.1.2-ToGrill';
     case 'meater-plus':
       return 'v2.8.5-MEATER';
     case 'thermoworks-signals':
@@ -53,7 +53,7 @@ export function getInitialInstalledFirmware(device?: ThermometerDeviceDef | null
   if (device.installedFirmware) return device.installedFirmware;
   
   switch (device.id) {
-    case 'meat-minder-pro': return 'v2.1.0-BLE';
+    case 'togrill-app-bridge': return 'v2.2.0-ToGrill';
     case 'meater-plus': return 'v1.9.2-MEATER';
     case 'thermoworks-signals': return 'v3.1.0-TW';
     case 'inkbird-int-11p': return 'v1.5.0-INK';
@@ -70,21 +70,16 @@ export function getInitialInstalledFirmware(device?: ThermometerDeviceDef | null
 
 export const TOP_25_THERMOMETERS: ThermometerDeviceDef[] = [
   {
-    id: 'meat-minder-pro',
-    name: 'Meat Minder Pro (Wireless Dual-Probe)',
-    brand: 'Meat Minder Pro',
-    probeCount: 2,
+    id: 'togrill-app-bridge',
+    name: 'ToGrill App Gateway (Direct App Connection)',
+    brand: 'ToGrill App / OEM BLE',
+    probeCount: 6,
     wirelessType: 'Bluetooth BLE',
-    rangeFeet: 500,
+    rangeFeet: 300,
     isFeatured: true,
-    serviceUUIDs: ['0000181a-0000-1000-8000-00805f9b34fb', '00001809-0000-1000-8000-00805f9b34fb'],
-    characteristicUUIDs: {
-      meatTemp: '00002a6e-0000-1000-8000-00805f9b34fb',
-      pitTemp: '00002a6f-0000-1000-8000-00805f9b34fb',
-      battery: '00002a19-0000-1000-8000-00805f9b34fb',
-    },
-    features: ['Bluetooth BLE Hardware Probe Protocol', 'Ultra-Precision Core & Ambient Dual Sensors', 'High Temp Ceramic Handle (1000°F)', 'Smart Thermal Stall Predictor', 'Fast 1-sec Temp Refresh'],
-    description: 'Flagship competition wireless probe operating on the native Bluetooth BLE Hardware Probe Protocol with real-time ambient pit and internal core temperature streaming.',
+    serviceUUIDs: ['0000fff0-0000-1000-8000-00805f9b34fb', '0000ffe0-0000-1000-8000-00805f9b34fb'],
+    features: ['Direct ToGrill App Local Data Pull', 'Auto-Detection of Installed ToGrill App', 'Up to 6 Simultaneous Probes', 'Live Target Preset Sync', 'Supports Chugod, Soraken, HerQules, Cadrim'],
+    description: 'Direct app bridge connection to pull probe telemetry and pit target alerts directly from the ToGrill application running on your tablet/phone.',
     maxTempF: 572,
     defaultTargetTempF: 203,
   },

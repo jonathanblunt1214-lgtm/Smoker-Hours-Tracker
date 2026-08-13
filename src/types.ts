@@ -5,6 +5,14 @@ export type ProteinType =
   | 'Seafood'
   | 'Turkey'
   | 'Lamb'
+  | 'Mutton'
+  | 'Poultry'
+  | 'Sausage'
+  | 'Fish'
+  | 'Ribs'
+  | 'Pork Chops'
+  | 'Salmon'
+  | 'Prime Rib'
   | 'Venison'
   | 'Bear'
   | 'Wild Boar'
@@ -14,6 +22,7 @@ export type ProteinType =
   | 'Pheasant'
   | 'Rabbit'
   | 'Wild Game'
+  | 'Game'
   | 'Other';
 
 export type SmokerType = string;
@@ -70,6 +79,7 @@ export interface CustomSmokerSpec {
   metalGauge: string;
   chamberVolumeSqIn: number;
   hopperCapacityLbs: number;
+  bowlCapacityLbs?: number;
   baselineBurnRateLbsHr: number;
   draftType: string;
   notes?: string;
@@ -89,6 +99,7 @@ export interface ManufacturerSmokerSpec {
   factoryBaselineBurnRateLbsHr: number;
   factoryHighHeatBurnRateLbsHr: number;
   hopperCapacityLbs: number;
+  bowlCapacityLbs?: number;
   cookingAreaSqIn: number;
   insulationType: string;
   thermalEfficiencyRating: 'Extreme' | 'High' | 'Standard' | 'Moderate';
@@ -108,9 +119,12 @@ export interface SmokerProfile {
   smokerType: SmokerType;
   fuelType: 'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas';
   fuelOnHand?: string;
+  activeFuelName?: string;
   initialHours: number; // e.g. 148.25 baseline from log sheet
   currentHours: number;
   pelletHopperCapacityLbs: number;
+  bowlCapacityLbs?: number;
+  charGPTPersona?: string;
   lastRefillHours?: number; // Runtime hours at last hopper refill
   maintenanceTasks: SmokerMaintenanceTask[];
   isCustomBuilt?: boolean;
@@ -119,6 +133,13 @@ export interface SmokerProfile {
   appliedModIds?: string[];
   appliedMods?: AppliedSmokerMod[];
   activeBlendComponents?: FuelBlendComponent[];
+  healthScore?: number; // 0 - 100
+  healthScoreBreakdown?: {
+    maintenanceScore: number;
+    stabilityScore: number;
+    efficiencyScore: number;
+    ageScore: number;
+  };
 }
 
 export interface LowPowerModeSettings {
@@ -182,6 +203,8 @@ export interface FuelLog {
   costPerLb: number;
   pricePaid?: number;
   notes?: string;
+  userEmail?: string;
+  userId?: string;
   // Custom Fuel Blend properties
   isBlend?: boolean;
   blendComponents?: FuelBlendComponent[];
@@ -214,6 +237,71 @@ export interface TemperatureReading {
   meatTemp4?: number; // °F (Probe 4 / Meat 4)
   ambientTemp: number; // °F
   actionsTaken: string; // e.g. "Started smoker", "Spritzed", "Wrapped in butcher paper"
+}
+
+export interface ThermalCurveDataPoint {
+  time: string;
+  timestampMinutes: number;
+  meatTemp: number;
+  pitTemp: number;
+  targetTemp: number;
+  ambientTemp?: number;
+  action?: string;
+}
+
+export interface ThermalCurveAnalytics {
+  startingMeatTempF: number;
+  peakMeatTempF: number;
+  avgPitTempF: number;
+  maxPitTempF: number;
+  minPitTempF: number;
+  totalCookDurationMinutes: number;
+  tempRiseRateFPerHr: number;
+  stallDetected: boolean;
+  stallRangeF?: string;
+  stallDurationMinutes?: number;
+  thermalStabilityVarianceF: number;
+  thermalStabilityRating: string;
+  curveDataPoints: ThermalCurveDataPoint[];
+  generatedAt: string;
+}
+
+export type StructuredEventType =
+  | 'cook_started'
+  | 'temperature_reading'
+  | 'fuel_added'
+  | 'spritz'
+  | 'rotate'
+  | 'flip'
+  | 'wrap'
+  | 'unwrap'
+  | 'vent_adjustment'
+  | 'probe_tender'
+  | 'rest_started'
+  | 'rest_completed'
+  | 'cook_completed'
+  | 'user_note'
+  | 'custom_event';
+
+export interface StructuredCookEvent {
+  id: string;
+  timestampMinutes: number;
+  time: string;
+  type: StructuredEventType;
+  label: string;
+  detail?: string;
+  pitTemp?: number;
+  meatTemp?: number;
+  fuelLbs?: number;
+}
+
+export interface PostCookEvaluation {
+  overallScore10?: number; // 1 - 10
+  tendernessRating?: 'under' | 'slightly_under' | 'ideal' | 'slightly_over' | 'over';
+  barkRating?: 'poor' | 'fair' | 'good' | 'excellent';
+  smokeRating?: 'too_light' | 'preferred' | 'too_heavy';
+  moistureRating?: 'dry' | 'acceptable' | 'juicy';
+  whatToChangeNextTime?: string;
 }
 
 export interface CookLog {
@@ -249,8 +337,18 @@ export interface CookLog {
   photoUrl?: string;
   photoUrls?: string[];
   status: 'In Progress' | 'Completed' | 'Draft';
+  timerSeconds?: number;
+  isTimerRunning?: boolean;
+  isPublishedToTotalHours?: boolean;
+  publishedAt?: string;
+  thermalCurveAnalytics?: ThermalCurveAnalytics;
   pitmasterAlias?: string;
   userEmail?: string;
+  userId?: string;
+  // Lifecycle & Structured Extensions
+  targetServingTime?: string; // e.g. "2026-08-13T18:00" or "6:00 PM"
+  timelineEvents?: StructuredCookEvent[];
+  postCookEvaluation?: PostCookEvaluation;
 }
 
 export interface LocalUserProfile {
@@ -259,8 +357,18 @@ export interface LocalUserProfile {
   email: string;
   title: string;
   createdAt: string;
+  rememberMe?: boolean;
+  unitSystem?: 'imperial' | 'metric';
+  fuelOnHand?: string;
   rigs?: SmokerProfile[];
   activeRigId?: string;
+  charGPTMemory?: CharGPTMemory;
+  charGPTLinked?: boolean;
+  charGPTProfileId?: string;
+  charGPTLinkedAt?: string;
+  charGPTAutoSyncMemory?: boolean;
+  charGPTPersona?: 'Master Pitmaster' | 'Texas Offset Specialist' | 'Competition BBQ Judge' | 'Thermal Chemist & Science' | 'Kansas City Pit Master';
+  charGPTCustomInstructions?: string;
 }
 
 export interface OneDriveAccount {
@@ -300,6 +408,10 @@ export interface CharGPTRule {
 export interface CharGPTMemory {
   totalInteractions: number;
   totalLogsAnalyzed: number;
+  userName?: string;
+  lastAnalysisText?: string;
+  lastAnalysisLogCount?: number;
+  lastAnalysisTimestamp?: string;
   learnedRules: CharGPTRule[];
   favoriteProteins: string[];
   preferredWoodTypes: string[];
@@ -358,6 +470,7 @@ export interface FederatedLearningConfig {
 
 export interface FederatedPoolStats {
   totalContributions: number;
+  userContributions?: number;
   proteinsLearned: Record<string, number>;
   topPelletBlends: Array<{
     blend: string;
@@ -379,6 +492,8 @@ export interface VerifiedMeatCut {
   name: string;
   aliases: string[];
   proteinType: ProteinType;
+  gameSubcategory?: string;
+  proteinSubcategory?: string;
   primalOrigin: string;
   impsCode?: string;
   description: string;

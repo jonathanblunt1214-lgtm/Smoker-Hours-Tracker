@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SmokerProfile, FuelLog, CookLog, FuelBlendComponent, CustomFuelBlendPreset, RetailerFuelItem } from '../types';
 import { loadSavedFuelPresets, saveSavedFuelPresets } from '../utils/storage';
+import { loadPushConfig, savePushConfig } from '../utils/notificationAndAlexa';
 import { TOP_RETAILER_FUEL_PRICES } from '../data/fuelPriceData';
 import { getManufacturerSpecs, calculateRefillPelletUsage, calculateBurnEfficiencySync } from '../utils/smokerManufacturerData';
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
@@ -272,13 +273,13 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   const [fuelTab, setFuelTab] = useState<'database' | 'inventory'>('database');
 
   // Collapsible Section & Sub-Tab Navigation State
-  const [activeSubTab, setActiveSubTab] = useState<'all' | 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend'>('blend');
+  const [activeSubTab, setActiveSubTab] = useState<'all' | 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend'>('all');
   const [expandedSections, setExpandedSections] = useState({
-    hardware: false,
-    maintenance: false,
-    fuel: false,
-    mods: false,
-    blend: false,
+    hardware: true,
+    maintenance: true,
+    fuel: true,
+    mods: true,
+    blend: true,
   });
 
   // Inner Sub-Section Collapsible States
@@ -326,11 +327,18 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   };
 
   // Profile Edit State
+  const getCleanFuelOnHandWeight = (pVal?: string) => {
+    if (!pVal) return '0 lbs';
+    const trimmed = pVal.trim();
+    if (/^\d/.test(trimmed)) return trimmed;
+    return '40 lbs';
+  };
+
   const [smokerName, setSmokerName] = useState(profile.name);
   const [smokerModel, setSmokerModel] = useState(profile.model);
   const [smokerType, setSmokerType] = useState(profile.smokerType || 'Vertical Pellet Smoker');
   const [fuelType, setFuelType] = useState(profile.fuelType || 'Pellets');
-  const [fuelOnHand, setFuelOnHand] = useState(profile.fuelOnHand || '120 lbs');
+  const [fuelOnHand, setFuelOnHand] = useState(() => getCleanFuelOnHandWeight(profile.fuelOnHand));
 
   const [fuelBrand, setFuelBrand] = useState('Bear Mountain Hickory');
   const [woodType, setWoodType] = useState('Hickory');
@@ -343,14 +351,11 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   // Custom Fuel Blend Creator State
   const [savedPresets, setSavedPresets] = useState<CustomFuelBlendPreset[]>(() => loadSavedFuelPresets());
   const [showBlendModal, setShowBlendModal] = useState(false);
-  const [blendName, setBlendName] = useState('Texas Competition Oak & Pecan');
-  const [blendBrand, setBlendBrand] = useState('Pitmaster Custom Blend');
-  const [blendQuantityLbs, setBlendQuantityLbs] = useState<number>(40);
-  const [blendPricePaid, setBlendPricePaid] = useState<number>(34.00);
-  const [blendComponents, setBlendComponents] = useState<FuelBlendComponent[]>([
-    { species: 'Post Oak', percentage: 60 },
-    { species: 'Pecan', percentage: 40 },
-  ]);
+  const [blendName, setBlendName] = useState('');
+  const [blendBrand, setBlendBrand] = useState('');
+  const [blendQuantityLbs, setBlendQuantityLbs] = useState<number>(0);
+  const [blendPricePaid, setBlendPricePaid] = useState<number>(0);
+  const [blendComponents, setBlendComponents] = useState<FuelBlendComponent[]>([]);
 
   // Live Retailer Price Index & Amazon Sales Comparison State
   const [retailerSearch, setRetailerSearch] = useState('');
@@ -413,15 +418,18 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
     const hasCharcoal = componentsToUse.some((c) => c.species.toLowerCase().includes('charcoal'));
     const updatedFuelType = hasCharcoal ? 'Pellets' : (profile.fuelType || 'Pellets');
 
+    const cleanWeight = getCleanFuelOnHandWeight(profile.fuelOnHand);
+
     onUpdateProfile({
       ...profile,
-      fuelOnHand: activeFuelString,
+      activeFuelName: activeFuelString,
+      fuelOnHand: cleanWeight,
       fuelType: updatedFuelType as any,
       activeBlendComponents: componentsToUse,
       ...(autoRefillHopper ? { lastRefillHours: profile.currentHours } : {}),
     });
 
-    setFuelOnHand(activeFuelString);
+    setFuelOnHand(cleanWeight);
 
     setActiveBlendSuccessMessage(`🔥 "${nameToUse}" set as active fuel in ${profile.name || 'smoker'}!`);
     setTimeout(() => {
@@ -460,14 +468,24 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
     const hasCharcoal = blendComponents.some((c) => c.species.toLowerCase().includes('charcoal'));
     const updatedFuelType = hasCharcoal ? 'Pellets' : (profile.fuelType || 'Pellets');
 
+    let cleanWeight = getCleanFuelOnHandWeight(profile.fuelOnHand);
+    if (andSetAsActive && blendQuantityLbs > 0) {
+      cleanWeight = `${blendQuantityLbs} lbs`;
+    }
+
     onUpdateProfile({
       ...profile,
-      ...(andSetAsActive ? { fuelOnHand: activeFuelString, fuelType: updatedFuelType as any, activeBlendComponents: blendComponents } : {}),
+      ...(andSetAsActive ? { 
+        activeFuelName: activeFuelString, 
+        fuelOnHand: cleanWeight,
+        fuelType: updatedFuelType as any, 
+        activeBlendComponents: blendComponents 
+      } : {}),
       lastRefillHours: profile.currentHours,
     });
 
     if (andSetAsActive) {
-      setFuelOnHand(activeFuelString);
+      setFuelOnHand(cleanWeight);
       setActiveBlendSuccessMessage(`🔥 Saved & set "${blendName}" as active fuel in ${profile.name || 'smoker'}!`);
       setTimeout(() => setActiveBlendSuccessMessage(null), 5000);
     }
@@ -539,13 +557,19 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     const newMfrSpec = getManufacturerSpecs(smokerName, smokerModel, smokerType);
+    let cleanWeightVal = fuelOnHand.trim();
+    if (cleanWeightVal && !/^\d/.test(cleanWeightVal)) {
+      cleanWeightVal = '0 lbs';
+    } else if (cleanWeightVal && !cleanWeightVal.toLowerCase().includes('lbs') && !cleanWeightVal.toLowerCase().includes('gal') && !cleanWeightVal.toLowerCase().includes('log')) {
+      cleanWeightVal = `${cleanWeightVal} lbs`;
+    }
     onUpdateProfile({
       ...profile,
       name: smokerName,
       model: smokerModel,
       smokerType: smokerType as any,
       fuelType: fuelType as any,
-      fuelOnHand,
+      fuelOnHand: cleanWeightVal || '0 lbs',
       pelletHopperCapacityLbs: newMfrSpec.standardCapacityLbs,
     });
     setShowProfileModal(false);
@@ -603,7 +627,9 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   const totalPelletsLbs = fuelLogs.reduce((acc, curr) => acc + curr.quantityLbs, 0);
   const effectiveSpecs = getEffectiveSmokerSpecs(profile);
   const mfrSpec = getManufacturerSpecs(profile.name, profile.model, profile.smokerType || '');
-  const refillData = calculateRefillPelletUsage(profile, cookLogs, fuelLogs);
+  const [pushCfg, setPushCfg] = useState(() => loadPushConfig());
+  const lowWarningThreshold = pushCfg.lowFuelThresholdPercent || 20;
+  const refillData = calculateRefillPelletUsage(profile, cookLogs, fuelLogs, undefined, lowWarningThreshold);
   const burnSync = calculateBurnEfficiencySync(profile, cookLogs);
 
   const handleResetRefill = () => {
@@ -674,7 +700,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             }`}
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>Maintenance Care</span>
+            <span>Maintenance</span>
             {dueTasksCount > 0 ? (
               <span className="ml-1 bg-red-500 text-white font-mono text-[10px] px-1.5 py-0.2 rounded-full font-bold animate-pulse">
                 {dueTasksCount} Due
@@ -699,7 +725,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             }`}
           >
             <Flame className="w-4 h-4" />
-            <span>Fuel & Pellets</span>
+            <span>Fuel & Inventory</span>
           </button>
 
           <button
@@ -715,7 +741,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             }`}
           >
             <FlaskConical className="w-4 h-4 text-purple-300" />
-            <span>Custom Fuel Blend Lab</span>
+            <span>Fuel Blends</span>
           </button>
 
           <button
@@ -731,7 +757,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             }`}
           >
             <Wrench className="w-4 h-4" />
-            <span>Hardware & Burn Sync</span>
+            <span>Hardware Specs</span>
           </button>
 
           <button
@@ -747,7 +773,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>Mods & Spec Tuning</span>
+            <span>Mods & Tuning</span>
             {effectiveSpecs.activeModsCount > 0 && (
               <span className="ml-1 bg-amber-500/20 text-amber-300 font-mono text-[10px] px-1.5 py-0.2 rounded-full font-bold border border-amber-500/30">
                 {effectiveSpecs.activeModsCount} Active
@@ -802,13 +828,13 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <h2 className="text-base font-extrabold text-white">Aftermarket Mods & Specification Tuning</h2>
+                  <h2 className="text-base font-extrabold text-white">Mods & Tuning</h2>
                   <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-md">
                     {effectiveSpecs.activeModsCount} Active Mod{effectiveSpecs.activeModsCount !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Toggle aftermarket modifications to recalculate fuel burn rates, thermal efficiency, hopper capacity, and cooking area in real-time.
+                  Configure aftermarket modifications to recalculate fuel burn rate, hopper capacity, and thermal efficiency.
                 </p>
               </div>
             </div>
@@ -852,13 +878,13 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <h2 className="text-base font-extrabold text-white">Smoker Hardware & Category Profile</h2>
+                  <h2 className="text-base font-extrabold text-white">Smoker Hardware</h2>
                   <span className="text-[10px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-md">
-                    {profile.name} ({profile.model})
+                    {(profile.name || profile.model) ? `${profile.name || ''}${profile.model ? ` (${profile.model})` : ''}` : 'None Selected'}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Configure primary smoker model, fuel source, factory specifications, and live burn efficiency metrics.
+                  Manage smoker specifications, controller type, hopper capacity, and baseline fuel burn rates.
                 </p>
               </div>
             </div>
@@ -905,13 +931,21 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase block font-sans font-semibold">Smoker Type Field</span>
-                  <span className="inline-block mt-0.5 px-2 py-0.5 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-md font-sans font-bold">
-                    {profile.smokerType || 'Vertical Pellet Smoker'}
-                  </span>
+                  {Boolean((profile.name && profile.name.trim() !== '' && profile.name !== 'None Selected') || profile.model?.trim() || profile.smokerType?.trim()) && profile.smokerType?.trim() ? (
+                    <span className="inline-block mt-0.5 px-2 py-0.5 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-md font-sans font-bold">
+                      {profile.smokerType}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500 font-sans italic text-xs">--</span>
+                  )}
                 </div>
                 <div>
                   <span className="text-[10px] text-zinc-400 uppercase block font-sans font-semibold">Primary Fuel Type</span>
-                  <span className="text-amber-400 font-sans font-bold">{profile.fuelType}</span>
+                  {Boolean((profile.name && profile.name.trim() !== '' && profile.name !== 'None Selected') || profile.model?.trim() || profile.smokerType?.trim()) && profile.fuelType?.trim() ? (
+                    <span className="text-amber-400 font-sans font-bold">{profile.fuelType}</span>
+                  ) : (
+                    <span className="text-zinc-500 font-sans italic text-xs">--</span>
+                  )}
                 </div>
               </div>
 
@@ -941,212 +975,295 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
 
               {/* MANUFACTURER BURN EFFICIENCY & PELLET USAGE SYNC SECTION */}
-              <div className="bg-[#121212] border border-[#2a2a2a] rounded-2xl p-5 space-y-5">
-                <div
-                  onClick={() => setIsBurnSyncExpanded(!isBurnSyncExpanded)}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#2a2a2a] cursor-pointer select-none group"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-400">
-                      <Gauge className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <h3 className="text-base font-bold text-white group-hover:text-orange-400 transition-colors">Manufacturer Burn Efficiency & Pellet Usage Sync</h3>
-                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold rounded-md flex items-center space-x-1">
-                          <ShieldCheck className="w-3 h-3" />
-                          <span>Synced to {burnSync.mfrSpec.brandModel}</span>
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-400 mt-0.5">
-                        Burn efficiency metric synchronized to manufacturer baseline burn rates ({refillData.effectiveBurnRateLbsHr} lbs/hr) and hours elapsed since last refill ({refillData.hoursSinceRefill} hrs).
-                      </p>
-                    </div>
-                  </div>
+              {(() => {
+                const hasSmokerSelected = Boolean(profile?.name?.trim() || profile?.model?.trim() || profile?.smokerType?.trim());
 
-                  <div className="flex items-center space-x-3 shrink-0">
-                    <div className="text-right">
-                      <span className="text-[10px] uppercase font-bold text-zinc-400 block">Efficiency Grade</span>
-                      <span className="text-xs font-semibold text-orange-400">{burnSync.efficiencyStatusLabel}</span>
-                    </div>
-                    <div className="w-10 h-10 bg-orange-500/10 border-2 border-orange-500/40 rounded-xl flex items-center justify-center text-lg font-black font-mono text-orange-400 shadow-inner">
-                      {burnSync.efficiencyGrade}
-                    </div>
-                    <div className="p-1.5 bg-[#181818] rounded-lg text-zinc-400 border border-[#2a2a2a]">
-                      {isBurnSyncExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 5 Synchronized Metric Cards */}
-                {isBurnSyncExpanded && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 animate-fadeIn">
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
-                      <div className="flex items-center justify-between text-zinc-400 mb-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Mfr Baseline Rate</span>
-                        <Building2 className="w-4 h-4 text-zinc-400" />
-                      </div>
-                      <div className="flex items-baseline space-x-1">
-                        <span className="text-xl font-extrabold font-mono text-white">{burnSync.factoryBaselineBurnRateLbsHr}</span>
-                        <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1.5">Factory spec at 225°F baseline</p>
-                    </div>
-
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
-                      <div className="flex items-center justify-between text-zinc-400 mb-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Weather Adjusted</span>
-                        <CloudSun className="w-4 h-4 text-blue-400" />
-                      </div>
-                      <div className="flex items-baseline space-x-1">
-                        <span className="text-xl font-extrabold font-mono text-blue-400">{burnSync.weatherAdjustedBaselineBurnRateLbsHr}</span>
-                        <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1.5">Factoring {burnSync.avgAmbientTempF}°F ambient weather</p>
-                    </div>
-
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
-                      <div className="flex items-center justify-between text-zinc-400 mb-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Actual Logged Burn</span>
-                        <Flame className="w-4 h-4 text-orange-500" />
-                      </div>
-                      <div className="flex items-baseline space-x-1">
-                        <span className="text-xl font-extrabold font-mono text-orange-400">{burnSync.actualBurnRateLbsHr}</span>
-                        <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1.5">Calculated from logged cooks</p>
-                    </div>
-
-                    <div className="bg-[#1a1a1a] border border-orange-500/30 p-3.5 rounded-xl relative overflow-hidden">
-                      <div className="flex items-center justify-between text-zinc-400 mb-1.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">Synced Pellet Usage</span>
-                        <Clock className="w-4 h-4 text-orange-400" />
-                      </div>
-                      <div className="flex items-baseline space-x-1">
-                        <span className="text-xl font-extrabold font-mono text-white">{refillData.pelletUsageLbs}</span>
-                        <span className="text-xs text-orange-400 font-sans font-bold">lbs</span>
-                      </div>
-                      <p className="text-[10px] text-zinc-400 mt-1.5 font-mono">
-                        {refillData.hoursSinceRefill} hrs × {refillData.effectiveBurnRateLbsHr} lbs/hr
-                      </p>
-                    </div>
-
-                    <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
-                      <div className="flex items-center justify-between text-zinc-400 mb-1.5">
-                        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Efficiency Ratio</span>
-                        <Zap className="w-4 h-4 text-emerald-400" />
-                      </div>
-                      <div className="flex items-baseline space-x-1">
-                        <span className="text-xl font-extrabold font-mono text-emerald-400">{burnSync.efficiencyPercentage}%</span>
-                      </div>
-                      <p className="text-[10px] text-emerald-400/90 font-medium mt-1.5">
-                        {burnSync.efficiencyPercentage >= 100
-                          ? `${burnSync.efficiencyPercentage - 100}% higher efficiency`
-                          : `${100 - burnSync.efficiencyPercentage}% below factory rating`}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Dynamic Hopper Level & Pellet Usage Sync Card */}
-                <div className="bg-[#181818] border border-[#2a2a2a] rounded-xl p-4 text-xs space-y-4">
-                  <div
-                    onClick={() => setIsHopperSyncExpanded(!isHopperSyncExpanded)}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none group"
-                  >
-                    <div className="flex items-center space-x-2.5">
-                      <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-400 shrink-0">
-                        <Gauge className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2 flex-wrap gap-1">
-                          <span className="font-bold text-white uppercase text-[11px] tracking-wider group-hover:text-orange-400 transition-colors">Hopper Level & Pellet Usage Sync</span>
-                          <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1">
-                            <Zap className="w-3 h-3 text-emerald-400" />
-                            <span>Auto-Calculated from Fuel Inventory</span>
-                          </span>
+                return (
+                  <div className="bg-[#121212] border border-[#2a2a2a] rounded-2xl p-5 space-y-5">
+                    <div
+                      onClick={() => setIsBurnSyncExpanded(!isBurnSyncExpanded)}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#2a2a2a] cursor-pointer select-none group"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-400">
+                          <Gauge className="w-5 h-5" />
                         </div>
-                        <p className="text-[11px] text-zinc-400 mt-0.5">
-                          Hours since refill automatically calculated from wood pellet restock inventory logs ({refillData.latestFuelRestockDate ? `last restock ${refillData.latestFuelRestockDate}` : 'no restocks logged'}) and logged cook sessions ({refillData.cooksCountSinceRestock} cook{refillData.cooksCountSinceRestock === 1 ? '' : 's'} post-restock).
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-3 shrink-0">
-                      <div className="flex items-center space-x-1.5 bg-[#121212] border border-[#2a2a2a] px-2.5 py-1.5 rounded-xl" onClick={(e) => e.stopPropagation()}>
-                        <span className="text-[10px] text-zinc-400 font-semibold">Hours Since Refill:</span>
-                        <input
-                          type="number"
-                          step="0.5"
-                          min="0"
-                          value={refillData.hoursSinceRefill}
-                          onChange={handleHoursSinceRefillChange}
-                          className="w-14 bg-[#1a1a1a] border border-[#2a2a2a] text-orange-400 font-mono font-bold text-xs rounded px-1.5 py-0.5 text-center focus:outline-none focus:ring-1 focus:ring-orange-500"
-                        />
-                        <span className="text-[10px] text-zinc-400 font-mono">hrs</span>
-                      </div>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleResetRefill();
-                        }}
-                        className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/30 transition-all cursor-pointer font-sans"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                        Reset Refill
-                      </button>
-
-                      <div className="p-1.5 bg-[#121212] rounded-lg text-zinc-400 border border-[#2a2a2a]">
-                        {isHopperSyncExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Math Formula Display & Visual Progress Gauge */}
-                  {isHopperSyncExpanded && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-[#2a2a2a]/60 animate-fadeIn">
-                      <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex items-center justify-between">
                         <div>
-                          <span className="text-[10px] text-zinc-400 font-semibold uppercase block">Estimated Pellet Usage</span>
-                          <span className="text-zinc-400 font-mono text-[11px]">
-                            {refillData.hoursSinceRefill} hrs × {refillData.effectiveBurnRateLbsHr} lbs/hr =
-                          </span>
-                        </div>
-                        <span className="text-base font-extrabold font-mono text-orange-400">{refillData.pelletUsageLbs} lbs</span>
-                      </div>
-
-                      <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex flex-col justify-between">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] text-zinc-400 font-semibold uppercase">Hopper Fill ({refillData.hopperCapacityLbs} lbs max)</span>
-                          <span className={`font-mono font-bold text-xs ${refillData.isLowPelletWarning ? 'text-red-400' : 'text-emerald-400'}`}>
-                            {refillData.remainingPelletsLbs} lbs ({refillData.hopperPercentFull}%)
-                          </span>
-                        </div>
-                        <div className="w-full bg-[#1a1a1a] rounded-full h-2 mt-2 overflow-hidden border border-[#2a2a2a]">
-                          <div
-                            className={`h-full transition-all duration-500 ${
-                              refillData.isLowPelletWarning ? 'bg-red-500' : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${refillData.hopperPercentFull}%` }}
-                          />
+                          <div className="flex items-center space-x-2 flex-wrap gap-1">
+                            <h3 className="text-base font-bold text-white group-hover:text-orange-400 transition-colors">Burn Efficiency & Usage Sync</h3>
+                            {hasSmokerSelected ? (
+                              <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold rounded-md flex items-center space-x-1">
+                                <ShieldCheck className="w-3 h-3" />
+                                <span>Synced to {burnSync.mfrSpec.brandModel}</span>
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-mono font-bold rounded-md flex items-center space-x-1">
+                                <span>Awaiting Smoker Selection</span>
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-zinc-400 mt-0.5">
+                            {hasSmokerSelected ? (
+                              `Burn efficiency metric synchronized to manufacturer baseline burn rates (${refillData.effectiveBurnRateLbsHr} lbs/hr) and hours elapsed since last refill (${refillData.hoursSinceRefill} hrs).`
+                            ) : (
+                              'Awaiting smoker selection — select or configure your smoker model to calculate manufacturer burn efficiency and sync pellet usage.'
+                            )}
+                          </p>
                         </div>
                       </div>
 
-                      <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-zinc-400 font-semibold uppercase block">Est Runtime Remaining</span>
-                          <span className="text-zinc-400 text-[11px]">Before hopper empty</span>
-                        </div>
+                      <div className="flex items-center space-x-3 shrink-0">
                         <div className="text-right">
-                          <span className="text-base font-extrabold font-mono text-white">~{refillData.hoursUntilEmpty}</span>
-                          <span className="text-[10px] text-zinc-400 font-sans ml-1">hrs</span>
+                          <span className="text-[10px] uppercase font-bold text-zinc-400 block">Efficiency Grade</span>
+                          <span className="text-xs font-semibold text-orange-400">
+                            {hasSmokerSelected ? burnSync.efficiencyStatusLabel : 'Awaiting Selection'}
+                          </span>
+                        </div>
+                        <div className="w-10 h-10 bg-orange-500/10 border-2 border-orange-500/40 rounded-xl flex items-center justify-center text-lg font-black font-mono text-orange-400 shadow-inner">
+                          {hasSmokerSelected ? burnSync.efficiencyGrade : '--'}
+                        </div>
+                        <div className="p-1.5 bg-[#181818] rounded-lg text-zinc-400 border border-[#2a2a2a]">
+                          {isBurnSyncExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </div>
                       </div>
                     </div>
-                  )}
-                </div>
-              </div>
+
+                    {/* 5 Synchronized Metric Cards */}
+                    {isBurnSyncExpanded && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 animate-fadeIn">
+                        <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
+                          <div className="flex items-center justify-between text-zinc-400 mb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Mfr Baseline Rate</span>
+                            <Building2 className="w-4 h-4 text-zinc-400" />
+                          </div>
+                          <div className="flex items-baseline space-x-1">
+                            {hasSmokerSelected ? (
+                              <>
+                                <span className="text-xl font-extrabold font-mono text-white">{burnSync.factoryBaselineBurnRateLbsHr}</span>
+                                <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
+                              </>
+                            ) : (
+                              <span className="text-xs font-bold text-amber-400 font-mono leading-tight">Awaiting smoker selection</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-1.5">Factory spec at 225°F baseline</p>
+                        </div>
+
+                        <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
+                          <div className="flex items-center justify-between text-zinc-400 mb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Weather Adjusted</span>
+                            <CloudSun className="w-4 h-4 text-blue-400" />
+                          </div>
+                          <div className="flex items-baseline space-x-1">
+                            {hasSmokerSelected ? (
+                              <>
+                                <span className="text-xl font-extrabold font-mono text-blue-400">{burnSync.weatherAdjustedBaselineBurnRateLbsHr}</span>
+                                <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
+                              </>
+                            ) : (
+                              <span className="text-xs font-bold text-amber-400 font-mono leading-tight">Awaiting smoker selection</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-1.5">
+                            {hasSmokerSelected ? `Factoring ${burnSync.avgAmbientTempF}°F ambient weather` : 'Awaiting weather sync calculation'}
+                          </p>
+                        </div>
+
+                        <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
+                          <div className="flex items-center justify-between text-zinc-400 mb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Actual Logged Burn</span>
+                            <Flame className="w-4 h-4 text-orange-500" />
+                          </div>
+                          <div className="flex items-baseline space-x-1">
+                            {hasSmokerSelected ? (
+                              <>
+                                <span className="text-xl font-extrabold font-mono text-orange-400">{burnSync.actualBurnRateLbsHr}</span>
+                                <span className="text-xs text-zinc-400 font-sans">lbs/hr</span>
+                              </>
+                            ) : (
+                              <span className="text-xs font-bold text-amber-400 font-mono leading-tight">Awaiting smoker selection</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-1.5">Calculated from logged cooks</p>
+                        </div>
+
+                        <div className="bg-[#1a1a1a] border border-orange-500/30 p-3.5 rounded-xl relative overflow-hidden">
+                          <div className="flex items-center justify-between text-zinc-400 mb-1.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400">Synced Pellet Usage</span>
+                            <Clock className="w-4 h-4 text-orange-400" />
+                          </div>
+                          <div className="flex items-baseline space-x-1">
+                            {hasSmokerSelected ? (
+                              <>
+                                <span className="text-xl font-extrabold font-mono text-white">{refillData.pelletUsageLbs}</span>
+                                <span className="text-xs text-orange-400 font-sans font-bold">lbs</span>
+                              </>
+                            ) : (
+                              <span className="text-xs font-bold text-amber-400 font-mono leading-tight">Awaiting smoker selection</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-1.5 font-mono">
+                            {hasSmokerSelected ? `${refillData.hoursSinceRefill} hrs × ${refillData.effectiveBurnRateLbsHr} lbs/hr` : '--'}
+                          </p>
+                        </div>
+
+                        <div className="bg-[#1a1a1a] border border-[#2a2a2a] p-3.5 rounded-xl">
+                          <div className="flex items-center justify-between text-zinc-400 mb-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Efficiency Ratio</span>
+                            <Zap className="w-4 h-4 text-emerald-400" />
+                          </div>
+                          <div className="flex items-baseline space-x-1">
+                            {hasSmokerSelected ? (
+                              <span className="text-xl font-extrabold font-mono text-emerald-400">{burnSync.efficiencyPercentage}%</span>
+                            ) : (
+                              <span className="text-xs font-bold text-amber-400 font-mono leading-tight">Awaiting smoker selection</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-emerald-400/90 font-medium mt-1.5">
+                            {hasSmokerSelected ? (
+                              burnSync.efficiencyPercentage >= 100
+                                ? `${burnSync.efficiencyPercentage - 100}% higher efficiency`
+                                : `${100 - burnSync.efficiencyPercentage}% below factory rating`
+                            ) : (
+                              '--'
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dynamic Hopper Level & Pellet Usage Sync Card */}
+                    <div className="bg-[#181818] border border-[#2a2a2a] rounded-xl p-4 text-xs space-y-4">
+                      <div
+                        onClick={() => setIsHopperSyncExpanded(!isHopperSyncExpanded)}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none group"
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <div className="p-2 bg-orange-500/10 border border-orange-500/20 rounded-xl text-orange-400 shrink-0">
+                            <Gauge className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center space-x-2 flex-wrap gap-1">
+                              <span className="font-bold text-white uppercase text-[11px] tracking-wider group-hover:text-orange-400 transition-colors">Hopper Level & Pellet Usage Sync</span>
+                              <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1">
+                                <Zap className="w-3 h-3 text-emerald-400" />
+                                <span>Auto-Calculated from Fuel Inventory</span>
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">
+                              {hasSmokerSelected ? (
+                                `Hours since refill automatically calculated from wood pellet restock inventory logs (${refillData.latestFuelRestockDate ? `last restock ${refillData.latestFuelRestockDate}` : 'no restocks logged'}) and logged cook sessions (${refillData.cooksCountSinceRestock} cook${refillData.cooksCountSinceRestock === 1 ? '' : 's'} post-restock).`
+                              ) : (
+                                'Awaiting smoker selection — select or configure your smoker to sync hopper level and pellet usage calculations.'
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-3 shrink-0">
+                          <div className="flex items-center space-x-1.5 bg-[#121212] border border-[#2a2a2a] px-2.5 py-1.5 rounded-xl" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-[10px] text-zinc-400 font-semibold">Hours Since Refill:</span>
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              value={refillData.hoursSinceRefill}
+                              onChange={handleHoursSinceRefillChange}
+                              className="w-14 bg-[#1a1a1a] border border-[#2a2a2a] text-orange-400 font-mono font-bold text-xs rounded px-1.5 py-0.5 text-center focus:outline-none focus:ring-1 focus:ring-orange-500"
+                            />
+                            <span className="text-[10px] text-zinc-400 font-mono">hrs</span>
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleResetRefill();
+                            }}
+                            className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/30 transition-all cursor-pointer font-sans"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                            Reset Refill
+                          </button>
+
+                          <div className="p-1.5 bg-[#121212] rounded-lg text-zinc-400 border border-[#2a2a2a]">
+                            {isHopperSyncExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Math Formula Display & Visual Progress Gauge */}
+                      {isHopperSyncExpanded && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-[#2a2a2a]/60 animate-fadeIn">
+                          <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] text-zinc-400 font-semibold uppercase block">Estimated Pellet Usage</span>
+                              <span className="text-zinc-400 font-mono text-[11px]">
+                                {hasSmokerSelected ? `${refillData.hoursSinceRefill} hrs × ${refillData.effectiveBurnRateLbsHr} lbs/hr =` : 'Awaiting smoker selection'}
+                              </span>
+                            </div>
+                            <span className="text-base font-extrabold font-mono text-orange-400">
+                              {hasSmokerSelected ? `${refillData.pelletUsageLbs} lbs` : '--'}
+                            </span>
+                          </div>
+
+                          <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex flex-col justify-between">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-zinc-400 font-semibold uppercase">Hopper Fill ({hasSmokerSelected ? `${refillData.hopperCapacityLbs} lbs max` : '--'})</span>
+                              <span className={`font-mono font-bold text-xs ${hasSmokerSelected ? (refillData.isLowPelletWarning ? 'text-red-400' : 'text-emerald-400') : 'text-amber-400'}`}>
+                                {hasSmokerSelected ? `${refillData.remainingPelletsLbs} lbs (${refillData.hopperPercentFull}%)` : '--'}
+                              </span>
+                            </div>
+                            <div className="w-full bg-[#1a1a1a] rounded-full h-2 my-1.5 overflow-hidden border border-[#2a2a2a]">
+                              <div
+                                className={`h-full transition-all duration-500 ${
+                                  refillData.isLowPelletWarning ? 'bg-red-500' : 'bg-emerald-500'
+                                }`}
+                                style={{ width: `${hasSmokerSelected ? refillData.hopperPercentFull : 0}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between pt-1 border-t border-[#2a2a2a]/40 text-[10px]">
+                              <span className="text-zinc-400 font-medium">Alert Threshold:</span>
+                              <div className="flex items-center gap-1">
+                                {[10, 15, 20, 25, 30].map((pct) => (
+                                  <button
+                                    key={pct}
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = { ...pushCfg, lowFuelThresholdPercent: pct };
+                                      setPushCfg(updated);
+                                      savePushConfig(updated);
+                                    }}
+                                    className={`px-1.5 py-0.2 rounded font-mono font-bold transition-all cursor-pointer ${
+                                      lowWarningThreshold === pct
+                                        ? 'bg-amber-500 text-black font-black shadow-sm'
+                                        : 'bg-[#1e1e28] hover:bg-[#2a2a38] text-zinc-400 border border-[#2a2a3a]'
+                                    }`}
+                                  >
+                                    {pct}%
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-[#121212] p-3 rounded-xl border border-[#2a2a2a] flex items-center justify-between">
+                            <div>
+                              <span className="text-[10px] text-zinc-400 font-semibold uppercase block">Est Runtime Remaining</span>
+                              <span className="text-zinc-400 text-[11px]">Before hopper empty</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-base font-extrabold font-mono text-white">
+                                {hasSmokerSelected ? `~${refillData.hoursUntilEmpty}` : '--'}
+                              </span>
+                              <span className="text-[10px] text-zinc-400 font-sans ml-1">hrs</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -1165,7 +1282,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <h2 className="text-base font-extrabold text-white">Smoker Maintenance & Operating Hours Care</h2>
+                  <h2 className="text-base font-extrabold text-white">Maintenance Schedule</h2>
                   {dueTasksCount > 0 ? (
                     <span className="text-[10px] font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-md flex items-center space-x-1">
                       <AlertTriangle className="w-3 h-3 text-red-400" />
@@ -1402,7 +1519,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <h2 className="text-base font-extrabold text-white">Wood Pellets & Fuel Inventory</h2>
+                  <h2 className="text-base font-extrabold text-white">Fuel Inventory</h2>
                   <span className="text-[10px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-md">
                     {refillData.inventoryLbsOnHand} lbs On Hand
                   </span>
@@ -1691,13 +1808,13 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               </div>
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <h2 className="text-base sm:text-lg font-black text-white">Custom Fuel Blend Lab & Pellet Physics</h2>
+                  <h2 className="text-base sm:text-lg font-black text-white">Fuel Blend Lab</h2>
                   <span className="text-[10px] font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2.5 py-0.5 rounded-md">
-                    Wood & Charcoal Pellets AI Physics
+                    Custom Physics
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Formulate custom wood pellet, charcoal pellet, and brand blends with live BTU density, moisture, and thermal burn efficiency calculations.
+                  Calculate BTU heat output, smoke density, and ash production for custom wood pellet blends.
                 </p>
               </div>
             </div>
@@ -1720,7 +1837,12 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
                   </div>
                   <div>
                     <span className="text-[10px] uppercase font-mono font-bold text-zinc-400 block">Current Active Fuel in {profile.name || 'Smoker'}</span>
-                    <span className="font-extrabold text-white text-sm">{profile.fuelOnHand || 'Standard Wood Pellets'}</span>
+                    <span className="font-extrabold text-white text-sm">
+                      {profile.activeFuelName || 
+                        (profile.activeBlendComponents && profile.activeBlendComponents.length > 0 
+                          ? `Custom Blend (${profile.activeBlendComponents.map(c => `${c.percentage}% ${c.species}`).join(' / ')})` 
+                          : (profile.fuelOnHand && !/^\d/.test(profile.fuelOnHand.trim()) ? profile.fuelOnHand : 'Standard Wood Pellets'))}
+                    </span>
                   </div>
                 </div>
 
@@ -1857,6 +1979,20 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
 
               {/* COLLAPSIBLE CONTAINER 2: REAL-TIME WOOD & PELLET PHYSICS CALCULATIONS */}
               {(() => {
+                if (blendComponents.length === 0) {
+                  return (
+                    <div className="bg-[#121212] border border-purple-500/30 rounded-xl p-4 text-center space-y-2 shadow-lg">
+                      <div className="flex items-center justify-center space-x-2 text-purple-400 font-mono text-xs font-bold uppercase tracking-wider">
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <span>2. Real-Time Wood & Pellet Physics Engine Calculations</span>
+                      </div>
+                      <p className="text-xs text-amber-300/90 font-medium max-w-md mx-auto">
+                        Awaiting component selection — add your first wood species or charcoal component above to calculate live BTU heat output, moisture vapor, burn efficiency, and cost economics.
+                      </p>
+                    </div>
+                  );
+                }
+
                 const physics = calculateBlendPhysics(blendComponents);
                 const totalPct = blendComponents.reduce((a, b) => a + b.percentage, 0);
 
@@ -2859,6 +2995,20 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
 
               {/* LIVE PHYSICS ENGINE CALCULATIONS PREVIEW */}
               {(() => {
+                if (blendComponents.length === 0) {
+                  return (
+                    <div className="bg-[#121212] border border-purple-500/30 rounded-xl p-3.5 text-center space-y-1">
+                      <div className="flex items-center justify-center space-x-2 text-purple-400 font-mono text-xs font-bold uppercase tracking-wider">
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <span>Real-Time Wood Physics & Efficiency Calculations</span>
+                      </div>
+                      <p className="text-xs text-amber-300/90 font-medium">
+                        Awaiting blend component selection — select at least 1 wood species component to view live physics calculations.
+                      </p>
+                    </div>
+                  );
+                }
+
                 const physics = calculateBlendPhysics(blendComponents);
                 const totalPct = blendComponents.reduce((a, b) => a + b.percentage, 0);
 

@@ -1,62 +1,182 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CookLog, ProteinType, SmokerProfile, SmokerType, TemperatureReading } from '../types';
+import { CookLog, ProteinType, SmokerProfile, SmokerType, TemperatureReading, ThermalCurveAnalytics } from '../types';
 import { RecipeSuggestion } from '../data/recipeSuggestions';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { getManufacturerSpecs } from '../utils/smokerManufacturerData';
 import { getEffectiveSmokerSpecs, calculateFuelConsumptionLbs } from '../utils/smokerCalculations';
-import { Flame, Plus, Trash2, Clock, Scale, Thermometer, Save, X, AlertCircle, CloudSun, MapPin, RefreshCw, Search, Loader2, CheckCircle2, Zap, Play, Pause, RotateCcw, Timer, Sparkles, Bluetooth, Camera, Upload, Image as ImageIcon, SwitchCamera, Check, Navigation, Wind, Droplets, Compass, Bot } from 'lucide-react';
+import { FUEL_AND_WOOD_DATABASE } from '../utils/fuelDatabase';
+import { HourlyCheckReminderBanner } from './HourlyCheckReminderBanner';
+import { ThermalCurveAnalyticsCard } from './ThermalCurveAnalyticsCard';
+import { PhysicalLogSheetModal } from './PhysicalLogSheetModal';
+import { calculateThermalCurveAnalytics } from '../utils/thermalCurveCalculator';
+import { Flame, Plus, Trash2, Clock, Scale, Thermometer, Save, X, AlertCircle, Cloud, CloudSun, MapPin, RefreshCw, Search, Loader2, CheckCircle2, Zap, Play, Pause, RotateCcw, Timer, Sparkles, Camera, Upload, Image as ImageIcon, SwitchCamera, Check, Navigation, Wind, Droplets, Compass, Bot, Lock, Unlock, Award, Printer, Download } from 'lucide-react';
+
+// Helper to adjust time strings (e.g. "8:22 AM", "14:22", "8:22") by adding offset minutes
+function addMinutesToTimeStr(baseTime: string, offsetMins: number): string {
+  if (!baseTime) return '';
+  const trimmed = baseTime.trim();
+  const match12 = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?$/i);
+  if (match12) {
+    let hours = parseInt(match12[1], 10);
+    const mins = parseInt(match12[2], 10);
+    const period = match12[3] ? match12[3].toUpperCase() : null;
+
+    if (period === 'PM' && hours < 12) hours += 12;
+    if (period === 'AM' && hours === 12) hours = 0;
+
+    let totalMins = hours * 60 + mins + offsetMins;
+    totalMins = (totalMins + 1440 * 10) % 1440;
+
+    const newHours24 = Math.floor(totalMins / 60);
+    const newMins = totalMins % 60;
+    const padMins = newMins < 10 ? `0${newMins}` : `${newMins}`;
+
+    if (period) {
+      let h12 = newHours24 % 12;
+      if (h12 === 0) h12 = 12;
+      const newPeriod = newHours24 >= 12 ? 'PM' : 'AM';
+      return `${h12}:${padMins} ${newPeriod}`;
+    } else {
+      return `${newHours24}:${padMins}`;
+    }
+  }
+
+  const simpleMatch = trimmed.match(/^(\d+):(\d{2})$/);
+  if (simpleMatch) {
+    const h = parseInt(simpleMatch[1], 10);
+    const m = parseInt(simpleMatch[2], 10);
+    const total = h * 60 + m + offsetMins;
+    const nh = Math.floor(total / 60);
+    const nm = total % 60;
+    return `${nh}:${nm < 10 ? '0' : ''}${nm}`;
+  }
+
+  return baseTime;
+}
+
+function generateInitialReadingsWithCurrentTime(): TemperatureReading[] {
+  const now = new Date();
+  const startTimeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const offsets = [0, 60, 120, 180, 240, 300]; // Hourly 1-hr intervals
+  const defaultMeatTemps = [40, 110, 152, 165, 192, 203];
+  const defaultCookTemps = [225, 225, 228, 250, 252, 250];
+  const defaultTargetTemps = [225, 225, 225, 250, 250, 250];
+
+  return offsets.map((offset, idx) => ({
+    id: `r-init-${idx + 1}-${Date.now()}`,
+    time: offset === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, offset),
+    timestampMinutes: offset,
+    targetTemp: defaultTargetTemps[idx],
+    cookingTemp: defaultCookTemps[idx],
+    meatTemp: defaultMeatTemps[idx],
+    ambientTemp: undefined, // Blank until weather system data is pulled
+    actionsTaken: idx === 0 ? 'Start' : (idx === offsets.length - 1 ? 'Finish' : ''),
+  }));
+}
 
 interface CookLogFormProps {
   profile: SmokerProfile;
   nextPageNumber: number;
   initialRecipe?: RecipeSuggestion | null;
+  initialCook?: CookLog | null;
   onSaveCook: (newCook: CookLog) => void;
   onCancel: () => void;
   onUpdateProfile?: (updated: SmokerProfile) => void;
-  onOpenBluetoothModal?: () => void;
   onOpenSettings?: (tab?: 'appearance' | 'alerts' | 'cloud' | 'data' | 'smokers') => void;
+  onDeleteCook?: (id: string) => void;
 }
 
 export const CookLogForm: React.FC<CookLogFormProps> = ({
   profile,
   nextPageNumber,
+  initialCook,
   initialRecipe,
   onSaveCook,
   onCancel,
   onUpdateProfile,
-  onOpenBluetoothModal,
   onOpenSettings,
+  onDeleteCook,
 }) => {
   const today = new Date().toISOString().split('T')[0];
 
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(today);
-  const [smokerType, setSmokerType] = useState<string>(profile.smokerType || 'Vertical Pellet Smoker');
+  const [smokerType, setSmokerType] = useState<string>('');
+  const [showPhysicalSheetModal, setShowPhysicalSheetModal] = useState<boolean>(false);
 
-  // Keep smokerType in sync if profile changes externally
-  useEffect(() => {
-    if (profile.smokerType && profile.smokerType !== smokerType) {
-      setSmokerType(profile.smokerType);
-    }
-  }, [profile.smokerType]);
+  const [autoSyncOnSave, setAutoSyncOnSave] = useState<boolean>(() => {
+    const saved = localStorage.getItem('smoker_auto_sync_new_cooks');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const toggleAutoSyncOnSave = () => {
+    const next = !autoSyncOnSave;
+    setAutoSyncOnSave(next);
+    localStorage.setItem('smoker_auto_sync_new_cooks', String(next));
+  };
 
   const handleSmokerTypeChange = (newVal: string) => {
     setSmokerType(newVal);
-    if (onUpdateProfile) {
+    if (onUpdateProfile && newVal) {
       onUpdateProfile({
         ...profile,
         smokerType: newVal,
       });
     }
   };
-  const [proteinType, setProteinType] = useState<ProteinType>('Beef');
+  const [proteinType, setProteinType] = useState<ProteinType>('' as any);
   const [proteinCut, setProteinCut] = useState('');
-  const [meatWeightLbs, setMeatWeightLbs] = useState<number>(12.0);
-  const [hoursLogged, setHoursLogged] = useState<number>(8.0);
-  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
-  const [timerSeconds, setTimerSeconds] = useState<number>(8.0 * 3600);
+  const [meatWeightLbs, setMeatWeightLbs] = useState<number | ''>('');
+  const [hoursLogged, setHoursLogged] = useState<number>(() => {
+    if (initialCook?.hoursLogged !== undefined && initialCook.hoursLogged > 0) {
+      return Number(initialCook.hoursLogged.toFixed(2));
+    }
+    if (initialCook?.endingSmokerHours !== undefined && initialCook?.startingSmokerHours !== undefined && initialCook.endingSmokerHours > initialCook.startingSmokerHours) {
+      return Number((initialCook.endingSmokerHours - initialCook.startingSmokerHours).toFixed(2));
+    }
+    return 0;
+  });
+  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(() => {
+    if (initialCook?.isTimerRunning !== undefined) return initialCook.isTimerRunning;
+    try {
+      const saved = localStorage.getItem('smoker_active_cook_timer');
+      if (saved) return JSON.parse(saved)?.isTimerRunning || false;
+    } catch (e) {}
+    return false;
+  });
+  const [timerSeconds, setTimerSeconds] = useState<number>(() => {
+    if (initialCook?.timerSeconds !== undefined && initialCook.timerSeconds > 0) return initialCook.timerSeconds;
+    if (initialCook?.hoursLogged) return Math.round(initialCook.hoursLogged * 3600);
+    try {
+      const saved = localStorage.getItem('smoker_active_cook_timer');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed?.timerSeconds === 'number') {
+          if (parsed.isTimerRunning && parsed.updatedAt) {
+            const elapsed = Math.floor((Date.now() - new Date(parsed.updatedAt).getTime()) / 1000);
+            if (elapsed > 0 && elapsed < 86400 * 7) {
+              return parsed.timerSeconds + elapsed;
+            }
+          }
+          return parsed.timerSeconds;
+        }
+      }
+    } catch (e) {}
+    return 0;
+  });
   const [isAutoFuel, setIsAutoFuel] = useState<boolean>(true);
   const [formTab, setFormTab] = useState<'basics' | 'environment' | 'temps' | 'notes'>('basics');
+
+  // Persist timer state to localStorage whenever it updates
+  useEffect(() => {
+    try {
+      localStorage.setItem('smoker_active_cook_timer', JSON.stringify({
+        timerSeconds,
+        isTimerRunning,
+        updatedAt: new Date().toISOString(),
+      }));
+    } catch (e) {}
+  }, [timerSeconds, isTimerRunning]);
 
   // Live Stopwatch / Timer Effect
   useEffect(() => {
@@ -110,39 +230,34 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
 
     for (let hr = 0; hr <= totalHrs; hr++) {
       let meatTemp = startMeatTemp;
-      let actions = '';
-
       if (hr === 0) {
         meatTemp = startMeatTemp;
-        actions = `Cook Started: Preheated smoker to ${pitTarget}°F. Loaded ${pCut || pType || 'cut'} at ${startMeatTemp}°F internal.`;
       } else {
         const progressRatio = hr / totalHrs;
         if (progressRatio <= 0.4) {
           meatTemp = Math.round(startMeatTemp + (150 - startMeatTemp) * (hr / (totalHrs * 0.4)));
-          actions = hr === 1 ? 'Clean blue smoke flowing steady. Surface bark forming.' : 'Checked pellet hopper fuel & spritzed surface.';
         } else if (progressRatio <= 0.65) {
           const stallProgress = (progressRatio - 0.4) / 0.25;
           meatTemp = Math.round(150 + 15 * stallProgress);
-          actions = hr === Math.round(totalHrs * 0.5) ? 'Reached stall temp ~165°F. Wrapped tightly in butcher paper/foil.' : 'Monitored pit temp through stall.';
         } else {
           const finalProgress = (progressRatio - 0.65) / 0.35;
           meatTemp = Math.round(165 + (finishMeatTemp - 165) * finalProgress);
-          actions = hr === totalHrs ? `Probed tender like warm butter at target ${finishMeatTemp}°F. Pulled to rest.` : 'Monitored probe rise past stall.';
         }
       }
 
       const ambientOffset = Math.round(Math.sin((hr / totalHrs) * Math.PI) * 3);
       const hourlyAmbient = currentAmbient + ambientOffset;
+      const startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
       newHourlyReadings.push({
         id: `r-hr-${hr}-${Date.now()}`,
-        time: `${hr}:00`,
+        time: hr === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, hr * 60),
         timestampMinutes: hr * 60,
         targetTemp: pitTarget,
         cookingTemp: pitTarget + (hr % 2 === 1 ? 2 : 0),
         meatTemp,
         ambientTemp: hourlyAmbient,
-        actionsTaken: actions,
+        actionsTaken: hr === 0 ? 'Start' : (hr === totalHrs ? 'Finish' : ''),
       });
     }
 
@@ -163,13 +278,14 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
       setTimeout(() => setHourlyPullNotice(null), 4000);
     }
   };
-  const [fuelLbsConsumed, setFuelLbsConsumed] = useState<number>(10.0);
-  const [fuelType, setFuelType] = useState('Pit Boss Competition Blend');
+  const [fuelLbsConsumed, setFuelLbsConsumed] = useState<number>(0);
+  const [fuelType, setFuelType] = useState('');
+  const [isFuelDbModalOpen, setIsFuelDbModalOpen] = useState<boolean>(false);
   const [seasoningRubs, setSeasoningRubs] = useState('');
   const [saucesGlazes, setSaucesGlazes] = useState('');
   const [finishedNotes, setFinishedNotes] = useState('');
   const [nextTimeNotes, setNextTimeNotes] = useState('');
-  const [wouldMakeAgain, setWouldMakeAgain] = useState<boolean>(true);
+  const [wouldMakeAgain, setWouldMakeAgain] = useState<boolean | null>(null);
 
   // Web Recipe Search for Custom Typed Cuts
   const [isSearchingWebRecipe, setIsSearchingWebRecipe] = useState(false);
@@ -279,16 +395,63 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     setIsCameraActive(false);
   };
 
+  const compressImage = (dataUrl: string, maxDim = 800, quality = 0.75): Promise<string> => {
+    return new Promise((resolve) => {
+      if (!dataUrl || !dataUrl.startsWith('data:image')) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
   const captureSnapshot = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    const maxDim = 800;
+    let w = video.videoWidth || 640;
+    let h = video.videoHeight || 480;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      ctx.drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
       setPhotoUrl(dataUrl);
       stopCamera();
     }
@@ -305,13 +468,52 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Auto-extract date from uploaded document / image file
+      if (file.lastModified) {
+        try {
+          const fileDate = new Date(file.lastModified).toISOString().split('T')[0];
+          if (fileDate) setDate(fileDate);
+        } catch (err) {}
+      }
+      const nameMatch = file.name.match(/(\d{4}[-/.]\d{2}[-/.]\d{2})|(\d{2}[-/.]\d{2}[-/.]\d{4})/);
+      if (nameMatch) {
+        const rawMatched = nameMatch[0].replace(/[/.]/g, '-');
+        const parts = rawMatched.split('-');
+        if (parts[0].length === 4) {
+          setDate(rawMatched);
+        } else if (parts[2].length === 4) {
+          setDate(`${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`);
+        }
+      }
+
       const reader = new FileReader();
       reader.onload = (event) => {
-        if (event.target?.result) {
-          setPhotoUrl(event.target.result as string);
+        const rawUrl = event.target?.result as string;
+        if (rawUrl) {
+          compressImage(rawUrl, 800, 0.75).then((compressed) => {
+            setPhotoUrl(compressed);
+          });
         }
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleFinishedNotesChange = (val: string) => {
+    setFinishedNotes(val);
+
+    // Auto-detect if a protein is written in notes and set cook name
+    if (val.trim().length >= 3) {
+      const knownProteins = [
+        'Brisket', 'Pork Shoulder', 'Pulled Pork', 'Baby Back Ribs', 'St. Louis Ribs', 'Spare Ribs', 'Ribs',
+        'Beef Ribs', 'Pork Ribs', 'Chicken Wings', 'Whole Chicken', 'Chicken Thighs', 'Chicken', 'Turkey', 'Turkey Breast',
+        'Venison', 'Prime Rib', 'Tri-Tip', 'Pork Belly', 'Pork Loin', 'Pork Chop', 'Sausage', 'Salmon', 'Bison', 'Elk', 'Duck'
+      ];
+      const valLower = val.toLowerCase();
+      const matchedProtein = knownProteins.find(p => valLower.includes(p.toLowerCase()));
+      if (matchedProtein) {
+        setTitle(`Smoked ${matchedProtein}`);
+      }
     }
   };
 
@@ -345,7 +547,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   }, [initialRecipe]);
 
   // Weather & Ambient Temperature Tracking State
-  const [zipcode, setZipcode] = useState('78701');
+  const [zipcode, setZipcode] = useState('');
   const [weatherData, setWeatherData] = useState<{
     tempF: number;
     cityState: string;
@@ -497,14 +699,21 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
       // Ignore and try fallback zip
     }
 
-    // Default ZIP Fallback (Austin, TX 78701)
-    await fetchWeatherByZip(zipcode || '78701');
+    // Fallback ZIP if entered
+    if (zipcode.trim()) {
+      await fetchWeatherByZip(zipcode.trim());
+    } else {
+      setWeatherLoading(false);
+    }
   };
 
   // Fetch Weather by ZIP Code
   const fetchWeatherByZip = async (zipToFetch?: string) => {
     const zip = (zipToFetch || zipcode).trim();
-    if (!zip) return;
+    if (!zip) {
+      setWeatherError('Please enter a 5-digit US ZIP code to fetch weather');
+      return;
+    }
 
     setWeatherLoading(true);
     setWeatherError(null);
@@ -528,7 +737,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     }
   };
 
-  // Auto-detect weather on form mount
+  // Auto-detect weather on form mount using browser geolocation / IP location
   useEffect(() => {
     fetchWeatherByGeolocation();
   }, []);
@@ -552,72 +761,118 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     overall: 5,
   });
 
-  // Time Series Temperature Readings - Defaulted to 6 total lines
-  const [readings, setReadings] = useState<TemperatureReading[]>([
-    {
-      id: 'r-init-1',
-      time: '0:00',
-      timestampMinutes: 0,
-      targetTemp: 225,
-      cookingTemp: 225,
-      meatTemp: 40,
-      ambientTemp: 70,
-      actionsTaken: 'Preheated smoker to 225°F. Loaded seasoned cut fat side down.',
-    },
-    {
-      id: 'r-init-2',
-      time: '2:00',
-      timestampMinutes: 120,
-      targetTemp: 225,
-      cookingTemp: 226,
-      meatTemp: 110,
-      ambientTemp: 72,
-      actionsTaken: 'Clean blue smoke flowing steady. Checked pellet hopper fuel level.',
-    },
-    {
-      id: 'r-init-3',
-      time: '4:00',
-      timestampMinutes: 240,
-      targetTemp: 225,
-      cookingTemp: 228,
-      meatTemp: 152,
-      ambientTemp: 72,
-      actionsTaken: 'First spritz with apple cider vinegar & broth blend.',
-    },
-    {
-      id: 'r-init-4',
-      time: '6:00',
-      timestampMinutes: 360,
-      targetTemp: 250,
-      cookingTemp: 250,
-      meatTemp: 165,
-      ambientTemp: 74,
-      actionsTaken: 'Thermal stall hit at 165°F. Wrapped tightly in pink butcher paper with tallow.',
-    },
-    {
-      id: 'r-init-5',
-      time: '8:00',
-      timestampMinutes: 480,
-      targetTemp: 250,
-      cookingTemp: 252,
-      meatTemp: 192,
-      ambientTemp: 76,
-      actionsTaken: 'Bypassed stall cleanly after wrap. Internal temp rising smoothly.',
-    },
-    {
-      id: 'r-init-6',
-      time: '9:30',
-      timestampMinutes: 570,
-      targetTemp: 250,
-      cookingTemp: 250,
-      meatTemp: 203,
-      ambientTemp: 75,
-      actionsTaken: 'Probed like warm butter throughout flat and point! Pulled off pit to rest.',
-    },
-  ]);
+  // Time Series Temperature Readings - Defaulted to current time and standard 6 lines
+  const [readings, setReadings] = useState<TemperatureReading[]>(() => generateInitialReadingsWithCurrentTime());
 
-  // Auto-Pull Hourly Log & Real-time Reading State
-  const [isAutoHourlyPullActive, setIsAutoHourlyPullActive] = useState(false);
+  // Editable until published state
+  const [isPublishedToTotalHours, setIsPublishedToTotalHours] = useState<boolean>(false);
+
+  // Quick Action from Hourly Check Reminder
+  const handleLogHourlyCheckNow = () => {
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const last = readings[readings.length - 1];
+    const nextIndex = readings.length;
+    const currentAmbient = weatherData?.tempF || 72;
+
+    const newReading: TemperatureReading = {
+      id: `reading-hourly-${Date.now()}`,
+      time: timeStr,
+      timestampMinutes: Math.round(timerSeconds / 60) || nextIndex * 60,
+      targetTemp: last ? last.targetTemp : 225,
+      cookingTemp: last ? last.cookingTemp : 225,
+      meatTemp: last ? Math.min(203, last.meatTemp + 8) : 45,
+      ambientTemp: currentAmbient,
+      actionsTaken: `Hourly Probe Check at ${timeStr}. Meat: ${last ? Math.min(203, last.meatTemp + 8) : 45}°F`,
+    };
+
+    setReadings((prev) => [...prev, newReading]);
+    setFormTab('temps');
+    setHourlyPullNotice(`Logged hourly thermometer check entry at ${timeStr}`);
+    setTimeout(() => setHourlyPullNotice(null), 4000);
+  };
+
+  // Graph Image Data Extraction State inside Cook Log
+  const [graphImageUrl, setGraphImageUrl] = useState<string | null>(null);
+  const [isExtractingGraph, setIsExtractingGraph] = useState<boolean>(false);
+  const [graphExtractionNotice, setGraphExtractionNotice] = useState<string | null>(null);
+  const graphFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleGraphFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert('File size exceeds 15MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Str = event.target?.result as string;
+      setGraphImageUrl(base64Str);
+      await processGraphImageExtraction(base64Str, file.type);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const processGraphImageExtraction = async (base64Str: string, mimeType: string = 'image/png') => {
+    setIsExtractingGraph(true);
+    setGraphExtractionNotice('Analyzing temperature graph curves with Pitmaster AI Vision...');
+
+    try {
+      const res = await fetch('/api/analyze-cook-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: base64Str,
+          mimeType,
+          cookTitle: title,
+          proteinType,
+        }),
+      });
+
+      const result = await res.json();
+      if (result.success && result.data && Array.isArray(result.data.readings) && result.data.readings.length > 0) {
+        // Pull ONLY meat temp from uploaded temperature graph.
+        // Target temp is manual, cooking temp stays manual, and pull ambient temp from weather system automatically if pulled, else leave blank.
+        const defaultTarget = readings[0]?.targetTemp || 225;
+        const defaultCooking = readings[0]?.cookingTemp || 225;
+        const ambientFromWeather = weatherData ? weatherData.tempF : undefined;
+
+        const extractedReadings: TemperatureReading[] = result.data.readings.map((r: any, idx: number) => {
+          const existingLine = readings[idx];
+          const manualTarget = existingLine ? existingLine.targetTemp : defaultTarget;
+          const manualCooking = existingLine ? existingLine.cookingTemp : defaultCooking;
+
+          return {
+            id: `r-graph-${idx}-${Date.now()}`,
+            time: r.time || `${idx * 2}:00`,
+            timestampMinutes: typeof r.timestampMinutes === 'number' ? r.timestampMinutes : idx * 120,
+            targetTemp: manualTarget,
+            cookingTemp: manualCooking,
+            meatTemp: typeof r.meatTemp === 'number' ? r.meatTemp : 165,
+            ambientTemp: ambientFromWeather,
+            actionsTaken: r.actionsTaken || 'Extracted meat temperature from graph image',
+          };
+        });
+
+        setReadings(extractedReadings);
+
+        const summaryText = result.data.summary || `Extracted ${extractedReadings.length} meat temperature data points from graph!`;
+        const metricsText = ` (Peak Meat: ${result.data.peakMeatTempF || 203}°F)`;
+        setGraphExtractionNotice(`📈 ${summaryText}${metricsText}`);
+      } else {
+        setGraphExtractionNotice('⚠️ Graph analysis complete. Log updated with parsed meat temperature points.');
+      }
+    } catch (err) {
+      console.error('Graph extraction error:', err);
+      setGraphExtractionNotice('Failed to extract graph readings. Please ensure image is a clear temperature chart.');
+    } finally {
+      setIsExtractingGraph(false);
+    }
+  };
+
   const [hourlyPullNotice, setHourlyPullNotice] = useState<string | null>(null);
   const [isAiAnalyzingNotes, setIsAiAnalyzingNotes] = useState(false);
 
@@ -721,117 +976,17 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
     const newHourlyReadings = generateHourlyReadings(totalHrs, currentAmbient, proteinType, proteinCut);
 
     setReadings(newHourlyReadings);
-    setHourlyPullNotice(`Automatically adjusted to ${totalHrs + 1} hourly log entries (0:00 to ${totalHrs}:00) pulling ambient temp (${currentAmbient}°F), meat curve & pit temps!`);
+    setHourlyPullNotice(`Automatically generated ${totalHrs + 1} hourly log entries (0:00 to ${totalHrs}:00) for cook duration.`);
     setTimeout(() => setHourlyPullNotice(null), 5000);
   };
 
-  // Pull Live Reading Now (Exact current time, live outdoor ambient temp & current probe)
-  const handlePullLiveReadingNow = () => {
-    const currentAmbient = weatherData?.tempF || 72;
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const lastReading = readings[readings.length - 1];
-    const nextHr = readings.length;
-
-    const currentMeatTemp = lastReading ? Math.min(203, lastReading.meatTemp + 8) : 45;
-    const pitTarget = 225;
-
-    const liveRead: TemperatureReading = {
-      id: `r-live-${Date.now()}`,
-      time: timeStr,
-      timestampMinutes: nextHr * 60,
-      targetTemp: pitTarget,
-      cookingTemp: pitTarget,
-      meatTemp: currentMeatTemp,
-      ambientTemp: currentAmbient,
-      actionsTaken: `Auto-pulled live reading at ${timeStr}. Ambient: ${currentAmbient}°F, Meat: ${currentMeatTemp}°F.`,
-    };
-
-    setReadings((prev) => [...prev, liveRead]);
-    setHourlyPullNotice(`Pulled live reading at ${timeStr}: Outdoor Ambient ${currentAmbient}°F, Meat Temp ${currentMeatTemp}°F.`);
-    setTimeout(() => setHourlyPullNotice(null), 4000);
-  };
-
-  // Automatic Hourly Interval Effect
-  useEffect(() => {
-    let interval: any = null;
-    if (isAutoHourlyPullActive) {
-      // Pull once every 3600 seconds (or for responsive demo, every hour)
-      interval = setInterval(() => {
-        handlePullLiveReadingNow();
-      }, 3600000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isAutoHourlyPullActive, weatherData, readings]);
-
   const handleSetSixStandardLines = () => {
-    setReadings([
-      {
-        id: `r-std-1-${Date.now()}`,
-        time: '0:00',
-        timestampMinutes: 0,
-        targetTemp: 225,
-        cookingTemp: 225,
-        meatTemp: 40,
-        ambientTemp: 70,
-        actionsTaken: 'Preheated smoker to 225°F. Loaded seasoned cut.',
-      },
-      {
-        id: `r-std-2-${Date.now()}`,
-        time: '2:00',
-        timestampMinutes: 120,
-        targetTemp: 225,
-        cookingTemp: 226,
-        meatTemp: 110,
-        ambientTemp: 72,
-        actionsTaken: 'Clean blue smoke flowing steady.',
-      },
-      {
-        id: `r-std-3-${Date.now()}`,
-        time: '4:00',
-        timestampMinutes: 240,
-        targetTemp: 225,
-        cookingTemp: 228,
-        meatTemp: 152,
-        ambientTemp: 72,
-        actionsTaken: 'Spritzed surface with apple cider vinegar spray.',
-      },
-      {
-        id: `r-std-4-${Date.now()}`,
-        time: '6:00',
-        timestampMinutes: 360,
-        targetTemp: 250,
-        cookingTemp: 250,
-        meatTemp: 165,
-        ambientTemp: 74,
-        actionsTaken: 'Reached stall temp. Wrapped tightly in foil/butcher paper.',
-      },
-      {
-        id: `r-std-5-${Date.now()}`,
-        time: '8:00',
-        timestampMinutes: 480,
-        targetTemp: 250,
-        cookingTemp: 252,
-        meatTemp: 192,
-        ambientTemp: 76,
-        actionsTaken: 'Monitored internal probe rise past stall.',
-      },
-      {
-        id: `r-std-6-${Date.now()}`,
-        time: '9:30',
-        timestampMinutes: 570,
-        targetTemp: 250,
-        cookingTemp: 250,
-        meatTemp: 203,
-        ambientTemp: 75,
-        actionsTaken: 'Probed tender throughout. Removed from smoker to rest.',
-      },
-    ]);
+    setReadings(generateInitialReadingsWithCurrentTime());
   };
 
-  const startingHours = profile.currentHours;
+  const startingHours = initialCook?.startingSmokerHours !== undefined
+    ? initialCook.startingSmokerHours
+    : (profile.currentHours || 0);
   const endingHours = Number((startingHours + Number(hoursLogged || 0)).toFixed(2));
 
   // Automated Smoker Burn Rate Metric Calculation via Centralized Physics Utility
@@ -854,46 +1009,100 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
   }, [hoursLogged, smokerType, weatherData, isAutoFuel, autoCalculatedFuelLbs]);
 
   const handleAddReading = () => {
-    const lastReading = readings[readings.length - 1];
-    const lastMins = lastReading ? lastReading.timestampMinutes + 120 : 120;
-    const hours = Math.floor(lastMins / 60);
-    const mins = lastMins % 60;
-    const timeStr = `${hours}:${mins < 10 ? '0' : ''}${mins}`;
+    setReadings((prev) => {
+      const firstTime = prev[0]?.time || new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const nextIdx = prev.length;
+      const nextMins = nextIdx * 60;
+      const timeStr = addMinutesToTimeStr(firstTime, nextMins);
+      const lastReading = prev[prev.length - 1];
 
-    const newRead: TemperatureReading = {
-      id: `r-new-${Date.now()}`,
-      time: timeStr,
-      timestampMinutes: lastMins,
-      targetTemp: lastReading ? lastReading.targetTemp : 225,
-      cookingTemp: lastReading ? lastReading.cookingTemp : 225,
-      meatTemp: lastReading ? Math.min(203, lastReading.meatTemp + 15) : 180,
-      ambientTemp: weatherData ? weatherData.tempF : (lastReading ? lastReading.ambientTemp : 72),
-      actionsTaken: 'Monitored cook progress.',
-    };
-    setReadings([...readings, newRead]);
+      const newRead: TemperatureReading = {
+        id: `r-new-${Date.now()}`,
+        time: timeStr,
+        timestampMinutes: nextMins,
+        targetTemp: lastReading ? lastReading.targetTemp : 225,
+        cookingTemp: lastReading ? lastReading.cookingTemp : 225,
+        meatTemp: lastReading ? Math.min(203, lastReading.meatTemp + 15) : 180,
+        ambientTemp: weatherData ? weatherData.tempF : (lastReading ? lastReading.ambientTemp : undefined),
+        actionsTaken: 'Finish',
+      };
+
+      const updated = prev.map((r, idx) => {
+        if (idx === 0) {
+          return { ...r, actionsTaken: r.actionsTaken || 'Start' };
+        }
+        return {
+          ...r,
+          actionsTaken: r.actionsTaken === 'Finish' ? '' : r.actionsTaken,
+        };
+      });
+
+      return [...updated, newRead];
+    });
   };
 
   const handleRemoveReading = (id: string) => {
-    setReadings(readings.filter((r) => r.id !== id));
+    setReadings((prev) => {
+      const filtered = prev.filter((r) => r.id !== id);
+      if (filtered.length === 0) return filtered;
+      const firstTime = filtered[0].time;
+
+      return filtered.map((r, idx) => {
+        const isFirst = idx === 0;
+        const isLast = idx === filtered.length - 1;
+        const hourlyMins = idx * 60;
+        return {
+          ...r,
+          timestampMinutes: hourlyMins,
+          time: isFirst ? r.time : addMinutesToTimeStr(firstTime, hourlyMins),
+          actionsTaken: isFirst ? (r.actionsTaken || 'Start') : (isLast ? 'Finish' : ''),
+        };
+      });
+    });
   };
 
   const handleReadingChange = (id: string, field: keyof TemperatureReading, value: any) => {
-    setReadings(
-      readings.map((r) => {
+    setReadings((prevReadings) => {
+      const isFirstReading = prevReadings[0]?.id === id;
+      if (field === 'time' && isFirstReading && typeof value === 'string') {
+        const newStartTime = value;
+        return prevReadings.map((r, idx) => {
+          if (idx === 0) {
+            return { ...r, time: newStartTime, timestampMinutes: 0 };
+          }
+          const hourlyMins = idx * 60;
+          return {
+            ...r,
+            timestampMinutes: hourlyMins,
+            time: addMinutesToTimeStr(newStartTime, hourlyMins),
+          };
+        });
+      }
+
+      return prevReadings.map((r) => {
         if (r.id === id) {
           return { ...r, [field]: value };
         }
         return r;
-      })
-    );
+      });
+    });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const buildCookLogObject = (published: boolean): CookLog => {
     const cookTitle = title.trim() || `${proteinCut || proteinType} Smoke Session`;
 
-    const newCookLog: CookLog = {
-      id: `cook-${Date.now()}`,
+    let computedHours = Number(hoursLogged) || 0;
+    if (computedHours <= 0 && readings.length > 1) {
+      const maxMins = Math.max(...readings.map((r) => r.timestampMinutes || 0));
+      if (maxMins > 0) {
+        computedHours = Number((maxMins / 60).toFixed(2));
+      }
+    }
+    const computedEndingHours = Number((startingHours + computedHours).toFixed(2));
+    const analytics = calculateThermalCurveAnalytics(readings, computedHours);
+
+    return {
+      id: initialCook?.id || `cook-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       pageNumber: nextPageNumber,
       date,
       title: cookTitle,
@@ -903,8 +1112,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       proteinCut: proteinCut || `${proteinType} Cut`,
       meatWeightLbs: Number(meatWeightLbs) || undefined,
       startingSmokerHours: startingHours,
-      hoursLogged: Number(hoursLogged) || 0,
-      endingSmokerHours: endingHours,
+      hoursLogged: computedHours,
+      endingSmokerHours: computedEndingHours,
       fuelLbsConsumed: Number(fuelLbsConsumed) || 0,
       fuelType,
       temperatureReadings: readings,
@@ -917,7 +1126,12 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       finishedNotes,
       nextTimeNotes,
       photoUrl: photoUrl || undefined,
-      status: 'Completed',
+      status: published ? 'Completed' : 'Draft',
+      timerSeconds: timerSeconds || Math.round((Number(hoursLogged) || 0) * 3600),
+      isTimerRunning,
+      isPublishedToTotalHours: published,
+      publishedAt: published ? new Date().toISOString() : undefined,
+      thermalCurveAnalytics: analytics,
       pitmasterAlias: (() => {
         try {
           const saved = localStorage.getItem('pitmaster_local_user_account');
@@ -928,13 +1142,28 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       userEmail: (() => {
         try {
           const saved = localStorage.getItem('pitmaster_local_user_account');
-          if (saved) return JSON.parse(saved)?.email || 'jonathanblunt1214@gmail.com';
+          if (saved) return JSON.parse(saved)?.email || '';
         } catch (e) {}
-        return 'jonathanblunt1214@gmail.com';
+        return '';
       })(),
     };
+  };
 
-    onSaveCook(newCookLog);
+  const handlePublishToTotalHours = () => {
+    if (readings.length === 0) {
+      alert('Please log at least one temperature reading before publishing.');
+      return;
+    }
+    const log = buildCookLogObject(true);
+    setIsPublishedToTotalHours(true);
+    onSaveCook(log);
+    alert(`🔥 Cook Log Published! ${hoursLogged.toFixed(2)} hours officially published to Total Smoker Operating Hours and thermal curve analytics saved.`);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const log = buildCookLogObject(isPublishedToTotalHours);
+    onSaveCook(log);
   };
 
   return (
@@ -947,19 +1176,32 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             <Flame className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Log New Smoke Session</h2>
+            <h2 className="text-lg font-bold text-white">New Cook</h2>
             <p className="text-xs text-zinc-400">
-              Record cook details, temperature readings, and auto-update total smoker runtime hours.
+              Record real-time cook metrics, temperatures, and smoker runtime hours.
             </p>
           </div>
         </div>
 
-        <button
-          onClick={onCancel}
-          className="p-2 text-zinc-400 hover:text-white hover:bg-[#242424] rounded-xl transition-all"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => setShowPhysicalSheetModal(true)}
+            className="inline-flex items-center px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs rounded-xl transition-all shadow-sm cursor-pointer"
+            title="Download physical paper smoker log sheet with auto-filled date and smoker"
+          >
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            <span>Download Physical Log</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onCancel}
+            className="p-2 text-zinc-400 hover:text-white hover:bg-[#242424] rounded-xl transition-all"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Pre-filled Recipe Banner */}
@@ -1298,6 +1540,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
               onChange={(e) => setProteinType(e.target.value as ProteinType)}
               className="w-full bg-[#121212] border border-[#2a2a2a] text-white font-medium rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
             >
+              <option value="">Select Protein Category...</option>
               <optgroup label="Domestic Meats">
                 <option value="Beef">Beef</option>
                 <option value="Pork">Pork</option>
@@ -1364,7 +1607,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   max="150"
                   placeholder="Mass (lbs)"
                   value={meatWeightLbs}
-                  onChange={(e) => setMeatWeightLbs(Number(e.target.value))}
+                  onChange={(e) => setMeatWeightLbs(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-transparent text-white font-bold text-xs focus:outline-none"
                 />
                 <span className="text-[10px] text-zinc-400 font-mono font-bold">lbs</span>
@@ -1572,16 +1815,6 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                 </p>
               </div>
             </div>
-
-            <div>
-              <label className="text-zinc-300 block mb-1 font-semibold text-xs">Wood Pellet / Fuel Blend:</label>
-              <input
-                type="text"
-                value={fuelType}
-                onChange={(e) => setFuelType(e.target.value)}
-                className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
           </div>
         </div>
 
@@ -1602,7 +1835,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-400">Automatic weather, humidity, and wind speed logging for pit efficiency.</p>
+                <p className="text-[11px] text-zinc-400">Local outdoor weather, humidity, and wind speed logging for pit efficiency.</p>
               </div>
             </div>
 
@@ -1751,9 +1984,139 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         </div>
 
         </div>
-        <div className={formTab === 'temps' ? 'block space-y-8 animate-fade-in' : 'hidden'}>
-        {/* ROW 4: TEMPERATURE READINGS TABLE */}
-        <div className="space-y-3">
+        <div className={formTab === 'temps' ? 'block space-y-6 animate-fade-in' : 'hidden'}>
+        {/* HOURLY MEAT THERMOMETER CHECK REMINDER SYSTEM */}
+        <HourlyCheckReminderBanner
+          isTimerRunning={isTimerRunning}
+          timerSeconds={timerSeconds}
+          onAddLogCheck={handleLogHourlyCheckNow}
+          showToast={(msg) => {
+            setHourlyPullNotice(msg);
+            setTimeout(() => setHourlyPullNotice(null), 4000);
+          }}
+        />
+
+        {/* PUBLISH TO TOTAL HOURS STATUS & ACTIONS */}
+        {!isPublishedToTotalHours ? (
+          <div className="bg-gradient-to-r from-orange-950/40 via-[#1f1710] to-amber-950/40 border border-orange-500/40 p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-orange-500 text-zinc-950 rounded-xl font-black shrink-0 shadow-md">
+                <Flame className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h4 className="text-sm font-black text-white">Publish Cook Log to Total Smoker Hours</h4>
+                  <span className="text-[10px] bg-orange-500/20 text-orange-300 font-mono font-bold px-2 py-0.5 rounded-full border border-orange-500/30">
+                    {hoursLogged.toFixed(2)} Hours Ready
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-300 mt-0.5">
+                  ✏️ Temperature entries are editable until published. Publishing locks temperature readings, generates thermal curve analytics, and adds runtime to total smoker hours.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handlePublishToTotalHours}
+              className="px-5 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-zinc-950 font-black text-xs rounded-xl shadow-xl transition-all cursor-pointer active:scale-95 shrink-0 flex items-center space-x-2"
+            >
+              <Award className="w-4 h-4 text-zinc-950" />
+              <span>Publish to Total Hours</span>
+            </button>
+          </div>
+        ) : (
+          <div className="bg-emerald-950/30 border border-emerald-500/30 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-emerald-200">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30 shrink-0">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="font-extrabold text-white text-sm block">
+                  Published & Locked to Smoker Operating Hours ({hoursLogged.toFixed(2)} hrs)
+                </span>
+                <span className="text-zinc-300">
+                  Temperature data is locked. Thermal curve analytics are generated and saved inside this log.
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsPublishedToTotalHours(false)}
+              className="px-3.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs rounded-xl border border-zinc-700 transition-all cursor-pointer flex items-center space-x-1.5 shrink-0"
+            >
+              <Unlock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Unlock Temp Log to Edit</span>
+            </button>
+          </div>
+        )}
+
+        {/* THERMAL CURVE ANALYTICS CARD WHEN PUBLISHED */}
+        {isPublishedToTotalHours && (
+          <ThermalCurveAnalyticsCard cook={buildCookLogObject(true)} isPublished={true} />
+        )}
+
+        {/* ROW 4: TEMPERATURE READINGS TABLE & GRAPH DATA EXTRACTION */}
+        <div className="space-y-4">
+          {/* UPLOADED TEMPERATURE GRAPH DATA EXTRACTION CARD */}
+          <div className="bg-gradient-to-r from-blue-950/40 via-[#141b26] to-cyan-950/40 border border-blue-500/40 p-4 rounded-2xl shadow-lg space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-blue-600 text-white font-black shadow-md shrink-0">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-sm font-bold text-white">Pull Data from Uploaded Temperature Graph</h3>
+                    <span className="text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30 font-mono font-bold px-2 py-0.5 rounded-full">
+                      AI Vision Graph Parser
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-300 mt-0.5">
+                    Upload a screenshot or photo of a temperature graph (MEATER, ThermoWorks, FireBoard, ToGrill, Inkbird, Traeger, Weber) to extract data points directly into this log.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto">
+                <input
+                  type="file"
+                  ref={graphFileInputRef}
+                  onChange={handleGraphFileSelect}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => graphFileInputRef.current?.click()}
+                  disabled={isExtractingGraph || isPublishedToTotalHours}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer active:scale-95 disabled:opacity-50 flex items-center space-x-2"
+                >
+                  <Upload className={`w-4 h-4 ${isExtractingGraph ? 'animate-bounce' : ''}`} />
+                  <span>{isExtractingGraph ? 'Extracting Graph...' : 'Upload Graph Image'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Extracted Graph Notice / Progress */}
+            {graphExtractionNotice && (
+              <div className="text-xs text-blue-200 bg-blue-500/10 border border-blue-500/30 p-2.5 rounded-xl flex items-center space-x-2 font-medium animate-fadeIn">
+                <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>{graphExtractionNotice}</span>
+              </div>
+            )}
+
+            {/* Graph Image Preview */}
+            {graphImageUrl && (
+              <div className="relative border border-blue-500/30 rounded-xl overflow-hidden bg-black/60 max-h-56 flex items-center justify-center p-2">
+                <img src={graphImageUrl} alt="Uploaded Cook Temperature Graph" className="max-h-48 object-contain rounded-lg" />
+                <div className="absolute top-2 right-2 bg-black/80 backdrop-blur-md border border-blue-500/40 text-blue-300 text-[10px] font-mono font-bold px-2.5 py-1 rounded-lg flex items-center space-x-1.5 shadow-md">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Graph Data Parsed & Populated</span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#121212] border border-[#2a2a2a] p-4 rounded-2xl">
             <div>
               <div className="flex items-center space-x-2">
@@ -1761,15 +2124,14 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   <Thermometer className="w-4 h-4 text-orange-400" />
                   <span>Cook Temperature Logs & Actions Taken</span>
                 </h3>
-                {isAutoHourlyPullActive && (
-                  <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center space-x-1 animate-pulse">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Hourly Auto-Pull Active</span>
+                {isPublishedToTotalHours && (
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 font-mono font-bold px-2 py-0.5 rounded-md border border-emerald-500/30">
+                    🔒 Read-Only (Published)
                   </span>
                 )}
               </div>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Automatically pull ambient temp, internal meat temp, and timestamps every hour from cook start to finish.
+                Review, edit, or append lines extracted from your graph curve or generated schedule.
               </p>
             </div>
 
@@ -1778,58 +2140,22 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
               <button
                 type="button"
                 onClick={handleGenerateHourlyReadings}
-                className="px-3.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-black rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                disabled={isPublishedToTotalHours}
+                className="px-3.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-black rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40"
                 title="Automatically generate hourly log lines starting at 0:00 for total cook duration"
               >
                 <Clock className="w-4 h-4 text-orange-400" />
-                <span>Auto-Pull Hourly Schedule (0:00 - Finish)</span>
+                <span>Generate Hourly Schedule</span>
               </button>
-
-              {/* Instant Live Pull Button */}
-              <button
-                type="button"
-                onClick={handlePullLiveReadingNow}
-                className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
-                title="Capture live time, outdoor ambient weather temp, and meat probe reading into a new log line now"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pull Live Reading Now</span>
-              </button>
-
-              {/* Toggle Automatic Background Hourly Logger */}
-              <button
-                type="button"
-                onClick={() => setIsAutoHourlyPullActive(!isAutoHourlyPullActive)}
-                className={`px-3 py-1.5 border text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer active:scale-95 ${
-                  isAutoHourlyPullActive
-                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow-md'
-                    : 'bg-[#242424] hover:bg-[#2a2a2a] border-[#2a2a2a] text-zinc-400 hover:text-white'
-                }`}
-                title="Toggle background hourly interval auto-pulling"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isAutoHourlyPullActive ? 'animate-spin text-emerald-400' : ''}`} />
-                <span>{isAutoHourlyPullActive ? 'Auto-Pull: ON' : 'Auto-Pull Every Hr'}</span>
-              </button>
-
-              {onOpenBluetoothModal && (
-                <button
-                  type="button"
-                  onClick={onOpenBluetoothModal}
-                  className="px-2.5 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 text-blue-300 text-xs font-bold rounded-xl flex items-center space-x-1 transition-all cursor-pointer shadow-sm active:scale-95"
-                  title="Connect Bluetooth probe or Meat Minder Pro"
-                >
-                  <Bluetooth className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Probes</span>
-                </button>
-              )}
 
               <button
                 type="button"
                 onClick={handleAddReading}
-                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-black text-xs rounded-xl flex items-center space-x-1 transition-all cursor-pointer active:scale-95 shadow-md"
+                disabled={isPublishedToTotalHours}
+                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-black text-xs rounded-xl flex items-center space-x-1 transition-all cursor-pointer active:scale-95 shadow-md disabled:opacity-40"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ Line</span>
+                <span>+ Add Line</span>
               </button>
             </div>
           </div>
@@ -1861,56 +2187,64 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="text"
+                        disabled={isPublishedToTotalHours}
                         value={r.time}
                         onChange={(e) => handleReadingChange(r.id, 'time', e.target.value)}
-                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-orange-400 font-bold text-xs"
+                        className="w-24 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-orange-400 font-bold text-xs disabled:opacity-60"
                       />
                     </td>
                     <td className="p-2">
                       <input
                         type="number"
+                        disabled={isPublishedToTotalHours}
                         value={r.targetTemp}
                         onChange={(e) => handleReadingChange(r.id, 'targetTemp', parseInt(e.target.value) || 0)}
-                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-300 text-xs"
+                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-300 text-xs disabled:opacity-60"
                       />
                     </td>
                     <td className="p-2">
                       <input
                         type="number"
+                        disabled={isPublishedToTotalHours}
                         value={r.cookingTemp}
                         onChange={(e) => handleReadingChange(r.id, 'cookingTemp', parseInt(e.target.value) || 0)}
-                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-orange-400 font-bold text-xs"
+                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-orange-400 font-bold text-xs disabled:opacity-60"
                       />
                     </td>
                     <td className="p-2">
                       <input
                         type="number"
+                        disabled={isPublishedToTotalHours}
                         value={r.meatTemp}
                         onChange={(e) => handleReadingChange(r.id, 'meatTemp', parseInt(e.target.value) || 0)}
-                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-red-400 font-bold text-xs"
+                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-red-400 font-bold text-xs disabled:opacity-60"
                       />
                     </td>
                     <td className="p-2">
                       <input
                         type="number"
-                        value={r.ambientTemp}
-                        onChange={(e) => handleReadingChange(r.id, 'ambientTemp', parseInt(e.target.value) || 0)}
-                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-400 text-xs"
+                        disabled={isPublishedToTotalHours}
+                        value={r.ambientTemp ?? ''}
+                        placeholder="--"
+                        onChange={(e) => handleReadingChange(r.id, 'ambientTemp', e.target.value === '' ? undefined : (parseInt(e.target.value) || 0))}
+                        className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-400 text-xs disabled:opacity-60 placeholder:text-zinc-600"
                       />
                     </td>
                     <td className="p-2">
                       <input
                         type="text"
+                        disabled={isPublishedToTotalHours}
                         value={r.actionsTaken}
                         onChange={(e) => handleReadingChange(r.id, 'actionsTaken', e.target.value)}
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-200 font-sans text-xs"
+                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-200 font-sans text-xs disabled:opacity-60"
                       />
                     </td>
                     <td className="p-2 text-right">
                       <button
                         type="button"
+                        disabled={isPublishedToTotalHours}
                         onClick={() => handleRemoveReading(r.id)}
-                        className="p-1 text-zinc-500 hover:text-red-400 rounded"
+                        className="p-1 text-zinc-500 hover:text-red-400 rounded disabled:opacity-30"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1956,16 +2290,56 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         {/* ROW 6: FINISHED NOTES & WOULD MAKE AGAIN */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1">
-              Finished Product Notes
-            </label>
-            <textarea
-              rows={3}
-              placeholder="Notes on bark texture, moisture, smoke ring depth..."
-              value={finishedNotes}
-              onChange={(e) => setFinishedNotes(e.target.value)}
-              className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
+            {(() => {
+              const isLpSmokerSelected = Boolean(
+                (smokerType && (smokerType.toLowerCase().includes('gas') || smokerType.toLowerCase().includes('propane') || smokerType.toLowerCase().includes('lp'))) ||
+                (profile.smokerType && (profile.smokerType.toLowerCase().includes('gas') || profile.smokerType.toLowerCase().includes('propane') || profile.smokerType.toLowerCase().includes('lp'))) ||
+                (profile.fuelType && (profile.fuelType.toLowerCase().includes('gas') || profile.fuelType.toLowerCase().includes('propane') || profile.fuelType.toLowerCase().includes('lp')))
+              );
+
+              if (isLpSmokerSelected) {
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300">
+                        Finished Product & Wood/Pellet Notes
+                      </label>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                        🪵 Log Fuel / Wood Used Here
+                      </span>
+                    </div>
+                    <div className="mb-2 bg-[#171717] border border-amber-500/20 p-2.5 rounded-xl text-xs text-zinc-300 flex items-start space-x-2">
+                      <Flame className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <p className="text-[11px] leading-relaxed">
+                        <strong className="text-amber-300 font-semibold">Fuel & Wood Logging Note:</strong> Use this notes field to record details about what pellets, wood species (e.g. Hickory, Post Oak, Cherry), wood chips, or fuel blends were used during this cook session.
+                      </p>
+                    </div>
+                    <textarea
+                      rows={3}
+                      placeholder="Notes on bark texture, moisture, smoke ring depth, and specific pellets/wood species used (e.g. 100% Hickory, Post Oak & Cherry Blend)..."
+                      value={finishedNotes}
+                      onChange={(e) => handleFinishedNotesChange(e.target.value)}
+                      className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                );
+              }
+
+              return (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1">
+                    Finished Product Notes
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Notes on bark texture, moisture, smoke ring depth..."
+                    value={finishedNotes}
+                    onChange={(e) => handleFinishedNotesChange(e.target.value)}
+                    className="w-full bg-[#121212] border border-[#2a2a2a] text-white rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              );
+            })()}
           </div>
 
           <div className="space-y-4">
@@ -1978,29 +2352,29 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                   type="button"
                   onClick={() => setWouldMakeAgain(true)}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer min-h-[42px] ${
-                    wouldMakeAgain
+                    wouldMakeAgain === true
                       ? 'bg-emerald-500 text-zinc-950 shadow-md font-black'
                       : 'bg-[#121212] text-zinc-400 border border-[#2a2a2a] hover:text-white'
                   }`}
                 >
-                  [ ✓ ] YES, Absolutely
+                  [{wouldMakeAgain === true ? ' ✓ ' : ' '}] YES, Absolutely
                 </button>
 
                 <button
                   type="button"
                   onClick={handleSelectNeedsAdjustments}
                   className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 min-h-[42px] ${
-                    !wouldMakeAgain
+                    wouldMakeAgain === false
                       ? 'bg-red-500 text-white shadow-md ring-2 ring-red-400/50 font-black'
                       : 'bg-[#121212] text-zinc-400 border border-[#2a2a2a] hover:text-white'
                   }`}
                 >
-                  <span>[ ] NO, Needs Adjustments</span>
+                  <span>[{wouldMakeAgain === false ? ' ✓ ' : ' '}] NO, Needs Adjustments</span>
                   {isAiAnalyzingNotes && <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />}
                 </button>
               </div>
 
-              {!wouldMakeAgain && (
+              {wouldMakeAgain === false && (
                 <p className="text-[11px] text-amber-300 mt-2 flex items-center space-x-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-xl animate-fadeIn">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
                   <span>
@@ -2057,25 +2431,90 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
         </div>
         {/* SUBMIT BUTTON */}
-        <div className="pt-4 border-t border-[#2a2a2a] flex items-center justify-end space-x-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-5 py-2.5 bg-[#242424] hover:bg-[#2a2a2a] text-zinc-300 rounded-xl font-semibold text-xs transition-colors border border-[#2a2a2a]"
-          >
-            Cancel
-          </button>
+        <div className="pt-4 border-t border-[#2a2a2a] flex items-center justify-between space-x-3">
+          {initialCook && onDeleteCook ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to delete cook log "${initialCook.title}"?`)) {
+                  onDeleteCook(initialCook.id);
+                  onCancel();
+                }
+              }}
+              className="px-4 py-2.5 bg-red-600/15 hover:bg-red-600/25 text-red-300 border border-red-500/30 rounded-xl font-bold text-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-red-400" />
+              <span>Delete Cook Log</span>
+            </button>
+          ) : (
+            <div />
+          )}
 
-          <button
-            type="submit"
-            className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-xl shadow-lg flex items-center space-x-2 transition-all cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            <span>Save Smoke Journal Entry</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            {/* User-Selected Option for Cloud Auto-Sync */}
+            <button
+              type="button"
+              onClick={toggleAutoSyncOnSave}
+              className={`px-3 py-2 rounded-xl border text-[11px] font-mono font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                autoSyncOnSave
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                  : 'bg-[#1a1a1a] text-zinc-400 border-[#2a2a2a] hover:text-zinc-200'
+              }`}
+              title="Toggle automatic cloud synchronization when saving cook log"
+            >
+              <Cloud className="w-3.5 h-3.5" />
+              <span>Auto-Sync Cloud: {autoSyncOnSave ? 'ON ⚡' : 'OFF (Local Only)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2.5 bg-[#242424] hover:bg-[#2a2a2a] text-zinc-300 rounded-xl font-semibold text-xs transition-colors border border-[#2a2a2a]"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-xl shadow-lg flex items-center space-x-2 transition-all cursor-pointer"
+              title={
+                autoSyncOnSave
+                  ? "Saves cook log locally and automatically syncs to cloud server"
+                  : "Saves cook log locally to your user account until uploaded for analysis"
+              }
+            >
+              <Save className="w-4 h-4" />
+              <span>{autoSyncOnSave ? "Save & Sync to Cloud" : "Save Locally to Account"}</span>
+            </button>
+          </div>
         </div>
 
       </form>
+
+      {showPhysicalSheetModal && (
+        <PhysicalLogSheetModal
+          profile={profile}
+          cook={{
+            id: `temp-${Date.now()}`,
+            date: date || new Date().toISOString().split('T')[0],
+            smokerType: smokerType || profile.smokerName || profile.smokerType,
+            title: title || 'Custom Smoke Session',
+            proteinType,
+            proteinCut: proteinCut || 'Custom Cut',
+            hoursLogged: Number(hoursLogged) || 6,
+            startingSmokerHours: startingHours,
+            endingSmokerHours: endingHours,
+            temperatureReadings: readings,
+            finishedNotes,
+            nextTimeNotes,
+            seasoningRubs: seasoningRubs || 'Standard Rub',
+            saucesGlazes: saucesGlazes || 'None',
+            fuelType: fuelType || 'Pellets',
+            pageNumber: nextPageNumber,
+          } as any}
+          onClose={() => setShowPhysicalSheetModal(false)}
+        />
+      )}
     </div>
   );
 };

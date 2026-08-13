@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { CookLog } from '../types';
 import { X, Award, Flame, Download, Printer, Share2, Sparkles, DollarSign, Database } from 'lucide-react';
 import { calculateCookPelletHourlyCost } from '../utils/retailerPriceSync';
@@ -15,6 +15,21 @@ export const CookCertificateModal: React.FC<CookCertificateModalProps> = ({
   onAnalyzeWithAI,
 }) => {
   const certificateRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!cook) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'unset';
+    };
+  }, [cook, onClose]);
 
   if (!cook) return null;
 
@@ -43,8 +58,28 @@ export const CookCertificateModal: React.FC<CookCertificateModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-zinc-900 border border-zinc-700/60 rounded-2xl w-full max-w-4xl p-4 sm:p-6 shadow-2xl relative text-white font-sans my-4 space-y-4">
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-sm flex items-start justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+    >
+      {/* Fixed Viewport Quick Close Button */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="fixed top-4 right-4 z-50 px-3 py-2 bg-zinc-800 text-amber-300 hover:text-white hover:bg-zinc-700 rounded-full border border-zinc-600 shadow-2xl transition-all cursor-pointer print:hidden flex items-center space-x-1"
+        title="Close Certificate (Esc)"
+      >
+        <X className="w-5 h-5" />
+        <span className="text-xs font-bold pr-1">Close</span>
+      </button>
+
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-zinc-900 border border-zinc-700/60 rounded-2xl w-full max-w-4xl p-4 sm:p-6 shadow-2xl relative text-white font-sans my-4 space-y-4 cursor-default"
+      >
         
         {/* Top Control Header */}
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
@@ -259,7 +294,7 @@ export const CookCertificateModal: React.FC<CookCertificateModalProps> = ({
         {/* Footer Actions */}
         <div className="flex items-center justify-between text-xs text-zinc-400 pt-2">
           <span className="italic">
-            💡 Certificate generated using live Meat Minder telemetry & Pitmaster verification protocols.
+            💡 Certificate generated using live probe telemetry & Pitmaster verification protocols.
           </span>
           <button
             type="button"

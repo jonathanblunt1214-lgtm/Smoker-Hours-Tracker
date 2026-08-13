@@ -185,115 +185,127 @@ export const SmokerModManager: React.FC<SmokerModManagerProps> = ({
       </div>
 
       {/* Recalculation Impact Dashboard */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-zinc-900/90 border border-zinc-800 rounded-xl p-4">
-        {/* Metric 1: Burn Rate */}
-        <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
-          <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Flame className="w-3.5 h-3.5 text-amber-400" /> Fuel Burn Rate
-            </span>
-            {effectiveSpecs.fuelSavingsPercent > 0 && (
-              <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
-                -{effectiveSpecs.fuelSavingsPercent}% Burn
-              </span>
-            )}
+      {effectiveSpecs.activeModsCount === 0 ? (
+        <div className="bg-zinc-950/80 border border-amber-500/30 text-amber-300 rounded-xl p-5 text-center space-y-2 shadow-md">
+          <div className="flex items-center justify-center space-x-2 text-amber-400 font-mono text-xs font-bold uppercase tracking-wider">
+            <Info className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Smoker Specification Modifications & Tuning Metrics</span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-amber-400 tracking-tight">
-              {moddedBurn} <span className="text-xs font-medium text-zinc-400">lbs/hr</span>
-            </span>
-            {burnDiff > 0 && (
-              <span className="text-xs text-zinc-400 line-through font-mono">
-                {unmoddedBurn} lbs/hr
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-zinc-400 mt-1">
-            {burnDiff > 0
-              ? `Saves ~${(burnDiff * 12).toFixed(1)} lbs fuel on a 12-hour brisket cook`
-              : 'Factory stock fuel burn rate'}
+          <p className="text-xs text-amber-300/90 font-medium max-w-lg mx-auto leading-relaxed">
+            Awaiting modification selection — toggle an aftermarket mod or custom pit tuning upgrade below to calculate live burn rate adjustments, thermal efficiency ratings, payload changes, and cooking area metrics.
           </p>
         </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-zinc-900/90 border border-zinc-800 rounded-xl p-4">
+          {/* Metric 1: Burn Rate */}
+          <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
+            <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Flame className="w-3.5 h-3.5 text-amber-400" /> Fuel Burn Rate
+              </span>
+              {effectiveSpecs.fuelSavingsPercent > 0 && (
+                <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                  -{effectiveSpecs.fuelSavingsPercent}% Burn
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-amber-400 tracking-tight">
+                {moddedBurn} <span className="text-xs font-medium text-zinc-400">lbs/hr</span>
+              </span>
+              {burnDiff > 0 && (
+                <span className="text-xs text-zinc-400 line-through font-mono">
+                  {unmoddedBurn} lbs/hr
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-1">
+              {burnDiff > 0
+                ? `Saves ~${(burnDiff * 12).toFixed(1)} lbs fuel on a 12-hour cook`
+                : 'Custom tuned fuel burn rate'}
+            </p>
+          </div>
 
-        {/* Metric 2: Burn Efficiency Rate */}
-        <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
-          <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" /> Burn Efficiency Rate
-            </span>
-            <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded">
-              Grade {effectiveSpecs.globalBurnEfficiencyGrade}
-            </span>
+          {/* Metric 2: Burn Efficiency Rate */}
+          <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
+            <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" /> Burn Efficiency Rate
+              </span>
+              <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded">
+                Grade {effectiveSpecs.globalBurnEfficiencyGrade}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-blue-400 tracking-tight">
+                {effectiveSpecs.globalBurnEfficiencyPercent}%
+              </span>
+              <span className="text-xs text-zinc-400 font-medium">
+                ({effectiveSpecs.globalBurnEfficiencyStatus})
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-1 truncate" title={effectiveSpecs.globalBurnEfficiencySummary}>
+              {effectiveSpecs.thermalEfficiencyMultiplier}x retention • {effectiveSpecs.tempStabilitySummary}
+            </p>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-blue-400 tracking-tight">
-              {effectiveSpecs.globalBurnEfficiencyPercent}%
-            </span>
-            <span className="text-xs text-zinc-400 font-medium">
-              ({effectiveSpecs.globalBurnEfficiencyStatus})
-            </span>
-          </div>
-          <p className="text-[11px] text-zinc-400 mt-1 truncate" title={effectiveSpecs.globalBurnEfficiencySummary}>
-            {effectiveSpecs.thermalEfficiencyMultiplier}x retention • {effectiveSpecs.tempStabilitySummary}
-          </p>
-        </div>
 
-        {/* Metric 3: Hopper / Fuel Payload */}
-        <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
-          <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Layers className="w-3.5 h-3.5 text-orange-400" /> Fuel Capacity
-            </span>
-            {moddedCapacity > unmoddedCapacity && (
-              <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded">
-                +{moddedCapacity - unmoddedCapacity} lbs Added
+          {/* Metric 3: Hopper / Fuel Payload */}
+          <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
+            <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Layers className="w-3.5 h-3.5 text-orange-400" /> Fuel Capacity
               </span>
-            )}
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-orange-400 tracking-tight">
-              {moddedCapacity} <span className="text-xs font-medium text-zinc-400">lbs</span>
-            </span>
-            {moddedCapacity > unmoddedCapacity && (
-              <span className="text-xs text-zinc-400 line-through font-mono">
-                {unmoddedCapacity} lbs
+              {moddedCapacity > unmoddedCapacity && (
+                <span className="text-[10px] font-bold text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded">
+                  +{moddedCapacity - unmoddedCapacity} lbs Added
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-orange-400 tracking-tight">
+                {moddedCapacity} <span className="text-xs font-medium text-zinc-400">lbs</span>
               </span>
-            )}
+              {moddedCapacity > unmoddedCapacity && (
+                <span className="text-xs text-zinc-400 line-through font-mono">
+                  {unmoddedCapacity} lbs
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-1">
+              Est. Max Run Time: <strong className="text-zinc-200">{(moddedCapacity / (moddedBurn || 1.2)).toFixed(1)} hrs</strong> at 225°F
+            </p>
           </div>
-          <p className="text-[11px] text-zinc-400 mt-1">
-            Est. Max Run Time: <strong className="text-zinc-200">{(moddedCapacity / (moddedBurn || 1.2)).toFixed(1)} hrs</strong> at 225°F
-          </p>
-        </div>
 
-        {/* Metric 4: Usable Cooking Grate Area */}
-        <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
-          <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              <Maximize2 className="w-3.5 h-3.5 text-purple-400" /> Cooking Grate Area
-            </span>
-            {moddedArea > unmoddedArea && (
-              <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded">
-                +{moddedArea - unmoddedArea} sq in
+          {/* Metric 4: Usable Cooking Grate Area */}
+          <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-lg p-3 relative overflow-hidden">
+            <div className="flex items-center justify-between text-zinc-400 text-xs mb-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Maximize2 className="w-3.5 h-3.5 text-purple-400" /> Cooking Grate Area
               </span>
-            )}
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-purple-400 tracking-tight">
-              {moddedArea} <span className="text-xs font-medium text-zinc-400">sq in</span>
-            </span>
-            {moddedArea > unmoddedArea && (
-              <span className="text-xs text-zinc-400 line-through font-mono">
-                {unmoddedArea} sq in
+              {moddedArea > unmoddedArea && (
+                <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded">
+                  +{moddedArea - unmoddedArea} sq in
+                </span>
+              )}
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-purple-400 tracking-tight">
+                {moddedArea} <span className="text-xs font-medium text-zinc-400">sq in</span>
               </span>
-            )}
+              {moddedArea > unmoddedArea && (
+                <span className="text-xs text-zinc-400 line-through font-mono">
+                  {unmoddedArea} sq in
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-1">
+              {moddedArea > unmoddedArea
+                ? `Capacity extended to fit ~${Math.floor(moddedArea / 180)} briskets / butts`
+                : 'Factory cooking rack layout'}
+            </p>
           </div>
-          <p className="text-[11px] text-zinc-400 mt-1">
-            {moddedArea > unmoddedArea
-              ? `Capacity extended to fit ~${Math.floor(moddedArea / 180)} briskets / butts`
-              : 'Factory cooking rack layout'}
-          </p>
         </div>
-      </div>
+      )}
 
       {/* Controls Bar: Type Tabs, Category Filter, Search */}
       <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">

@@ -6,6 +6,7 @@ import {
   saveToGoogleDrive,
   loadFromGoogleDrive,
   findDriveFile,
+  getAccessToken,
   AppDriveData,
 } from '../lib/driveSync';
 import { SmokerProfile, CookLog, FuelLog, LocalUserProfile } from '../types';
@@ -92,8 +93,12 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   };
 
   const handleSaveToDrive = async () => {
-    if (!accessToken || !currentUser) {
-      setStatusMsg({ type: 'error', text: '🔒 User Account Required: Non-local cloud backups require an active user account. Please sign in with Google below.' });
+    let token = accessToken;
+    if (!token) {
+      token = await getAccessToken();
+    }
+    if (!token) {
+      setStatusMsg({ type: 'error', text: '🔒 Google Drive Access Required: Please click "Sign in with Google" below to authorize Drive storage.' });
       return;
     }
 
@@ -108,7 +113,7 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
     setConfirmOverwriteSave(false);
 
     try {
-      const res = await saveToGoogleDrive(accessToken, currentAppData);
+      const res = await saveToGoogleDrive(token, currentAppData);
       setDriveFileInfo({ exists: true, fileId: res.fileId });
       setStatusMsg({
         type: 'success',
@@ -124,15 +129,19 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
   };
 
   const handleFetchDriveBackup = async () => {
-    if (!accessToken) {
-      setStatusMsg({ type: 'error', text: 'Please sign in with Google first.' });
+    let token = accessToken;
+    if (!token) {
+      token = await getAccessToken();
+    }
+    if (!token) {
+      setStatusMsg({ type: 'error', text: '🔒 Google Drive Access Required: Please click "Sign in with Google" below to authorize Drive storage.' });
       return;
     }
 
     setLoading(true);
     setStatusMsg(null);
     try {
-      const driveData = await loadFromGoogleDrive(accessToken);
+      const driveData = await loadFromGoogleDrive(token);
       if (!driveData) {
         setStatusMsg({ type: 'info', text: 'No saved pitmaster_smoker_data.json backup found in your Google Drive.' });
       } else {
@@ -364,8 +373,8 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
             {/* Drive Backup File Status */}
             <div className="bg-[#121212] border border-[#2a2a2a] p-3 rounded-xl text-xs space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-zinc-400 font-semibold">Google Drive File:</span>
-                <span className="font-mono text-orange-400 font-bold">pitmaster_smoker_data.json</span>
+                <span className="text-zinc-400 font-semibold">Google Drive Folder & File:</span>
+                <span className="font-mono text-orange-400 font-bold">Smoke Stack / pitmaster_smoker_data.json</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400">Status:</span>

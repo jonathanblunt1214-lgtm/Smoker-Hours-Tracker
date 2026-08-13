@@ -4,6 +4,7 @@ import {
   Sparkles,
   Send,
   Bot,
+  User,
   HelpCircle,
   Loader2,
   LineChart,
@@ -13,6 +14,7 @@ import {
   Trash2,
   CheckCircle2,
   RefreshCw,
+  RotateCcw,
   Zap,
   BookOpen,
   Flame,
@@ -27,6 +29,7 @@ import {
   Layers,
   ArrowRight,
   ShieldAlert,
+  ShieldCheck,
   Camera,
   Image as ImageIcon,
   X,
@@ -43,11 +46,22 @@ import {
   DollarSign,
   ChevronDown,
   Check,
+  GraduationCap,
+  School,
+  Lock,
+  Unlock,
+  Star,
+  RotateCw,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
+import { CERTIFICATION_FLASHCARDS, PRACTICE_EXAM_QUESTIONS, StudyFlashcard, PracticeExamQuestion } from '../data/certificationStudySuite';
+import { getUsdaSafetyForMeatCut, determineProteinType, determineProteinSubcategory } from '../data/proteinTemps';
 import {
   loadCharGPTMemory,
   saveCharGPTMemory,
   autoEvolveCharGPTMemory,
+  addDeletedVaultRuleId,
   loadCharGPTChatHistory,
   saveCharGPTChatHistory,
   StoredChatMessage,
@@ -58,11 +72,14 @@ import {
   loadCustomFuelPresets,
   addCustomFuelPreset,
 } from '../utils/storage';
+import { INITIAL_PITMASTER_COURSES, PitmasterCourse } from '../data/pitmasterCoursesDatabase';
 import { calculateUserAccount } from '../utils/userLeveling';
+
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { calculateMassCookSchedule, MassCookInput, MassCookResult } from '../utils/massCalculator';
 import { PushAndAlexaHub } from './PushAndAlexaHub';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME, AI_ADVISOR_NAME } from '../constants/appName';
+import { triggerMasterVersionSync } from '../services/masterVersionSyncService';
 import { validateBBQTopicConstraint, getCharGPTDeveloperOverride, isMasterAdmin } from '../utils/adminAuth';
 
 interface AIPitmasterModalProps {
@@ -88,14 +105,105 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   onNavigateToNewCook,
   onOpenMasterAdmin,
 }) => {
-  const [activeTab, setActiveTab] = useState<'chat' | 'blend_optimizer' | 'mass_calculator' | 'meat_database' | 'memory' | 'analytics' | 'alexa_push'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'blend_optimizer' | 'mass_calculator' | 'meat_database' | 'memory' | 'analytics' | 'alexa_push' | 'pitmaster_courses'>('chat');
   const [charGPTMemory, setCharGPTMemory] = useState<CharGPTMemory>(() => loadCharGPTMemory());
   const [isMobileHeaderExpanded, setIsMobileHeaderExpanded] = useState(false);
   const [expandedCutIds, setExpandedCutIds] = useState<Record<string, boolean>>({});
 
+  // 10,000 Total Accumulated Hours Calculation & Unlocking System
+  const publishedCookLogs = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
+  const totalLogHours = publishedCookLogs.reduce((sum, c) => sum + (c.hoursLogged || 0), 0);
+  const profileHours = profile?.currentHours || 0;
+  const maxEndingHours = publishedCookLogs.length > 0 ? Math.max(...publishedCookLogs.map((c) => c.endingSmokerHours || 0)) : 0;
+  const baseAccumulatedHours = Math.max(totalLogHours, profileHours, maxEndingHours);
+
+  const is10kUnlocked = baseAccumulatedHours >= 10000;
+
+  // Pitmaster Courses Data Gathering State
+  const [coursesList, setCoursesList] = useState<PitmasterCourse[]>(INITIAL_PITMASTER_COURSES);
+  const [courseCategoryFilter, setCourseCategoryFilter] = useState<string>('all');
+  const [courseSearchQuery, setCourseSearchQuery] = useState<string>('');
+  const [isGatheringCourses, setIsGatheringCourses] = useState<boolean>(false);
+  const [courseResearchSummary, setCourseResearchSummary] = useState<string | null>(null);
+  const [courseNotice, setCourseNotice] = useState<string | null>(null);
+
+  // Inline Pitmaster Name Editing State
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [nameInputValue, setNameInputValue] = useState<string>('');
+
+  // 10,000-Hour Certification Study Suite State
+  const [studyMode, setStudyMode] = useState<'courses' | 'flashcards' | 'exam_sim'>('courses');
+  const [currentFlashcardIndex, setCurrentFlashcardIndex] = useState<number>(0);
+  const [isFlashcardFlipped, setIsFlashcardFlipped] = useState<boolean>(false);
+  const [selectedExamType, setSelectedExamType] = useState<string>('all');
+  const [examAnswers, setExamAnswers] = useState<Record<string, number>>({});
+  const [examSubmitted, setExamSubmitted] = useState<boolean>(false);
+
+  const handleNextFlashcard = () => {
+    setIsFlashcardFlipped(false);
+    setCurrentFlashcardIndex((prev) => (prev + 1) % CERTIFICATION_FLASHCARDS.length);
+  };
+
+  const handlePrevFlashcard = () => {
+    setIsFlashcardFlipped(false);
+    setCurrentFlashcardIndex((prev) => (prev - 1 + CERTIFICATION_FLASHCARDS.length) % CERTIFICATION_FLASHCARDS.length);
+  };
+
+  const handleSelectExamOption = (questionId: string, optionIdx: number) => {
+    if (examSubmitted) return;
+    setExamAnswers((prev) => ({ ...prev, [questionId]: optionIdx }));
+  };
+
+  const handleResetExam = () => {
+    setExamAnswers({});
+    setExamSubmitted(false);
+  };
+
+  const handleGatherCourseData = async (customQuery?: string) => {
+    const queryToUse = customQuery !== undefined ? customQuery : courseSearchQuery;
+    setIsGatheringCourses(true);
+    setCourseNotice(null);
+
+    try {
+      const res = await fetch('/api/chargpt/pitmaster-courses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: queryToUse || 'top pitmaster courses and masterclasses',
+          category: courseCategoryFilter,
+          accumulatedHours: Math.round(baseAccumulatedHours),
+          smokerType: profile?.name || profile?.smokerType,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (data.gatheredCourses && Array.isArray(data.gatheredCourses) && data.gatheredCourses.length > 0) {
+          setCoursesList((prev) => {
+            const existingIds = new Set(prev.map((c) => c.id));
+            const newUnique = data.gatheredCourses.filter((c: PitmasterCourse) => !existingIds.has(c.id));
+            return [...newUnique, ...prev];
+          });
+        }
+        if (data.searchSummary) {
+          setCourseResearchSummary(data.searchSummary);
+        }
+        setCourseNotice(`✅ CharGPT gathered ${data.gatheredCourses?.length || 0} pitmaster courses & masterclass insights!`);
+        setTimeout(() => setCourseNotice(null), 4000);
+      } else {
+        setCourseNotice('CharGPT gathered data using offline course archives.');
+      }
+    } catch (err: any) {
+      console.error('Error gathering course data:', err);
+      setCourseNotice('Operating with CharGPT offline pitmaster course database.');
+    } finally {
+      setIsGatheringCourses(false);
+    }
+  };
+
   const toggleCutExpand = (cutId: string) => {
     setExpandedCutIds((prev) => ({ ...prev, [cutId]: !prev[cutId] }));
   };
+
 
   // AI Wood & Pellet Blend Optimizer State
   const [blendGoal, setBlendGoal] = useState<'flavor' | 'efficiency' | 'cost' | 'balanced'>('flavor');
@@ -217,11 +325,15 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   const [messages, setMessages] = useState<StoredChatMessage[]>(() => {
     const saved = loadCharGPTChatHistory();
     if (saved && saved.length > 0) return saved;
+    const nameGreeting = charGPTMemory.userName ? `, ${charGPTMemory.userName}` : '';
+    const askNameText = !charGPTMemory.userName
+      ? `\n\nBefore we fire up the smoker, what is your name? I'd love to remember who I'm cooking with!`
+      : '';
     return [
       {
         id: 'msg-welcome',
         role: 'assistant',
-        text: `Hello Pitmaster! I am ${AI_PITMASTER_NAME}, your self-learning, evolving BBQ Chatbot & Smoker Scientist 🧠🔥\n\nI store our conversation dialogue history, remember your custom preferences, and feature a Mass & Weight Physics Calculator so you can manage cooks by exact meat weight! Ask me anything, or run a data analysis audit on your smoke logs.`,
+        text: `Hello Pitmaster${nameGreeting}! I am ${AI_PITMASTER_NAME}, your self-learning, evolving BBQ Chatbot & Smoker Scientist 🧠🔥${askNameText}\n\nI store our conversation dialogue history, remember your custom preferences, and feature a Mass & Weight Physics Calculator so you can manage cooks by exact meat weight! Ask me anything, or run a data analysis audit on your smoke logs.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -229,15 +341,13 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Save conversation history to local storage whenever messages update
   useEffect(() => {
-    if (messages.length > 0) {
-      saveCharGPTChatHistory(messages);
-    }
+    saveCharGPTChatHistory(messages);
   }, [messages]);
 
   // Mass & Weight Calculator State
-  const [massProtein, setMassProtein] = useState<ProteinType>('Beef');
-  const [massCut, setMassCut] = useState('Choice Full Packer Brisket');
-  const [massWeightValue, setMassWeightValue] = useState<number>(14.0);
+  const [massProtein, setMassProtein] = useState<ProteinType>('' as any);
+  const [massCut, setMassCut] = useState('');
+  const [massWeightValue, setMassWeightValue] = useState<number | ''>('');
   const [massWeightUnit, setMassWeightUnit] = useState<'lbs' | 'kg'>('lbs');
   const [massPitTempF, setMassPitTempF] = useState<number>(225);
   const [massTargetTempF, setMassTargetTempF] = useState<number>(203);
@@ -259,6 +369,13 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     detectedProteinCut: string;
     detectedBoneOption: 'Bone-In' | 'Boneless';
     detectedThicknessProfile: 'Standard Whole Muscle' | 'Thick Uniform Mass' | 'Thin Flat Slab' | 'Compact Roast';
+    detectedPitTempF?: number;
+    detectedTargetTempF?: number;
+    detectedWrapStrategy?: string;
+    detectedUsdaGrade?: string;
+    detectedPricePerLb?: number | null;
+    detectedTotalPrice?: number | null;
+    detectedTareWeight?: string | null;
     explanation: string;
     rawAnalysis?: string;
     photoPreviewUrl?: string;
@@ -284,25 +401,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
         if (!navigator.onLine) {
           setIsAnalyzingMeatPhoto(false);
-          setMassWeightValue(12.0);
-          setMassProtein('Beef');
-          setMassCut('Choice Full Packer Brisket');
-          setPhotoAnalysisResult({
-            detectedWeightValue: 12.0,
-            detectedWeightUnit: 'lbs',
-            detectedProteinType: 'Beef',
-            detectedProteinCut: 'Choice Full Packer Brisket',
-            detectedBoneOption: 'Boneless',
-            detectedThicknessProfile: 'Standard Whole Muscle',
-            estimatedCookHoursLowSlow: 15.0,
-            estimatedCookHoursHotFast: 9.5,
-            confidenceScore: 88,
-            explanation: '⚡ Offline Mode: Scanned scale/meat photo using local CharGPT mass physics engine.',
-            recommendedTargetTempF: 203,
-            suggestedRubAmountOz: 2.4,
-            suggestedWoodPounds: 14.4,
-            photoPreviewUrl: dataUrl,
-          });
+          setPhotoAnalysisError('Offline Mode: Photo vision analysis requires an active internet connection. Please enter cut details manually below or retry when back online.');
           return;
         }
 
@@ -341,6 +440,16 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             setMassThicknessProfile(r.detectedThicknessProfile);
           }
 
+          if (r.detectedPitTempF && typeof r.detectedPitTempF === 'number') {
+            setMassPitTempF(r.detectedPitTempF);
+          }
+          if (r.detectedTargetTempF && typeof r.detectedTargetTempF === 'number') {
+            setMassTargetTempF(r.detectedTargetTempF);
+          }
+          if (r.detectedWrapStrategy) {
+            setMassWrapStrategy(r.detectedWrapStrategy as any);
+          }
+
           setPhotoAnalysisResult({
             ...r,
             photoPreviewUrl: dataUrl,
@@ -358,9 +467,9 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Calculate live mass physics results
   const massCookInput: MassCookInput = {
-    proteinType: massProtein,
-    proteinCut: massCut,
-    weightValue: massWeightValue,
+    proteinType: massProtein || 'Beef',
+    proteinCut: massCut || 'Custom Cut',
+    weightValue: typeof massWeightValue === 'number' ? massWeightValue : 0,
     weightUnit: massWeightUnit,
     pitTempF: massPitTempF,
     targetInternalTempF: massTargetTempF,
@@ -379,7 +488,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Auto-evolve memory when component mounts or cookLogs change
   useEffect(() => {
-    const updated = autoEvolveCharGPTMemory(cookLogs, charGPTMemory);
+    const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
+    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
     setCharGPTMemory(updated);
     if (onMemoryUpdate) onMemoryUpdate(updated);
   }, [cookLogs.length]);
@@ -401,11 +511,107 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Manual Trigger to re-analyze logs
   const handleManualEvolve = () => {
-    const updated = autoEvolveCharGPTMemory(cookLogs, charGPTMemory);
+    const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
+    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
     setCharGPTMemory(updated);
     if (onMemoryUpdate) onMemoryUpdate(updated);
-    setTeachSuccessNotice(`🧠 ${AI_NAME} analyzed ${cookLogs.length} cook logs! Updated learned preferences.`);
+    setTeachSuccessNotice(`🧠 ${AI_NAME} analyzed ${published.length} published cook logs! Updated learned preferences.`);
     setTimeout(() => setTeachSuccessNotice(null), 4000);
+  };
+
+  // Handler: Add Analysed Cut from Cook Log to Meat Safety & BBQ Cook Target Temps Guide
+  const handleAddAnalysedCutFromCookLog = (cook: CookLog) => {
+    const c = cook as any;
+    const cutName = c.proteinCut || c.title;
+    if (!cutName) return;
+
+    const cat = c.proteinType || determineProteinType(cutName);
+    const subcat = c.proteinSubcategory || c.gameSubcategory || determineProteinSubcategory(cat, cutName);
+
+    const targetTempF = c.targetInternalTempF || c.targetTemp || (cat === 'Poultry' ? 165 : cat === 'Pork' ? 205 : 203);
+    const smokeTempF = c.idealSmokeTempF || c.smokeTemp || 225;
+
+    const newCut: VerifiedMeatCut = {
+      id: `cut-chargpt-cook-${c.id}-${Date.now().toString(36)}`,
+      name: cutName,
+      aliases: [c.title, `${cat} Cook Log Cut`],
+      proteinType: cat as ProteinType,
+      proteinSubcategory: subcat,
+      gameSubcategory: (cat === 'Game' || cat === 'Wild Game') ? subcat : undefined,
+      primalOrigin: c.primalOrigin || `${cat} Primal Cut (from Smoke Log)`,
+      impsCode: c.impsCode || undefined,
+      description: c.notes || `Analysed cut extracted from CharGPT cook log session "${c.title}".`,
+      visualKeyFeatures: [
+        `Analysed in Cook Log: "${c.title}"`,
+        `Smoker Unit: ${c.smokerType || 'Smoker Rig'}`,
+        `Wood/Pellet: ${c.woodPelletType || 'Hardwood Smoke'}`,
+      ],
+      idealSmokeTempF: smokeTempF,
+      targetInternalTempF: targetTempF,
+      cookingStrategy: c.cookingStrategy || c.notes || `Smoked on ${c.smokerType || 'Smoker'} to target internal temperature of ${targetTempF}°F.`,
+      verifiedStatus: 'Local User Confirmed',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = addOrUpdateVerifiedMeatCut(newCut);
+    setVerifiedCuts(updated);
+    triggerMasterVersionSync();
+
+    setTeachSuccessNotice(`✅ Added analysed cut "${cutName}" to Meat Safety & BBQ Cook Target Temps Guide!`);
+    setTimeout(() => setTeachSuccessNotice(null), 5000);
+  };
+
+  // Handler: Batch Import All Analysed Cuts from Cook Logs
+  const handleBatchImportAllCookLogCuts = () => {
+    if (cookLogs.length === 0) {
+      setTeachSuccessNotice('⚠️ No cook logs available to import cuts from.');
+      setTimeout(() => setTeachSuccessNotice(null), 4000);
+      return;
+    }
+
+    let addedCount = 0;
+    let currentList = loadVerifiedMeatCuts();
+
+    cookLogs.forEach((cook) => {
+      const c = cook as any;
+      const cutName = c.proteinCut || c.title;
+      if (!cutName) return;
+
+      const cat = c.proteinType || determineProteinType(cutName);
+      const subcat = c.proteinSubcategory || c.gameSubcategory || determineProteinSubcategory(cat, cutName);
+
+      const targetTempF = c.targetInternalTempF || c.targetTemp || (cat === 'Poultry' ? 165 : cat === 'Pork' ? 205 : 203);
+      const smokeTempF = c.idealSmokeTempF || c.smokeTemp || 225;
+
+      const newCut: VerifiedMeatCut = {
+        id: `cut-chargpt-batch-${c.id}`,
+        name: cutName,
+        aliases: [c.title],
+        proteinType: cat as ProteinType,
+        proteinSubcategory: subcat,
+        gameSubcategory: (cat === 'Game' || cat === 'Wild Game') ? subcat : undefined,
+        primalOrigin: c.primalOrigin || `${cat} Primal Cut`,
+        impsCode: c.impsCode || undefined,
+        description: c.notes || `Analysed meat cut extracted from cook log "${c.title}".`,
+        visualKeyFeatures: [`Analysed in Cook Log: ${c.title}`],
+        idealSmokeTempF: smokeTempF,
+        targetInternalTempF: targetTempF,
+        cookingStrategy: c.cookingStrategy || `Smoked on ${c.smokerType || 'smoker'} to ${targetTempF}°F.`,
+        verifiedStatus: 'Local User Confirmed',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      currentList = addOrUpdateVerifiedMeatCut(newCut);
+      addedCount++;
+    });
+
+    setVerifiedCuts(currentList);
+    triggerMasterVersionSync();
+
+    setTeachSuccessNotice(`🎉 Successfully imported ${addedCount} analysed cuts from cook logs to Meat Safety & Target Temps Guide!`);
+    setTimeout(() => setTeachSuccessNotice(null), 5000);
   };
 
   // Handler: Identify Unknown Cut via Server & Gemini (with Offline Fallback)
@@ -764,11 +970,25 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Delete a Rule from Memory
   const handleDeleteRule = (ruleId: string) => {
+    addDeletedVaultRuleId(ruleId);
     const updatedRules = charGPTMemory.learnedRules.filter((r) => r.id !== ruleId);
     const updated: CharGPTMemory = { ...charGPTMemory, learnedRules: updatedRules };
     setCharGPTMemory(updated);
     saveCharGPTMemory(updated);
     if (onMemoryUpdate) onMemoryUpdate(updated);
+  };
+
+  // Clear All Rules from Memory Vault
+  const handleClearAllRules = () => {
+    if (charGPTMemory.learnedRules.length === 0) return;
+    if (window.confirm(`Are you sure you want to delete all ${charGPTMemory.learnedRules.length} rule(s) from the ${AI_NAME} Memory Vault?`)) {
+      const allIds = charGPTMemory.learnedRules.map((r) => r.id);
+      addDeletedVaultRuleId(allIds);
+      const updated: CharGPTMemory = { ...charGPTMemory, learnedRules: [] };
+      setCharGPTMemory(updated);
+      saveCharGPTMemory(updated);
+      if (onMemoryUpdate) onMemoryUpdate(updated);
+    }
   };
 
   // Offline Assistant Response Generator
@@ -827,7 +1047,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     setLoading(true);
 
     // Perform Strict BBQ Topic Constraint check
-    const activeEmail = currentUserEmail || 'jonathanblunt1214@gmail.com';
+    const activeEmail = currentUserEmail || '';
     const devOverride = getCharGPTDeveloperOverride(activeEmail);
     const bbqCheck = validateBBQTopicConstraint(effectiveQuery, devOverride.allowed);
 
@@ -915,26 +1135,67 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       });
 
       const data = await res.json();
-      const assistantText = data.text || (data.error ? `⚠️ ${AI_NAME} Note: ${data.error}` : `Sorry, ${AI_NAME} encountered a thermal connection issue.`);
+      const rawAssistantText = data.text || (data.error ? `⚠️ ${AI_NAME} Note: ${data.error}` : `Sorry, ${AI_NAME} encountered a thermal connection issue.`);
+
+      // Extract user name if provided in user prompt or returned via AI tag
+      let extractedName: string | null = null;
+      const promptNameMatch = effectiveQuery.match(/(?:my name is|i'm|i am|call me|you can call me|name is|name's)\s+([a-zA-Z0-9_ -]{1,25})/i);
+      if (promptNameMatch && promptNameMatch[1]) {
+        extractedName = promptNameMatch[1].trim().replace(/[.,!?;:]/g, '');
+      } else if (!charGPTMemory.userName && /^[A-Z][a-zA-Z0-9'-]{1,20}(?:\s+[A-Z][a-zA-Z0-9'-]{1,20}){0,2}$/.test(effectiveQuery.trim())) {
+        extractedName = effectiveQuery.trim();
+      }
+
+      const tagMatch = rawAssistantText.match(/\[LEARNED_USER_NAME:\s*([^\]]+)\]/i);
+      if (tagMatch) {
+        extractedName = tagMatch[1].trim();
+      }
+
+      // Clean out tag from assistant text before rendering
+      const cleanedAssistantText = rawAssistantText.replace(/\[LEARNED_USER_NAME:\s*[^\]]+\]/gi, '').trim();
 
       setMessages([
         ...newMessages,
         {
           id: `msg-assistant-${Date.now()}`,
           role: 'assistant',
-          text: assistantText,
+          text: cleanedAssistantText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
 
-      // Increase interaction count
-      const updatedMemory: CharGPTMemory = {
-        ...charGPTMemory,
-        totalInteractions: charGPTMemory.totalInteractions + 1,
-      };
-      setCharGPTMemory(updatedMemory);
-      saveCharGPTMemory(updatedMemory);
-      if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
+      // Increase interaction count & update userName if learned
+      setCharGPTMemory((prevMemory) => {
+        let updatedMemory: CharGPTMemory = {
+          ...prevMemory,
+          totalInteractions: (prevMemory.totalInteractions || 0) + 1,
+          lastEvolvedAt: new Date().toISOString(),
+        };
+
+        if (extractedName) {
+          const nameRule: CharGPTRule = {
+            id: `rule-name-${Date.now()}`,
+            category: 'general',
+            title: 'Pitmaster Name',
+            detail: `User's name is ${extractedName}`,
+            source: 'user_taught',
+            createdAt: new Date().toISOString(),
+          };
+          const updatedRules = [
+            nameRule,
+            ...updatedMemory.learnedRules.filter((r) => r.title !== 'Pitmaster Name'),
+          ];
+          updatedMemory = {
+            ...updatedMemory,
+            userName: extractedName,
+            learnedRules: updatedRules,
+          };
+        }
+
+        saveCharGPTMemory(updatedMemory);
+        if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
+        return updatedMemory;
+      });
     } catch (e: any) {
       const offlineText = generateOfflineResponse(effectiveQuery);
       setMessages([
@@ -946,6 +1207,16 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+      setCharGPTMemory((prevMemory) => {
+        const updatedMemory: CharGPTMemory = {
+          ...prevMemory,
+          totalInteractions: (prevMemory.totalInteractions || 0) + 1,
+          lastEvolvedAt: new Date().toISOString(),
+        };
+        saveCharGPTMemory(updatedMemory);
+        if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
+        return updatedMemory;
+      });
     } finally {
       setLoading(false);
     }
@@ -1011,7 +1282,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                   </span>
                 )}
                 <span className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-0.5 rounded-md font-medium truncate max-w-[150px]">
-                  🔥 Smoker: {profile.name || 'Pit Boss Copperhead'}
+                  🔥 Smoker: {profile.name || 'Smoker Rig'}
                 </span>
               </div>
               <div className="bg-[#14121a] border border-purple-500/20 rounded-xl p-2 flex justify-between text-[11px] text-purple-200">
@@ -1060,10 +1331,10 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 )}
 
                 <span className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
-                  🔥 Linked Smoker: <strong className="text-white font-bold truncate max-w-[140px] sm:max-w-none">{profile.name || 'Pit Boss Copperhead'}</strong>
+                  🔥 Linked Smoker: <strong className="text-white font-bold truncate max-w-[140px] sm:max-w-none">{profile.name || 'Smoker Rig'}</strong>
                 </span>
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
-                  👤 Account: <strong className="text-white font-bold">{profile.name ? `${profile.name} Pitmaster` : 'Backyard Pitmaster'}</strong>
+                  👤 Account: <strong className="text-white font-bold">{currentUserEmail && currentUserEmail.trim() ? currentUserEmail : 'None'}</strong>
                 </span>
               </div>
             </div>
@@ -1109,6 +1380,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 <option value="blend_optimizer">🧪 AI Wood & Pellet Blend</option>
                 <option value="mass_calculator">⚖️ Weight & Mass Physics</option>
                 <option value="meat_database">📖 Meat Cut DB ({verifiedCuts.length})</option>
+                <option value="pitmaster_courses">🎓 Courses & Academies {is10kUnlocked ? '⚡ (10k Unlocked)' : '🔒 (10k Lock)'}</option>
                 <option value="memory">🧠 Memory Vault ({charGPTMemory.learnedRules.length})</option>
                 <option value="analytics">📊 BBQ Profile</option>
                 <option value="alexa_push">🔔 Push & Alexa</option>
@@ -1184,8 +1456,24 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               </button>
             </div>
 
-            {/* Percentage Grid 2: Secondary 3 Tabs (33.3% Width Each = 100% Responsive) */}
-            <div className="grid grid-cols-3 gap-1 w-full min-w-0 pt-0.5">
+            {/* Percentage Grid 2: Secondary 4 Tabs */}
+            <div className="grid grid-cols-4 gap-1 w-full min-w-0 pt-0.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab('pitmaster_courses')}
+                className={`w-full min-w-0 px-1 py-1.5 rounded-xl font-bold text-[10px] transition-all flex items-center justify-center space-x-1 cursor-pointer min-h-[34px] truncate ${
+                  activeTab === 'pitmaster_courses'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-950 font-black shadow-md'
+                    : is10kUnlocked
+                    ? 'bg-[#122019] text-emerald-300 hover:text-white border border-emerald-500/30'
+                    : 'bg-[#181622] text-amber-300/80 hover:text-white border border-amber-500/20'
+                }`}
+              >
+                <GraduationCap className={`w-3 h-3 shrink-0 ${is10kUnlocked ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className="truncate">Courses</span>
+                {is10kUnlocked ? <span className="text-[8px] bg-emerald-500/30 text-emerald-300 px-1 rounded">10k</span> : <Lock className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
+              </button>
+
               <button
                 type="button"
                 onClick={() => setActiveTab('memory')}
@@ -1222,7 +1510,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 }`}
               >
                 <Bell className="w-3 h-3 shrink-0 text-purple-400" />
-                <span className="truncate">Push & Alexa</span>
+                <span className="truncate">Push</span>
               </button>
             </div>
           </div>
@@ -1280,6 +1568,27 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               >
                 <BookOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span className="truncate">Meat Cuts</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('pitmaster_courses')}
+                className={`flex-1 min-w-0 px-2 py-1.5 rounded-lg font-extrabold text-xs transition-all flex items-center justify-center space-x-1 cursor-pointer min-h-[36px] truncate ${
+                  activeTab === 'pitmaster_courses'
+                    ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 text-zinc-950 font-black shadow-md'
+                    : is10kUnlocked
+                    ? 'text-emerald-300 hover:text-white hover:bg-emerald-500/10 border border-emerald-500/30'
+                    : 'text-amber-300/90 hover:text-white hover:bg-amber-500/10'
+                }`}
+                title={is10kUnlocked ? "10,000-Hour Master Pitmaster Course Intelligence Active" : "Requires 10,000 Total Hours"}
+              >
+                <GraduationCap className={`w-3.5 h-3.5 shrink-0 ${is10kUnlocked ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className="truncate">🎓 Courses</span>
+                {is10kUnlocked ? (
+                  <span className="text-[9px] bg-emerald-500/30 text-emerald-200 font-mono px-1 rounded ml-0.5">10k</span>
+                ) : (
+                  <Lock className="w-2.5 h-2.5 text-amber-400 shrink-0 ml-0.5" />
+                )}
               </button>
 
               <button
@@ -1427,9 +1736,33 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center space-x-1.5 text-[10px] sm:text-[11px] text-purple-300 bg-purple-500/10 px-2.5 py-1 rounded-lg border border-purple-500/20 shrink-0 max-w-full truncate self-start sm:self-auto">
-              <Brain className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span className="truncate">{charGPTMemory.learnedRules.length} Active Rules in Memory</span>
+            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+              {activeCook ? (
+                <button
+                  type="button"
+                  onClick={() => handleAddAnalysedCutFromCookLog(activeCook)}
+                  className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-[11px] rounded-lg transition-all flex items-center space-x-1 shrink-0 cursor-pointer shadow-sm"
+                  title={`Add analysed meat cut "${activeCook.proteinCut || activeCook.title}" to Target Temps Guide`}
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Add Cut to Guide</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleBatchImportAllCookLogCuts}
+                  className="px-2.5 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 font-bold text-[11px] rounded-lg transition-all flex items-center space-x-1 shrink-0 cursor-pointer shadow-sm"
+                  title="Import analysed meat cuts from all cook logs into Target Temps Guide"
+                >
+                  <Plus className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Sync Log Cuts to Guide</span>
+                </button>
+              )}
+
+              <div className="flex items-center space-x-1.5 text-[10px] sm:text-[11px] text-purple-300 bg-purple-500/10 px-2.5 py-1 rounded-lg border border-purple-500/20 shrink-0 max-w-full truncate">
+                <Brain className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                <span className="truncate">{charGPTMemory.learnedRules.length} Active Rules</span>
+              </div>
             </div>
           </div>
 
@@ -1833,11 +2166,11 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               <div className="flex items-center space-x-2">
                 <Scale className="w-5 h-5 text-amber-400 shrink-0" />
                 <h3 className="text-base font-bold text-white">
-                  Meat Mass & Weight Physics Calculator
+                  Meat Mass Calculator
                 </h3>
               </div>
               <p className="text-xs text-zinc-400 mt-1">
-                Manage cooks by exact meat mass. CharGPT calculates cook durations, stall start windows, wrap timing, and fuel burn based on thermal mass physics.
+                Calculate cook duration, target temps, wrap timing, and fuel burn by meat weight or photo scan.
               </p>
             </div>
 
@@ -1958,28 +2291,55 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                           <img
                             src={photoAnalysisResult.photoPreviewUrl}
                             alt="Scanned meat photo"
-                            className="w-12 h-12 rounded-lg object-cover border border-emerald-500/40 shrink-0 shadow"
+                            className="w-14 h-14 rounded-lg object-cover border border-emerald-500/40 shrink-0 shadow"
                           />
                         )}
-                        <div>
-                          <div className="flex items-center space-x-1">
+                        <div className="space-y-1">
+                          <div className="flex items-center space-x-1.5 flex-wrap">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                             <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">
-                              Photo Extracted & Applied!
+                              Label & Scale Data Auto-Filled!
                             </span>
+                            {photoAnalysisResult.detectedUsdaGrade && photoAnalysisResult.detectedUsdaGrade !== 'N/A' && (
+                              <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 font-black text-[9px] rounded uppercase">
+                                {photoAnalysisResult.detectedUsdaGrade}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-xs font-black text-white font-mono mt-0.5">
+
+                          <div className="text-xs font-black text-white font-mono">
                             {photoAnalysisResult.detectedWeightValue} {photoAnalysisResult.detectedWeightUnit} • {photoAnalysisResult.detectedProteinCut}
                           </div>
-                          <p className="text-[10px] text-zinc-300 mt-1 leading-normal italic">
+
+                          {/* Extra Pricing & Scale Details */}
+                          {(photoAnalysisResult.detectedPricePerLb || photoAnalysisResult.detectedTotalPrice || photoAnalysisResult.detectedTareWeight) && (
+                            <div className="flex items-center space-x-2 text-[10px] font-mono text-zinc-300 flex-wrap">
+                              {photoAnalysisResult.detectedPricePerLb && (
+                                <span>${photoAnalysisResult.detectedPricePerLb}/lb</span>
+                              )}
+                              {photoAnalysisResult.detectedTotalPrice && (
+                                <span>• Total: <strong className="text-emerald-300">${photoAnalysisResult.detectedTotalPrice}</strong></span>
+                              )}
+                              {photoAnalysisResult.detectedTareWeight && (
+                                <span className="text-zinc-400">• Scale Tare: {photoAnalysisResult.detectedTareWeight}</span>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="text-[10px] text-zinc-300 leading-normal italic">
                             "{photoAnalysisResult.explanation}"
-                          </p>
+                          </div>
+
+                          <div className="bg-[#121212] border border-[#2e2e2e] rounded-lg p-1.5 text-[9px] text-amber-300/90 font-mono flex items-center space-x-1">
+                            <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span>Auto-Configured: {massPitTempF}°F Pit • {massTargetTempF}°F Target • {massWrapStrategy} • {massBoneOption}</span>
+                          </div>
                         </div>
                       </div>
 
                       <button
                         onClick={() => setPhotoAnalysisResult(null)}
-                        className="text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer"
+                        className="text-zinc-500 hover:text-zinc-300 p-1 cursor-pointer shrink-0"
                         title="Dismiss"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -2005,6 +2365,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                     onChange={(e) => setMassProtein(e.target.value as ProteinType)}
                     className="w-full bg-[#1c1c1c] border border-[#333] text-white text-xs rounded-xl px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:outline-none cursor-pointer font-medium"
                   >
+                    <option value="">Select Protein Category...</option>
                     <option value="Beef">Beef</option>
                     <option value="Pork">Pork</option>
                     <option value="Chicken">Chicken</option>
@@ -2040,10 +2401,11 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                       <input
                         type="number"
                         step="0.5"
-                        min="0.5"
+                        min="0"
                         max="200"
+                        placeholder="0.0"
                         value={massWeightValue}
-                        onChange={(e) => setMassWeightValue(Math.max(0.5, Number(e.target.value)))}
+                        onChange={(e) => setMassWeightValue(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
                         className="w-full bg-transparent text-white font-black text-sm focus:outline-none"
                       />
                       <span className="text-xs font-mono font-bold text-amber-400">{massWeightUnit}</span>
@@ -2052,12 +2414,16 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (massWeightUnit === 'lbs') {
-                          setMassWeightUnit('kg');
-                          setMassWeightValue(parseFloat((massWeightValue / 2.20462).toFixed(1)));
+                        if (typeof massWeightValue === 'number' && massWeightValue > 0) {
+                          if (massWeightUnit === 'lbs') {
+                            setMassWeightUnit('kg');
+                            setMassWeightValue(parseFloat((massWeightValue / 2.20462).toFixed(1)));
+                          } else {
+                            setMassWeightUnit('lbs');
+                            setMassWeightValue(parseFloat((massWeightValue * 2.20462).toFixed(1)));
+                          }
                         } else {
-                          setMassWeightUnit('lbs');
-                          setMassWeightValue(parseFloat((massWeightValue * 2.20462).toFixed(1)));
+                          setMassWeightUnit(massWeightUnit === 'lbs' ? 'kg' : 'lbs');
                         }
                       }}
                       className="px-3 py-2 bg-[#252525] hover:bg-[#303030] border border-[#3a3a3a] text-zinc-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
@@ -2264,10 +2630,10 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             <div>
               <h3 className="text-sm sm:text-base font-black text-white flex items-center space-x-2">
                 <BookOpen className="w-5 h-5 text-amber-400 shrink-0" />
-                <span>Meat Cut Identification & Confirmed Catalog</span>
+                <span>Meat Cut Catalog</span>
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Scan names or pictures of unknown cuts to identify muscle structure, then manage your local database with automated online verification against USDA/NAMP specifications.
+                Identify unknown meat cuts and maintain your local catalog verified against USDA standards.
               </p>
             </div>
 
@@ -2686,6 +3052,37 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                                   <strong className="text-emerald-400 font-mono">{cut.targetInternalTempF}°F</strong>
                                 </div>
                               </div>
+
+                              {/* LINKED MEAT SAFETY & TARGET TEMPS COMPLIANCE */}
+                              {(() => {
+                                const compliance = getUsdaSafetyForMeatCut(cut);
+                                return (
+                                  <div className="bg-[#181818] border border-emerald-500/25 rounded-xl p-2.5 space-y-1.5 text-[11px] font-mono">
+                                    <div className="flex items-center justify-between text-emerald-400 font-bold border-b border-[#2a2a2a] pb-1 text-[10px] uppercase tracking-wider">
+                                      <span className="flex items-center space-x-1">
+                                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                        <span>USDA Safety & Target Temp Guide</span>
+                                      </span>
+                                      <span className="text-[9px] bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 text-emerald-300">
+                                        {compliance.restTimeMinutes > 0 ? `⏱️ ${compliance.restTimeMinutes}-Min Rest` : '0-Min Rest'}
+                                      </span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                                      <div className="bg-[#121212] p-1.5 rounded border border-[#2a2a2a]">
+                                        <span className="text-zinc-500 block uppercase font-bold text-[9px]">USDA Min Safe</span>
+                                        <span className="text-emerald-400 font-bold">{compliance.usdaMinSafeF}°F</span>
+                                      </div>
+                                      <div className="bg-[#121212] p-1.5 rounded border border-[#2a2a2a]">
+                                        <span className="text-zinc-500 block uppercase font-bold text-[9px]">Ideal Finish Range</span>
+                                        <span className="text-orange-400 font-bold">{compliance.idealFinishRange}</span>
+                                      </div>
+                                    </div>
+                                    <p className="text-[10px] text-zinc-400 leading-snug">
+                                      🛡️ <strong className="text-zinc-300">FSIS Citation:</strong> {compliance.regulatoryCitation}
+                                    </p>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
@@ -2892,16 +3289,108 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             <div>
               <h3 className="text-sm font-bold text-white flex items-center space-x-2">
                 <Brain className="w-4 h-4 text-purple-400 shrink-0" />
-                <span>{AI_NAME} Memory Vault & Preferences</span>
+                <span>Memory Vault</span>
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Every rule listed here is actively fed into {AI_NAME}'s system prompts to customize recipes, advice, and predictions.
+                Manage custom rules and guidelines for {AI_NAME} to follow across chat sessions.
               </p>
             </div>
 
-            <span className="text-xs font-mono font-bold text-purple-300 bg-purple-500/10 px-2.5 py-1 rounded-lg border border-purple-500/20 self-start sm:self-auto shrink-0">
-              {charGPTMemory.learnedRules.length} Active Rules
-            </span>
+            <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
+              <span className="text-xs font-mono font-bold text-purple-300 bg-purple-500/10 px-2.5 py-1 rounded-lg border border-purple-500/20">
+                {charGPTMemory.learnedRules.length} Active Rules
+              </span>
+            </div>
+          </div>
+
+          {/* REMEMBERED PITMASTER NAME CARD */}
+          <div className="bg-[#121212] border border-purple-500/30 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-3 flex-1 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+                <User className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider block">Pitmaster Remembered Name</span>
+                {!isEditingName ? (
+                  <span className="text-xs font-bold text-white block truncate">
+                    {charGPTMemory.userName ? (
+                      <span className="text-purple-300 font-extrabold">{charGPTMemory.userName}</span>
+                    ) : (
+                      <span className="text-zinc-400 italic">Not set yet (CharGPT will ask on 1st chat)</span>
+                    )}
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-2 mt-1 w-full max-w-xs">
+                    <input
+                      type="text"
+                      value={nameInputValue}
+                      onChange={(e) => setNameInputValue(e.target.value)}
+                      placeholder="Enter your name"
+                      className="bg-[#1a1a24] border border-purple-500/40 rounded-lg px-2.5 py-1 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-purple-400 flex-1 min-w-0"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const trimmed = nameInputValue.trim();
+                          const updated: CharGPTMemory = {
+                            ...charGPTMemory,
+                            userName: trimmed || undefined,
+                            learnedRules: trimmed
+                              ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString() }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
+                              : charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')
+                          };
+                          setCharGPTMemory(updated);
+                          saveCharGPTMemory(updated);
+                          if (onMemoryUpdate) onMemoryUpdate(updated);
+                          setIsEditingName(false);
+                        } else if (e.key === 'Escape') {
+                          setIsEditingName(false);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = nameInputValue.trim();
+                        const updated: CharGPTMemory = {
+                          ...charGPTMemory,
+                          userName: trimmed || undefined,
+                          learnedRules: trimmed
+                            ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString() }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
+                            : charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')
+                        };
+                        setCharGPTMemory(updated);
+                        saveCharGPTMemory(updated);
+                        if (onMemoryUpdate) onMemoryUpdate(updated);
+                        setIsEditingName(false);
+                      }}
+                      className="px-2.5 py-1 bg-gradient-to-r from-purple-600 to-amber-500 hover:opacity-95 text-zinc-950 font-bold text-xs rounded-lg transition-all cursor-pointer shrink-0"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingName(false)}
+                      className="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs rounded-lg transition-all cursor-pointer shrink-0"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {!isEditingName && (
+              <button
+                type="button"
+                onClick={() => {
+                  setNameInputValue(charGPTMemory.userName || '');
+                  setIsEditingName(true);
+                }}
+                className="px-3 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 font-bold text-xs rounded-lg transition-all cursor-pointer shrink-0 self-start sm:self-auto"
+              >
+                {charGPTMemory.userName ? 'Edit Name' : 'Set Name'}
+              </button>
+            )}
           </div>
 
           {/* TEACH FORM */}
@@ -2915,11 +3404,11 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                     CharGPT Automatic Machine Learning Engine
                   </span>
                   <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded font-bold">
-                    ⚡ Auto-Training Active (App-Sandboxed Only)
+                    ⚡ Auto-Training Active (Live Cloud Server Sync)
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-300">
-                  CharGPT automatically analyzes your cook logs, flavor ratings, and wood blends in real-time. Learning occurs strictly within Smoke Stack local app memory with zero external device access.
+                  CharGPT automatically analyzes your cook logs, flavor ratings, and wood blends in real-time. Learned insights, rules, and memory optimizations sync directly to the cloud server for live AI model evolution across all sessions.
                 </p>
               </div>
 
@@ -2928,7 +3417,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 onClick={() => {
                   const updated = autoEvolveCharGPTMemory(cookLogs, charGPTMemory);
                   setCharGPTMemory(updated);
-                  alert(`🎉 Sandboxed In-App ML Re-Training Complete! Analyzed ${cookLogs.length} cook logs and updated ${updated.learnedRules.length} culinary preference rules.`);
+                  alert(`🎉 Live Cloud ML Re-Training Complete! Analyzed ${cookLogs.length} cook logs and updated ${updated.learnedRules.length} culinary preference rules.`);
                 }}
                 className="px-3.5 py-2 bg-gradient-to-r from-purple-500 to-amber-500 hover:opacity-95 text-zinc-950 font-black text-xs rounded-xl shadow transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 self-start sm:self-auto"
               >
@@ -3061,14 +3550,14 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 sm:p-3.5 space-y-1">
               <span className="text-[10px] uppercase font-bold text-zinc-400">Preferred Wood Pellets</span>
               <div className="text-xs font-bold text-amber-400 truncate">
-                {charGPTMemory.preferredWoodTypes.join(', ') || 'Pecan & Post Oak'}
+                {charGPTMemory.preferredWoodTypes.length > 0 ? charGPTMemory.preferredWoodTypes.join(', ') : 'None Recorded'}
               </div>
             </div>
 
             <div className="bg-[#121212] border border-[#2a2a2a] rounded-xl p-3 sm:p-3.5 space-y-1">
               <span className="text-[10px] uppercase font-bold text-zinc-400">Top Meat Cuts</span>
               <div className="text-xs font-bold text-orange-400 truncate">
-                {charGPTMemory.favoriteProteins.join(', ') || 'Beef Brisket'}
+                {charGPTMemory.favoriteProteins.length > 0 ? charGPTMemory.favoriteProteins.join(', ') : 'None Recorded'}
               </div>
             </div>
 
@@ -3108,6 +3597,28 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 </span>
               </div>
             </div>
+
+            {/* Account Sync Actions */}
+            <div className="pt-3 border-t border-[#2a2a2a] flex flex-wrap items-center justify-between gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  saveCharGPTMemory(charGPTMemory);
+                  try {
+                    const rawAcc = localStorage.getItem('pitmaster_local_user_account');
+                    const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
+                    acc.charGPTMemory = charGPTMemory;
+                    localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                  } catch (e) {}
+                  setTeachSuccessNotice(`✨ Memory Vault (${charGPTMemory.learnedRules.length} rules) continuously synced to Pitmaster Account & AI server!`);
+                  setTimeout(() => setTeachSuccessNotice(null), 4000);
+                }}
+                className="px-3 py-2 bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-500 hover:to-orange-400 text-white font-extrabold text-xs rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-md"
+              >
+                <Brain className="w-4 h-4 text-purple-200" />
+                <span>Sync Memory Vault to AI Server</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3121,6 +3632,628 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
           />
         </div>
       )}
+
+      {/* TAB 8: PITMASTER COURSES & ACADEMY RESEARCH DATA ENGINE (10,000-HOUR UNLOCK) */}
+      {activeTab === 'pitmaster_courses' && (
+        <div className="space-y-4 animate-fadeIn">
+          {/* Top Status & Unlock Header */}
+          <div className="bg-gradient-to-r from-[#161b22] via-[#101e18] to-[#121921] border border-emerald-500/30 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2">
+                  <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-500/40 text-emerald-300 shrink-0">
+                    <GraduationCap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center space-x-2">
+                      <span>CharGPT Pitmaster Courses & Academy Research</span>
+                      {is10kUnlocked && (
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-extrabold flex items-center space-x-1">
+                          <Zap className="w-3 h-3 text-emerald-400" />
+                          <span>10k Unlocked</span>
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs text-zinc-300">
+                      Gather, research, and synthesize curriculum data on top barbecue academies, masterclasses, and competition certifications.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="bg-[#181818] p-3 rounded-xl border border-[#333] space-y-1.5 min-w-[240px] shrink-0">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-400 font-bold">Accumulated Operating Hours:</span>
+                  <strong className={`font-mono font-extrabold ${is10kUnlocked ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {baseAccumulatedHours.toLocaleString(undefined, { maximumFractionDigits: 1 })} / 10,000 hrs
+                  </strong>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden border border-zinc-700">
+                  <div
+                    className={`h-full transition-all duration-500 ${
+                      is10kUnlocked ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                    }`}
+                    style={{ width: `${Math.min(100, (baseAccumulatedHours / 10000) * 100)}%` }}
+                  />
+                </div>
+
+                <div className="flex justify-between items-center text-[10px] text-zinc-400 pt-0.5">
+                  {is10kUnlocked ? (
+                    <span className="text-emerald-400 font-extrabold flex items-center space-x-1">
+                      <CheckCircle className="w-3 h-3 text-emerald-400 inline mr-1" />
+                      <span>🎓 10,000h Master Academy Unlocked</span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 font-bold">
+                      {((baseAccumulatedHours / 10000) * 100).toFixed(1)}% Completed — Unlocks at 10,000 hours
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Locked Gate View if < 10,000 hours */}
+          {!is10kUnlocked && (
+            <div className="bg-[#181622] border border-amber-500/30 rounded-2xl p-6 text-center space-y-4 shadow-2xl">
+              <div className="w-16 h-16 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <Lock className="w-8 h-8" />
+              </div>
+              <div className="max-w-md mx-auto space-y-2">
+                <h4 className="text-base font-black text-white">10,000-Hour Pitmaster Academy Threshold</h4>
+                <p className="text-xs text-zinc-300 leading-relaxed">
+                  CharGPT's specialized Pitmaster Course Research & Data Gathering Engine unlocks once you have accumulated 10,000 total runtime hours across your cook logbooks and smoker rigs.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 max-w-lg mx-auto bg-[#121018] p-3 rounded-xl border border-purple-500/20 text-xs">
+                <div>
+                  <span className="text-zinc-400 text-[10px] block">Cook Log Hours</span>
+                  <strong className="text-purple-300 font-mono">{totalLogHours.toFixed(1)} h</strong>
+                </div>
+                <div>
+                  <span className="text-zinc-400 text-[10px] block">Smoker Rig Hours</span>
+                  <strong className="text-amber-300 font-mono">{profileHours.toFixed(1)} h</strong>
+                </div>
+                <div>
+                  <span className="text-zinc-400 text-[10px] block">Current Progress</span>
+                  <strong className="text-emerald-400 font-mono">{((baseAccumulatedHours / 10000) * 100).toFixed(1)}%</strong>
+                </div>
+              </div>
+
+
+            </div>
+          )}
+
+          {/* Unlocked Full Course Data Gathering & Study Suite */}
+          {is10kUnlocked && (
+            <div className="space-y-4">
+              {/* Study Mode Selector Sub-Tabs */}
+              <div className="flex items-center space-x-2 bg-[#121212] p-1.5 rounded-2xl border border-[#2a2a2a]">
+                <button
+                  type="button"
+                  onClick={() => setStudyMode('courses')}
+                  className={`flex-1 py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                    studyMode === 'courses'
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-950 shadow-md font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <GraduationCap className="w-4 h-4 shrink-0" />
+                  <span>Academy & Courses Archive</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStudyMode('flashcards')}
+                  className={`flex-1 py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                    studyMode === 'flashcards'
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-950 shadow-md font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4 shrink-0" />
+                  <span>⚡ 10k Study Flashcards</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStudyMode('exam_sim')}
+                  className={`flex-1 py-2 px-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                    studyMode === 'exam_sim'
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-zinc-950 shadow-md font-black'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Award className="w-4 h-4 shrink-0" />
+                  <span>🏅 Practice Exam Simulator</span>
+                </button>
+              </div>
+
+              {/* MODE 1: COURSES & ACADEMY ARCHIVE */}
+              {studyMode === 'courses' && (
+                <div className="space-y-4">
+                  {/* Live Search & Data Gathering Bar */}
+                  <div className="bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 space-y-3 shadow-lg">
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      value={courseSearchQuery}
+                      onChange={(e) => setCourseSearchQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleGatherCourseData()}
+                      placeholder="Search courses e.g. Franklin Brisket, Competition Bootcamp, KCBS Judge..."
+                      className="w-full bg-[#121212] border border-[#333] text-white text-xs rounded-xl pl-9 pr-3 py-2.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGatherCourseData()}
+                    disabled={isGatheringCourses}
+                    className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center space-x-2 shrink-0 disabled:opacity-50"
+                  >
+                    {isGatheringCourses ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-zinc-950" />
+                        <span>Gathering Data...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Globe className="w-4 h-4 text-zinc-950" />
+                        <span>🔎 Gather Course Data</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Quick Search Chips */}
+                <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
+                  <span className="text-[10px] text-zinc-400 font-bold uppercase shrink-0">Quick Gather:</span>
+                  {[
+                    '📜 Official Certifications',
+                    '🎓 Aaron Franklin Brisket',
+                    '🏆 Myron Mixon Competition',
+                    '🍖 Butchery & Meat Science',
+                    '🏅 KCBS Certified Judge',
+                    '🔥 Pellet Smoker Precision',
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => {
+                        const clean = chip.replace(/^[^\w]+/, '').trim();
+                        if (chip.includes('Certifications')) {
+                          setCourseCategoryFilter('certificates');
+                          setCourseSearchQuery('');
+                        } else {
+                          setCourseSearchQuery(clean);
+                          handleGatherCourseData(clean);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-[#222] hover:bg-[#2e2e2e] text-zinc-300 border border-[#333] rounded-lg text-[11px] font-medium shrink-0 transition-all cursor-pointer"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {courseNotice && (
+                  <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold animate-fadeIn">
+                    {courseNotice}
+                  </div>
+                )}
+              </div>
+
+              {/* Category Filter Tabs */}
+              <div className="flex items-center space-x-1 overflow-x-auto pb-1 no-scrollbar border-b border-[#222]">
+                {[
+                  { id: 'all', label: 'All Courses & Certs' },
+                  { id: 'certificates', label: '📜 Master Certificate Programs' },
+                  { id: 'brisket_offset', label: 'Texas Off-Set & Brisket' },
+                  { id: 'competition', label: 'Competition BBQ' },
+                  { id: 'pellet_bullet', label: 'Pellet & Bullet Precision' },
+                  { id: 'science_butchery', label: 'Science & Butchery' },
+                  { id: 'judging_rules', label: 'Judging & Rules' },
+                  { id: 'international', label: 'International & Live Fire' },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setCourseCategoryFilter(cat.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all cursor-pointer ${
+                      courseCategoryFilter === cat.id
+                        ? 'bg-emerald-500 text-zinc-950 shadow-md'
+                        : 'bg-[#181818] text-zinc-400 hover:text-white border border-[#2a2a2a]'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* CharGPT Research Synthesis Box */}
+              {courseResearchSummary && (
+                <div className="bg-[#121a15] border border-emerald-500/30 rounded-2xl p-4 space-y-2 animate-fadeIn">
+                  <div className="flex items-center space-x-2 text-emerald-400 font-extrabold text-xs">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>CharGPT Pitmaster Academy Research Synthesis</span>
+                  </div>
+                  <p className="text-xs text-zinc-200 leading-relaxed">
+                    {courseResearchSummary}
+                  </p>
+                </div>
+              )}
+
+              {/* Gathered Courses Cards Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {coursesList
+                  .filter((c) => {
+                    const matchCategory = courseCategoryFilter === 'all' || c.category === courseCategoryFilter;
+                    const q = courseSearchQuery.toLowerCase().trim();
+                    const matchSearch =
+                      !q ||
+                      c.title.toLowerCase().includes(q) ||
+                      c.instructor.toLowerCase().includes(q) ||
+                      c.academy.toLowerCase().includes(q) ||
+                      c.description.toLowerCase().includes(q);
+                    return matchCategory && matchSearch;
+                  })
+                  .map((course) => (
+                    <div
+                      key={course.id}
+                      className="bg-[#181818] border border-[#2a2a2a] hover:border-emerald-500/40 rounded-2xl p-4 space-y-3 shadow-lg transition-all flex flex-col justify-between"
+                    >
+                      <div className="space-y-2.5">
+                        {/* Header Badges */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
+                            {course.categoryLabel}
+                          </span>
+                          <span className="text-[10px] font-bold bg-[#222] text-zinc-300 px-2 py-0.5 rounded-md border border-[#333]">
+                            {course.format}
+                          </span>
+                        </div>
+
+                        {/* Title & Instructor */}
+                        <div>
+                          <h4 className="text-sm font-black text-white leading-snug">{course.title}</h4>
+                          <p className="text-xs text-emerald-400 font-bold flex items-center space-x-1 mt-0.5">
+                            <span>👨‍🍳 Instructor: {course.instructor}</span>
+                            <span className="text-zinc-500">•</span>
+                            <span className="text-zinc-400 font-normal">{course.academy}</span>
+                          </p>
+                        </div>
+
+                        {/* Meta info row */}
+                        <div className="grid grid-cols-3 gap-1 bg-[#121212] p-2 rounded-xl border border-[#222] text-[11px]">
+                          <div>
+                            <span className="text-zinc-500 text-[9px] uppercase font-bold block">Cost</span>
+                            <span className="text-amber-300 font-bold">{course.estimatedCost}</span>
+                          </div>
+                          <div>
+                            <span className="text-zinc-500 text-[9px] uppercase font-bold block">Duration</span>
+                            <span className="text-zinc-200 font-medium">{course.duration}</span>
+                          </div>
+                          <div>
+                            <span className="text-zinc-500 text-[9px] uppercase font-bold block">Rating</span>
+                            <span className="text-amber-400 font-extrabold flex items-center space-x-0.5">
+                              <Star className="w-3 h-3 fill-amber-400 inline shrink-0 mr-0.5" />
+                              <span>{course.rating} ({course.reviewCount})</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Certification Awarded & Prerequisites */}
+                        <div className="space-y-1.5">
+                          {course.certificationAwarded && (
+                            <div className="p-2 bg-[#121f18] border border-emerald-500/30 rounded-xl flex items-center space-x-2 text-[11px] text-emerald-300">
+                              <GraduationCap className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <span className="font-extrabold truncate">Credential: {course.certificationAwarded}</span>
+                            </div>
+                          )}
+                          {course.prerequisites && (
+                            <div className="px-2 py-1 bg-[#181510] border border-amber-500/20 rounded-lg text-[10px] text-amber-300/80">
+                              <strong>Prerequisite:</strong> {course.prerequisites}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Description */}
+                        <p className="text-xs text-zinc-300 leading-relaxed">{course.description}</p>
+
+                        {/* Curriculum Highlights */}
+                        {course.curriculumHighlights && course.curriculumHighlights.length > 0 && (
+                          <div className="space-y-1 bg-[#141414] p-2.5 rounded-xl border border-[#252525]">
+                            <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider block">
+                              📚 Curriculum & Technique Drills:
+                            </span>
+                            <ul className="space-y-1 text-[11px] text-zinc-300">
+                              {course.curriculumHighlights.map((hl, idx) => (
+                                <li key={idx} className="flex items-start space-x-1.5">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                                  <span>{hl}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* CharGPT Evaluation */}
+                        {course.charGPTTakeaway && (
+                          <div className="p-2.5 bg-emerald-950/20 border border-emerald-500/20 rounded-xl text-[11px] text-emerald-200/90 leading-relaxed">
+                            💡 <strong>CharGPT Evaluation:</strong> {course.charGPTTakeaway}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Action Buttons */}
+                      <div className="pt-2 border-t border-[#222] flex items-center justify-between gap-2 mt-3">
+                        {course.websiteUrl ? (
+                          <a
+                            href={course.websiteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1.5 bg-[#222] hover:bg-[#2a2a2a] text-zinc-200 border border-[#333] font-bold text-xs rounded-xl transition-all flex items-center space-x-1 shrink-0"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+                            <span>Official Website</span>
+                          </a>
+                        ) : (
+                          <span className="text-[10px] text-zinc-500">CharGPT Direct Research Record</span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('chat');
+                            setPrompt(`Please give me a detailed CharGPT pitmaster breakdown and study roadmap for "${course.title}" taught by ${course.instructor}. How can I apply these techniques to my ${profile?.name || 'smoker'}?`);
+                          }}
+                          className="px-3 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-extrabold text-xs rounded-xl shadow transition-all cursor-pointer flex items-center space-x-1"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
+                          <span>Consult CharGPT</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* MODE 2: FLASHCARD STUDY SYSTEM */}
+          {studyMode === 'flashcards' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-6 shadow-xl space-y-4 max-w-2xl mx-auto text-center">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span className="font-extrabold text-emerald-400 uppercase tracking-wider flex items-center space-x-1">
+                    <BookOpen className="w-3.5 h-3.5 inline mr-1" />
+                    <span>{CERTIFICATION_FLASHCARDS[currentFlashcardIndex].categoryLabel}</span>
+                  </span>
+                  <span className="font-mono text-zinc-300">
+                    Card {currentFlashcardIndex + 1} of {CERTIFICATION_FLASHCARDS.length}
+                  </span>
+                </div>
+
+                {/* Flip Card Deck Container */}
+                <div
+                  onClick={() => setIsFlashcardFlipped(!isFlashcardFlipped)}
+                  className={`p-6 sm:p-8 rounded-2xl border transition-all duration-300 cursor-pointer min-h-[220px] flex flex-col justify-center items-center relative shadow-2xl ${
+                    isFlashcardFlipped
+                      ? 'bg-gradient-to-b from-[#12221a] to-[#101c16] border-emerald-500/50 text-emerald-100'
+                      : 'bg-gradient-to-b from-[#1c1a24] to-[#14121a] border-amber-500/30 text-amber-50 hover:border-amber-500/50'
+                  }`}
+                >
+                  <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest absolute top-3 right-3 bg-[#111] px-2 py-0.5 rounded border border-[#333]">
+                    {isFlashcardFlipped ? 'Answer (Click to Flip)' : 'Question (Click to Flip)'}
+                  </span>
+
+                  {!isFlashcardFlipped ? (
+                    <div className="space-y-3">
+                      <HelpCircle className="w-8 h-8 text-amber-400 mx-auto" />
+                      <h3 className="text-base sm:text-lg font-black leading-snug">
+                        {CERTIFICATION_FLASHCARDS[currentFlashcardIndex].question}
+                      </h3>
+                      <p className="text-xs text-amber-300/70 font-medium">Click card to reveal answer & formula</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 text-left w-full">
+                      <div className="flex items-center space-x-2 text-emerald-400 font-black text-sm border-b border-emerald-500/20 pb-2">
+                        <CheckCircle className="w-5 h-5 shrink-0" />
+                        <span>{CERTIFICATION_FLASHCARDS[currentFlashcardIndex].answer}</span>
+                      </div>
+                      <p className="text-xs text-zinc-200 leading-relaxed">
+                        {CERTIFICATION_FLASHCARDS[currentFlashcardIndex].explanation}
+                      </p>
+                      {CERTIFICATION_FLASHCARDS[currentFlashcardIndex].keyFormula && (
+                        <div className="p-2.5 bg-[#0a140f] border border-emerald-500/30 rounded-xl font-mono text-[11px] text-emerald-300">
+                          📐 <strong>Formula:</strong> {CERTIFICATION_FLASHCARDS[currentFlashcardIndex].keyFormula}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Flashcard Navigation */}
+                <div className="flex items-center justify-between gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handlePrevFlashcard}
+                    className="px-4 py-2 bg-[#222] hover:bg-[#2e2e2e] text-zinc-200 border border-[#333] rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    ← Previous
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsFlashcardFlipped(!isFlashcardFlipped)}
+                    className="px-4 py-2 bg-[#1a2e24] hover:bg-[#223d30] text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-extrabold transition-all cursor-pointer flex items-center space-x-1"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>Flip Card</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleNextFlashcard}
+                    className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black rounded-xl text-xs transition-all cursor-pointer"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODE 3: PRACTICE EXAM SIMULATOR */}
+          {studyMode === 'exam_sim' && (
+            <div className="space-y-4 animate-fadeIn">
+              <div className="bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#2a2a2a] pb-3">
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center space-x-2">
+                      <Award className="w-5 h-5 text-emerald-400" />
+                      <span>Pitmaster Certification Practice Exam Simulator</span>
+                    </h3>
+                    <p className="text-xs text-zinc-300">
+                      Test your knowledge on thermal physics, KCBS rules, ServSafe HACCP, and commercial pitmaster yield calculations.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleResetExam}
+                    className="px-3 py-1.5 bg-[#222] hover:bg-[#333] text-zinc-300 border border-[#333] rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0"
+                  >
+                    Reset Exam Answers
+                  </button>
+                </div>
+
+                {/* Question List */}
+                <div className="space-y-5">
+                  {PRACTICE_EXAM_QUESTIONS.map((q, idx) => {
+                    const selectedOpt = examAnswers[q.id];
+                    const isCorrect = selectedOpt === q.correctOptionIndex;
+
+                    return (
+                      <div key={q.id} className="bg-[#121212] border border-[#282828] rounded-xl p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                            Question {idx + 1}: {q.examLabel}
+                          </span>
+                          {examSubmitted && (
+                            <span className={`text-xs font-extrabold flex items-center space-x-1 ${isCorrect ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isCorrect ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                              <span>{isCorrect ? 'Correct (+1)' : 'Incorrect'}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs sm:text-sm font-bold text-white leading-relaxed">{q.question}</p>
+
+                        {/* Options list */}
+                        <div className="space-y-2">
+                          {q.options.map((opt, optIdx) => {
+                            const isThisSelected = selectedOpt === optIdx;
+                            let btnStyle = 'bg-[#1a1a1a] border-[#333] text-zinc-300 hover:bg-[#252525]';
+
+                            if (examSubmitted) {
+                              if (optIdx === q.correctOptionIndex) {
+                                btnStyle = 'bg-emerald-950/60 border-emerald-500 text-emerald-200 font-bold';
+                              } else if (isThisSelected && !isCorrect) {
+                                btnStyle = 'bg-rose-950/60 border-rose-500 text-rose-200';
+                              }
+                            } else if (isThisSelected) {
+                              btnStyle = 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold';
+                            }
+
+                            return (
+                              <button
+                                key={optIdx}
+                                type="button"
+                                onClick={() => handleSelectExamOption(q.id, optIdx)}
+                                className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all cursor-pointer flex items-start space-x-2.5 ${btnStyle}`}
+                              >
+                                <span className="font-mono font-black text-zinc-400 shrink-0">
+                                  {String.fromCharCode(65 + optIdx)}.
+                                </span>
+                                <span className="leading-relaxed">{opt}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Explanation & CharGPT Pro-Tip */}
+                        {examSubmitted && (
+                          <div className="p-3 bg-[#161a18] border border-emerald-500/30 rounded-xl space-y-1.5 text-xs">
+                            <p className="text-zinc-200">
+                              <strong>Explanation:</strong> {q.explanation}
+                            </p>
+                            <div className="text-emerald-300 font-bold flex items-center space-x-1 pt-1">
+                              <Brain className="w-4 h-4 text-emerald-400 shrink-0" />
+                              <span>{q.charGPTTip}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Exam Submit & Score Summary Footer */}
+                <div className="p-4 bg-[#141414] border border-[#2a2a2a] rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 pt-3">
+                  <div>
+                    {!examSubmitted ? (
+                      <p className="text-xs text-zinc-400 font-medium">
+                        Answered {Object.keys(examAnswers).length} of {PRACTICE_EXAM_QUESTIONS.length} questions
+                      </p>
+                    ) : (
+                      <div className="space-y-0.5">
+                        <span className="text-xs text-zinc-400 uppercase font-bold block">Exam Result:</span>
+                        <strong className="text-emerald-400 text-sm font-black font-mono">
+                          Score:{' '}
+                          {
+                            PRACTICE_EXAM_QUESTIONS.filter(
+                              (q) => examAnswers[q.id] === q.correctOptionIndex
+                            ).length
+                          }{' '}
+                          / {PRACTICE_EXAM_QUESTIONS.length} (
+                          {Math.round(
+                            (PRACTICE_EXAM_QUESTIONS.filter(
+                              (q) => examAnswers[q.id] === q.correctOptionIndex
+                            ).length /
+                              PRACTICE_EXAM_QUESTIONS.length) *
+                              100
+                          )}
+                          %)
+                        </strong>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setExamSubmitted(true)}
+                    disabled={examSubmitted || Object.keys(examAnswers).length === 0}
+                    className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-zinc-950 font-black text-xs rounded-xl shadow-lg transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {examSubmitted ? 'Exam Submitted ✓' : 'Grade Practice Exam'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+        </div>
+      )}
+
     </div>
   );
 };

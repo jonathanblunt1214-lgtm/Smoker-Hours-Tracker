@@ -1,4 +1,4 @@
-import { SmokerProfile, CookLog, CustomSmokerSpec, ManufacturerSmokerSpec, SmokerModItem } from '../types';
+import { SmokerProfile, CookLog, FuelLog, CustomSmokerSpec, ManufacturerSmokerSpec, SmokerModItem } from '../types';
 import { KNOWN_SMOKER_MODS } from '../data/smokerModsDatabase';
 import { calculateBlendPhysics } from './fuelBlendPhysics';
 
@@ -14,6 +14,8 @@ export interface EffectiveSmokerSpecs {
   unmodifiedHighHeatBurnRateLbsHr: number;
   hopperCapacityLbs: number; // (with mods applied)
   unmodifiedHopperCapacityLbs: number;
+  bowlCapacityLbs: number;
+  unmodifiedBowlCapacityLbs: number;
   cookingAreaSqIn: number; // (with mods applied)
   unmodifiedCookingAreaSqIn: number;
   thermalEfficiencyRating: 'Extreme' | 'High' | 'Standard' | 'Moderate';
@@ -106,33 +108,37 @@ export function getEffectiveSmokerSpecs(profile?: SmokerProfile | null): Effecti
   const fuelSavingsPercent = Math.max(0, Math.round((1 - modBurnMultiplier) * 100));
   const heatLossReductionPct = Math.min(75, Math.round(modHeatLossReduction));
 
-  let baseDisplayName = 'Standard Pit';
-  let baseBrandOrBuilder = 'Generic Manufacturer';
-  let baseModelOrType = 'Pellet Smoker / Grill';
-  let baseCategory = 'Pellet Smoker / Grill';
-  let baseFuelType: 'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas' = 'Pellets';
-  let baseBurnRate = 1.20;
-  let baseHighHeatBurnRate = 2.50;
-  let baseHopperCapacity = 20;
-  let baseCookingArea = 800;
-  let baseThermalRating: 'Extreme' | 'High' | 'Standard' | 'Moderate' = 'High';
+  const isProfileUnassigned = !profile?.name || profile.name.trim() === '' || profile.name === 'None Selected';
+
+  let baseDisplayName = isProfileUnassigned ? 'None Selected' : (profile?.name || '');
+  let baseBrandOrBuilder = isProfileUnassigned ? '' : (profile?.model || profile?.name || '');
+  let baseModelOrType = isProfileUnassigned ? '' : (profile?.model || profile?.smokerType || '');
+  let baseCategory = isProfileUnassigned ? '' : (profile?.smokerType || '');
+  let baseFuelType: 'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas' = profile?.fuelType || 'Pellets';
+  let baseBurnRate = isProfileUnassigned ? 0 : 1.20;
+  let baseHighHeatBurnRate = isProfileUnassigned ? 0 : 2.50;
+  let baseHopperCapacity = profile?.pelletHopperCapacityLbs || 0;
+  let baseBowlCapacity = profile?.bowlCapacityLbs || 0;
+  let baseCookingArea = isProfileUnassigned ? 0 : 800;
+  let baseThermalRating: 'Extreme' | 'High' | 'Standard' | 'Moderate' = 'Standard';
   let baseThermalMultiplier = 1.0;
-  let baseMetalGaugeOrInsulation = 'Double-Wall Insulated Steel';
-  let baseDraftOrController = 'PID Wi-Fi Controller';
+  let baseMetalGaugeOrInsulation = isProfileUnassigned ? '' : 'Double-Wall Insulated Steel';
+  let baseDraftOrController = isProfileUnassigned ? '' : 'PID Wi-Fi Controller';
   let isCustom = false;
   let isVerifiedMfg = false;
 
-  if (profile) {
+  if (profile && !isProfileUnassigned) {
     if (profile.isCustomBuilt && profile.customSpecs) {
       const spec = profile.customSpecs;
-      baseDisplayName = spec.name;
+      baseDisplayName = spec.name || 'Custom Rig';
       baseBrandOrBuilder = spec.builderName || 'Custom Built';
       baseModelOrType = spec.smokerType || 'Custom Smoker';
       baseCategory = spec.smokerType || 'Custom Smoker';
       baseFuelType = spec.fuelType || 'Wood Splits';
       baseBurnRate = spec.baselineBurnRateLbsHr || 1.25;
       baseHighHeatBurnRate = Number((spec.baselineBurnRateLbsHr * 2.0).toFixed(2)) || 2.50;
-      baseHopperCapacity = spec.hopperCapacityLbs || profile.pelletHopperCapacityLbs || 30;
+      baseHopperCapacity = spec.hopperCapacityLbs ?? profile.pelletHopperCapacityLbs ?? 0;
+      baseBowlCapacity = spec.bowlCapacityLbs ?? profile.bowlCapacityLbs ?? 0;
       baseCookingArea = spec.chamberVolumeSqIn || 1200;
       baseThermalRating = 'High';
       baseThermalMultiplier = 1.05;
@@ -148,14 +154,15 @@ export function getEffectiveSmokerSpecs(profile?: SmokerProfile | null): Effecti
         Standard: 1.00,
         Moderate: 0.85,
       };
-      baseDisplayName = `${spec.brand} ${spec.model}`;
+      baseDisplayName = `${spec.brand} ${spec.model}`.trim() || 'Manufacturer Rig';
       baseBrandOrBuilder = spec.brand;
       baseModelOrType = spec.model;
       baseCategory = spec.category || 'Manufacturer Smoker';
       baseFuelType = spec.fuelType || profile.fuelType || 'Pellets';
       baseBurnRate = spec.factoryBaselineBurnRateLbsHr || 1.20;
       baseHighHeatBurnRate = spec.factoryHighHeatBurnRateLbsHr || 2.50;
-      baseHopperCapacity = spec.hopperCapacityLbs || profile.pelletHopperCapacityLbs || 22;
+      baseHopperCapacity = spec.hopperCapacityLbs ?? profile.pelletHopperCapacityLbs ?? 0;
+      baseBowlCapacity = spec.bowlCapacityLbs ?? profile.bowlCapacityLbs ?? 0;
       baseCookingArea = spec.cookingAreaSqIn || 850;
       baseThermalRating = spec.thermalEfficiencyRating || 'High';
       baseThermalMultiplier = ratingMap[spec.thermalEfficiencyRating] || 1.0;
@@ -164,12 +171,12 @@ export function getEffectiveSmokerSpecs(profile?: SmokerProfile | null): Effecti
       isCustom = false;
       isVerifiedMfg = !!spec.isVerifiedManufacturerData;
     } else {
-      baseDisplayName = profile.name || 'Active Smoker';
+      baseDisplayName = profile.name || 'Unassigned Rig';
       baseBrandOrBuilder = profile.name || 'Pit Brand';
       baseModelOrType = profile.model || profile.smokerType || 'Smoker';
       baseCategory = profile.smokerType || 'Vertical Pellet Smoker';
       baseFuelType = profile.fuelType || 'Pellets';
-      baseHopperCapacity = profile.pelletHopperCapacityLbs || 20;
+      baseHopperCapacity = profile.pelletHopperCapacityLbs || 0;
       isCustom = false;
       isVerifiedMfg = false;
     }
@@ -184,7 +191,7 @@ export function getEffectiveSmokerSpecs(profile?: SmokerProfile | null): Effecti
 
   if (profile?.activeBlendComponents && profile.activeBlendComponents.length > 0) {
     const physics = calculateBlendPhysics(profile.activeBlendComponents);
-    activeFuelBlendName = profile.fuelOnHand || 'Custom Wood Blend';
+    activeFuelBlendName = profile.activeFuelName || (profile.fuelOnHand && !/^\d/.test(profile.fuelOnHand.trim()) ? profile.fuelOnHand : 'Custom Wood Blend');
     activeFuelBlendBtuPerLb = physics.weightedBtuPerLb;
     activeFuelBlendEfficiencyRating = physics.calculatedEfficiencyRating;
 
@@ -249,6 +256,8 @@ export function getEffectiveSmokerSpecs(profile?: SmokerProfile | null): Effecti
     unmodifiedHighHeatBurnRateLbsHr: baseHighHeatBurnRate,
     hopperCapacityLbs: effectiveHopperCapacity,
     unmodifiedHopperCapacityLbs: baseHopperCapacity,
+    bowlCapacityLbs: baseBowlCapacity,
+    unmodifiedBowlCapacityLbs: baseBowlCapacity,
     cookingAreaSqIn: effectiveCookingArea,
     unmodifiedCookingAreaSqIn: baseCookingArea,
     thermalEfficiencyRating: baseThermalRating,
@@ -292,7 +301,7 @@ export function calculateGlobalBurnEfficiencyRate(
 
   let actualRate = specs.baselineBurnRateLbsHr;
   if (cookLogs && cookLogs.length > 0) {
-    const valid = cookLogs.filter((c) => c.hoursLogged > 0 && c.fuelLbsConsumed > 0);
+    const valid = cookLogs.filter((c) => c.hoursLogged > 0 && c.fuelLbsConsumed > 0 && c.isPublishedToTotalHours === true);
     const totalHours = valid.reduce((acc, c) => acc + c.hoursLogged, 0);
     const totalFuel = valid.reduce((acc, c) => acc + c.fuelLbsConsumed, 0);
     if (totalHours > 0) {
@@ -350,3 +359,222 @@ export function calculateFuelConsumptionLbs(
 
   return Number((durationHours * burnRate).toFixed(2));
 }
+
+export interface DetailedFuelTelemetry {
+  fuelTypeKey: 'Wood Splits' | 'Gas' | 'Pellets' | 'Charcoal' | 'Electric';
+  fuelTypeDisplayName: string;
+  burnRateLbsHr: number;
+  // Common metrics
+  totalConsumedLbs: number;
+  inventoryLbsOnHand: number;
+  hoursUntilEmpty: number;
+  costPerHour225F: number;
+  // Propane / Gas specific
+  lpGallonsConsumed?: number;
+  lpGallonsOnHand?: number;
+  tankCapacityLbs?: number;
+  tankCapacityGallons?: number;
+  tankPercentFull?: number;
+  hoursRemainingOnTank?: number;
+  estimated20lbTanksUsed?: number;
+  // Stick-Burner / Wood Split specific
+  splitLogsConsumed?: number;
+  splitLogsOnHand?: number;
+  splitLogsPerHour?: number;
+  fireboxRestockIntervalMinutes?: number;
+  // Pellet / Hopper specific
+  hopperCapacityLbs?: number;
+  hopperPercentFull?: number;
+  // Summary
+  telemetrySummaryLabel: string;
+  telemetryStatusBadge: string;
+}
+
+/**
+ * Calculates specialized multi-fuel telemetry based on selected smoker type and fuel type:
+ * - Wood Splits (Stick-Burning Offset Wood Smokers)
+ * - Gas (Propane / LP Gas Smokers)
+ * - Pellets (Pellet Smokers & Grills)
+ * - Charcoal & Electric
+ */
+export function calculateFuelTelemetryBySmokerType(
+  profile?: SmokerProfile | null,
+  cookLogs: CookLog[] = [],
+  fuelLogs: FuelLog[] = []
+): DetailedFuelTelemetry {
+  const specs = getEffectiveSmokerSpecs(profile);
+  const rawFuelType = specs.fuelType || profile?.fuelType || 'Pellets';
+
+  let fuelTypeKey: 'Wood Splits' | 'Gas' | 'Pellets' | 'Charcoal' | 'Electric' = 'Pellets';
+  if (rawFuelType === 'Wood Splits' || specs.category.includes('Stick-Burning') || specs.modelOrType.includes('Offset')) {
+    fuelTypeKey = 'Wood Splits';
+  } else if (rawFuelType === 'Gas' || specs.category.includes('Gas') || specs.modelOrType.includes('Propane')) {
+    fuelTypeKey = 'Gas';
+  } else if (rawFuelType === 'Charcoal' || specs.category.includes('Charcoal') || specs.category.includes('Kamado')) {
+    fuelTypeKey = 'Charcoal';
+  } else if (rawFuelType === 'Electric') {
+    fuelTypeKey = 'Electric';
+  }
+
+  const burnRateLbsHr = specs.baselineBurnRateLbsHr || 1.20;
+
+  // Inventory & Consumed Math
+  const totalRestockedLbs = fuelLogs.reduce((sum, f) => sum + (f.quantityLbs || 0), 0);
+  const totalConsumedLbs = cookLogs.filter((c) => c.isPublishedToTotalHours === true).reduce((sum, c) => sum + (c.fuelLbsConsumed || 0), 0);
+  const isUnassignedSmoker = !specs.displayName || specs.displayName === 'None Selected' || specs.displayName.includes('Unassigned') || specs.hopperCapacityLbs === 0;
+  const initialPayloadLbs = isUnassignedSmoker ? 0 : (specs.hopperCapacityLbs || 0);
+  const effectiveRestockLbs = totalRestockedLbs > 0 ? totalRestockedLbs : initialPayloadLbs;
+  const inventoryLbsOnHand = Math.max(0, Number((effectiveRestockLbs - totalConsumedLbs).toFixed(1)));
+
+  const hoursUntilEmpty = burnRateLbsHr > 0 ? Number((inventoryLbsOnHand / burnRateLbsHr).toFixed(1)) : 0;
+
+  // Propane calculations (1 Gallon LP = 4.24 Lbs LP)
+  if (fuelTypeKey === 'Gas') {
+    const tankCapacityLbs = specs.hopperCapacityLbs || 20; // 20 lb LP tank
+    const tankCapacityGallons = Number((tankCapacityLbs / 4.24).toFixed(2)); // ~4.72 Gallons
+    const lpGallonsConsumed = Number((totalConsumedLbs / 4.24).toFixed(2));
+    const lpGallonsOnHand = Number((inventoryLbsOnHand / 4.24).toFixed(2));
+
+    const latestCookLbs = cookLogs.length > 0 ? cookLogs[0].fuelLbsConsumed || 0 : 0;
+    const currentTankLbsRemaining = Math.max(0, tankCapacityLbs - latestCookLbs);
+    const tankPercentFull = Math.max(0, Math.min(100, Math.round((currentTankLbsRemaining / tankCapacityLbs) * 100)));
+    const hoursRemainingOnTank = burnRateLbsHr > 0 ? Number((currentTankLbsRemaining / burnRateLbsHr).toFixed(1)) : 0;
+    const estimated20lbTanksUsed = Number((totalConsumedLbs / 20).toFixed(1));
+    const costPerHour225F = Number((burnRateLbsHr * 1.15).toFixed(2)); // ~$1.15/lb LP
+
+    return {
+      fuelTypeKey: 'Gas',
+      fuelTypeDisplayName: 'LP Propane Gas Tank',
+      burnRateLbsHr,
+      totalConsumedLbs,
+      inventoryLbsOnHand,
+      hoursUntilEmpty,
+      costPerHour225F,
+      lpGallonsConsumed,
+      lpGallonsOnHand,
+      tankCapacityLbs,
+      tankCapacityGallons,
+      tankPercentFull,
+      hoursRemainingOnTank,
+      estimated20lbTanksUsed,
+      telemetrySummaryLabel: `${tankPercentFull}% LP Propane Tank (${currentTankLbsRemaining.toFixed(1)} lbs / ${(currentTankLbsRemaining / 4.24).toFixed(1)} gal remaining)`,
+      telemetryStatusBadge: `${hoursRemainingOnTank}h Continuous LP Burn Time`,
+    };
+  }
+
+  // Stick-Burner / Wood Splits calculations (Average 1 split log = ~2.5 lbs)
+  if (fuelTypeKey === 'Wood Splits') {
+    const splitLogsConsumed = Math.round(totalConsumedLbs / 2.5);
+    const splitLogsOnHand = Math.max(0, Math.round(inventoryLbsOnHand / 2.5));
+    const splitLogsPerHour = Number((burnRateLbsHr / 2.5).toFixed(1));
+    const fireboxRestockIntervalMinutes = burnRateLbsHr > 0 ? Math.round((2.5 / burnRateLbsHr) * 60) : 55;
+    const costPerHour225F = Number((burnRateLbsHr * 0.60).toFixed(2)); // ~$0.60/lb cord wood
+
+    return {
+      fuelTypeKey: 'Wood Splits',
+      fuelTypeDisplayName: 'Hardwood Split Logs (Stick Burner)',
+      burnRateLbsHr,
+      totalConsumedLbs,
+      inventoryLbsOnHand,
+      hoursUntilEmpty,
+      costPerHour225F,
+      splitLogsConsumed,
+      splitLogsOnHand,
+      splitLogsPerHour,
+      fireboxRestockIntervalMinutes,
+      telemetrySummaryLabel: `~${splitLogsPerHour} split log/hr (${fireboxRestockIntervalMinutes} min firebox restock rate)`,
+      telemetryStatusBadge: `${splitLogsOnHand} Split Logs On Hand (${hoursUntilEmpty}h run time)`,
+    };
+  }
+
+  // Pellet / Hardwood Pellet calculations
+  const hopperCapacityLbs = isUnassignedSmoker ? 0 : (specs.hopperCapacityLbs || 0);
+  const latestCookLbs = cookLogs.length > 0 ? cookLogs[0].fuelLbsConsumed || 0 : 0;
+  const remainingHopperLbs = hopperCapacityLbs > 0 ? Math.max(0, hopperCapacityLbs - latestCookLbs) : 0;
+  const hopperPercentFull = hopperCapacityLbs > 0 ? Math.max(0, Math.min(100, Math.round((remainingHopperLbs / hopperCapacityLbs) * 100))) : 0;
+  const costPerHour225F = Number((burnRateLbsHr * 0.90).toFixed(2));
+
+  return {
+    fuelTypeKey: 'Pellets',
+    fuelTypeDisplayName: 'Hardwood Pellets',
+    burnRateLbsHr,
+    totalConsumedLbs,
+    inventoryLbsOnHand,
+    hoursUntilEmpty,
+    costPerHour225F,
+    hopperCapacityLbs,
+    hopperPercentFull,
+    telemetrySummaryLabel: `${hopperPercentFull}% Hopper Level (${remainingHopperLbs.toFixed(1)} lbs pellets remaining)`,
+    telemetryStatusBadge: `${hoursUntilEmpty}h Pellet Supply On Hand`,
+  };
+}
+
+/**
+ * Calculates a transparent, explainable Smoker Health Score (0 - 100%)
+ * based on maintenance task status, thermal stability, burn efficiency, and operating age.
+ */
+export function calculateSmokerHealthScore(profile: SmokerProfile): {
+  healthScore: number;
+  maintenanceScore: number;
+  stabilityScore: number;
+  efficiencyScore: number;
+  ageScore: number;
+} {
+  const tasks = profile.maintenanceTasks || [];
+  const currentHours = profile.currentHours || 0;
+
+  // 1. Maintenance Score (40%)
+  let maintenanceScore = 90;
+  if (tasks.length > 0) {
+    const totalTasks = tasks.length;
+    const completedTasks = tasks.filter((t) => {
+      const hoursSince = currentHours - (t.lastPerformedHours || 0);
+      return hoursSince <= (t.intervalHours || 50);
+    }).length;
+    maintenanceScore = Math.round((completedTasks / totalTasks) * 100);
+  }
+
+  // 2. Thermal Stability Score (30%)
+  const specs = getEffectiveSmokerSpecs(profile);
+  const variance = specs.tempStabilityVarianceDegrees || 12;
+  let stabilityScore = 100;
+  if (variance <= 5) stabilityScore = 100;
+  else if (variance <= 10) stabilityScore = 92;
+  else if (variance <= 18) stabilityScore = 82;
+  else if (variance <= 25) stabilityScore = 70;
+  else stabilityScore = 55;
+
+  // 3. Burn Efficiency Score (20%)
+  let efficiencyScore = 85;
+  switch (specs.globalBurnEfficiencyGrade) {
+    case 'S+': efficiencyScore = 100; break;
+    case 'A+': efficiencyScore = 95; break;
+    case 'A':  efficiencyScore = 88; break;
+    case 'B':  efficiencyScore = 78; break;
+    case 'C':  efficiencyScore = 65; break;
+  }
+
+  // 4. Age / Operating Hours Score (10%)
+  let ageScore = 100;
+  if (currentHours > 1000) ageScore = 80;
+  else if (currentHours > 500) ageScore = 90;
+  else if (currentHours > 200) ageScore = 95;
+
+  const totalWeighted = Math.round(
+    maintenanceScore * 0.40 +
+    stabilityScore * 0.30 +
+    efficiencyScore * 0.20 +
+    ageScore * 0.10
+  );
+
+  const healthScore = Math.max(0, Math.min(100, totalWeighted));
+
+  return {
+    healthScore,
+    maintenanceScore,
+    stabilityScore,
+    efficiencyScore,
+    ageScore,
+  };
+}
+
