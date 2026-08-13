@@ -1,0 +1,50 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+const root = process.cwd();
+const targetPath = path.join(root, 'server.secure.generated.ts');
+let source = fs.readFileSync(targetPath, 'utf8');
+
+function replaceRequired(input, needle, replacement, label) {
+  if (!input.includes(needle)) throw new Error(`[chargpt-production] Required source pattern not found: ${label}`);
+  return input.replace(needle, replacement);
+}
+
+// Cloud Run must listen on the port injected by the platform.
+source = replaceRequired(
+  source,
+  'const PORT = 3000;',
+  'const PORT = Number(process.env.PORT) || 3000;',
+  'Cloud Run PORT support',
+);
+
+// Production CharGPT uses Cloud Run identity + Vertex AI. Local development can still use a standard API key.
+source = replaceRequired(
+  source,
+  `function getGeminiClient() {\n  const apiKey = process.env.GEMINI_API_KEY;\n  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {\n    return null;\n  }\n  return new GoogleGenAI({ apiKey });\n}`,
+  `function getGeminiClient() {\n  const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE);\n  if (useVertex) {\n    const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;\n    const location = process.env.GOOGLE_CLOUD_LOCATION || 'global';\n    if (!project) {\n      console.error('Vertex AI project is not configured.');\n      return null;\n    }\n    return new GoogleGenAI({ vertexai: true, project, location });\n  }\n  const apiKey = process.env.GEMINI_API_KEY;\n  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {\n    return null;\n  }\n  return new GoogleGenAI({ apiKey });\n}`,
+  'Vertex AI production client',
+);
+
+const routeStart = source.indexOf('// CharGPT API Route Handler');
+if (routeStart < 0) throw new Error('[chargpt-production] CharGPT route start not found.');
+const routeEndCandidate = source.indexOf("app.post('/api/chargpt", routeStart + 40);
+const routeEnd = routeEndCandidate > routeStart ? routeEndCandidate : source.length;
+let route = source.slice(routeStart, routeEnd);
+
+const evidencePolicy = `EVIDENCE AND PROVENANCE POLICY — MANDATORY:\n- VERIFIED: Use only when a claim is backed by an explicitly provided verified source record.\n- USER DATA: Use only for values actually present in the authenticated user's supplied SmokeStack context.\n- CALCULATED: Use only for deterministic calculations from VERIFIED or USER DATA inputs; show the inputs/assumptions.\n- ESTIMATED: Use for modeled estimates; state assumptions and never relabel an estimate as a manufacturer specification.\n- GENERAL GUIDANCE: Use for broadly applicable BBQ guidance that is not specific to this user's equipment.\n- UNVERIFIED: Use when a specific claim cannot be proven from provided context or verified retrieval.\n\nHard rules:\n1. Never invent or infer a smoker model, hopper size, burn rate, controller stability, modification state, saved preference, manufacturer specification, or user history that is not explicitly present in the request context.\n2. Never label a claim KNOWN or MFR SPECS. Use VERIFIED or USER DATA only when the evidence is actually present.\n3. If equipment-specific data is missing, say that it is not verified and ask for the missing smoker/profile detail only when needed.\n4. Do not convert model knowledge into a claim about this user's smoker. General knowledge must remain GENERAL GUIDANCE.\n5. Before returning an answer, self-check every equipment-specific number and personalization claim. Downgrade unsupported claims to ESTIMATED/GENERAL GUIDANCE/UNVERIFIED or remove them.\n6. Durable memory must not be updated from an unsupported or inferred claim.`;
+
+route = replaceRequired(
+  route,
+  'const systemInstruction = `',
+  `const systemInstruction = \`${evidencePolicy}\\n\\n\` + \``,
+  'CharGPT evidence policy injection',
+);
+route = route.replace(
+  'Gemini API key is not configured. Please set GEMINI_API_KEY in environment variables.',
+  'CharGPT model access is not configured for this runtime.',
+);
+source = source.slice(0, routeStart) + route + source.slice(routeEnd);
+
+fs.writeFileSync(targetPath, source, 'utf8');
+console.log('[chargpt-production] Applied Cloud Run PORT, Vertex AI auth, and strict CharGPT evidence policy.');
