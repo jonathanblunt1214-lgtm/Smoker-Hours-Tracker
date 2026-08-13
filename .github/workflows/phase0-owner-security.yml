@@ -36,6 +36,8 @@ jobs:
           grep -q "userSession?.isMasterAdmin === true" src/components/Navbar.trusted.tsx
           grep -q "'/api/admin/me'" src/App.trusted.tsx
           grep -q "Firestore is authoritative" src/App.trusted.tsx
+          grep -q "deletedCookLogIds: tombstones" src/App.trusted.tsx
+          grep -q "const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE }" src/App.trusted.tsx
           if grep -q "auth_token_default" src/App.trusted.tsx; then
             echo "Legacy default auth token remains in trusted client"
             exit 1
@@ -58,6 +60,28 @@ jobs:
           fi
           if grep -q "Excellent smoke ring" src/utils/storage.trusted.ts; then
             echo "Fabricated cook notes remain in trusted storage"
+            exit 1
+          fi
+
+      - name: Verify trusted data and UX assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "schemaVersion: '0.03'" src/lib/firestoreData.ts
+          grep -q "deletedCookLogIds" src/lib/firestoreData.ts
+          grep -q "deleteDoc" src/lib/firestoreData.ts
+          if grep -q "schemaVersion: '0.04A'" src/lib/firestoreData.ts; then
+            echo "Legacy 0.04A Firestore schema label remains"
+            exit 1
+          fi
+          if grep -q "lastSyncedAt: userData.lastSyncedAt || new Date" src/lib/firestoreData.ts; then
+            echo "Firestore load still fabricates a sync timestamp"
+            exit 1
+          fi
+          grep -q "Not yet published" src/components/AppDownloadStoreModal.tsx
+          grep -q "Google Drive is a separate backup/export destination" src/components/SettingsModal.tsx
+          if grep -q "MasterVersionSyncCard\|MasterSyncEngine\|MASTER_ADMIN_EMAIL\|isAdminUser" src/components/SettingsModal.tsx; then
+            echo "Legacy admin/master-sync controls remain in normal Settings"
             exit 1
           fi
 
