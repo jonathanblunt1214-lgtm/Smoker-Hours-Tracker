@@ -13,6 +13,14 @@ export default defineConfig(() => {
           replacement: path.resolve(__dirname, 'src/utils/storage.trusted.ts'),
         },
         {
+          find: /^\.\/AddMeatCutModal$/,
+          replacement: path.resolve(__dirname, 'src/components/AddMeatCutModal.trusted.tsx'),
+        },
+        {
+          find: /^\.\/components\/AddMeatCutModal$/,
+          replacement: path.resolve(__dirname, 'src/components/AddMeatCutModal.trusted.tsx'),
+        },
+        {
           find: '@',
           replacement: path.resolve(__dirname, '.'),
         },
