@@ -32,17 +32,17 @@ fs.writeFileSync(modalOutPath, modal, 'utf8');
 
 let app = fs.readFileSync(appTrustedPath, 'utf8');
 const sourceImportPattern = /from ['"]\.\/components\/MasterAdminDashboardModal['"]/;
-if (sourceImportPattern.test(app)) {
-  app = app.replace(sourceImportPattern, "from './components/MasterAdminDashboardModal.trusted'");
-}
-if (!app.includes("from './components/MasterAdminDashboardModal.trusted'")) {
-  throw new Error('[knowledge-admin-ui] App.trusted Operations import was not redirected');
-}
+if (sourceImportPattern.test(app)) app = app.replace(sourceImportPattern, "from './components/MasterAdminDashboardModal.trusted'");
+if (!app.includes("from './components/MasterAdminDashboardModal.trusted'")) throw new Error('[knowledge-admin-ui] App.trusted Operations import was not redirected');
 
 const overviewImport = "import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';";
 if (!app.includes("./components/HomeCommandCenter")) {
   if (!app.includes(overviewImport)) throw new Error('[home-command-center] import anchor not found');
   app = app.replace(overviewImport, `${overviewImport}\nimport { HomeCommandCenter } from './components/HomeCommandCenter';`);
+}
+if (!app.includes("./components/FuelMarketTracker")) {
+  if (!app.includes(overviewImport)) throw new Error('[fuel-market] import anchor not found');
+  app = app.replace(overviewImport, `${overviewImport}\nimport { FuelMarketTracker } from './components/FuelMarketTracker';`);
 }
 
 if (!app.includes('<HomeCommandCenter')) {
@@ -52,8 +52,16 @@ if (!app.includes('<HomeCommandCenter')) {
   app = app.replace(mainMarker, `${panel}${mainMarker}`);
 }
 
+if (!app.includes('<FuelMarketTracker')) {
+  const maintenanceBlock = `        {activeTab === 'maintenance' && (\n          <FuelAndMaintenance\n            profile={profile}\n            cookLogs={cookLogs}\n            fuelLogs={fuelLogs}\n            onUpdateProfile={handleUpdateProfile}\n            onAddFuelLog={handleAddFuelLog}\n            onUpdateFuelLog={handleUpdateFuelLog}\n            onDeleteFuelLog={handleDeleteFuelLog}\n          />\n        )}`;
+  if (!app.includes(maintenanceBlock)) throw new Error('[fuel-market] maintenance mount anchor not found');
+  app = app.replace(maintenanceBlock, `        {activeTab === 'maintenance' && (\n          <>\n            <FuelAndMaintenance\n              profile={profile}\n              cookLogs={cookLogs}\n              fuelLogs={fuelLogs}\n              onUpdateProfile={handleUpdateProfile}\n              onAddFuelLog={handleAddFuelLog}\n              onUpdateFuelLog={handleUpdateFuelLog}\n              onDeleteFuelLog={handleDeleteFuelLog}\n            />\n            <FuelMarketTracker />\n          </>\n        )}`);
+}
+
 if (!app.includes('<HomeCommandCenter')) throw new Error('[home-command-center] mount verification failed');
+if (!app.includes('<FuelMarketTracker')) throw new Error('[fuel-market] mount verification failed');
 fs.writeFileSync(appTrustedPath, app, 'utf8');
 
 console.log('[knowledge-admin-ui] Generated trusted Operations modal; Knowledge workbench is mounted and lazy-loaded.');
 console.log('[home-command-center] Mounted trust-safe AI Studio command center.');
+console.log('[fuel-market] Mounted account-linked observed price tracker; no synthetic market movement.');
