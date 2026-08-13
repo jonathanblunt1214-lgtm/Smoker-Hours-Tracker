@@ -12,13 +12,6 @@ function replaceRequired(input, needle, replacement, label) {
   return input.replace(needle, replacement);
 }
 
-function replaceRange(input, startMarker, endMarker, replacement, label) {
-  const start = input.indexOf(startMarker);
-  const end = input.indexOf(endMarker, start + startMarker.length);
-  if (start < 0 || end < 0 || end <= start) throw new Error(`[secure-server] Required range not found: ${label}`);
-  return input.slice(0, start) + replacement + '\n' + input.slice(end);
-}
-
 source = replaceRequired(
   source,
   "import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';",
@@ -34,10 +27,10 @@ source = replaceRequired(
 // Production authorization routes: Firebase token + server-side role claims.
 app.use('/api/admin', adminRolesRouter);
 
-// Phase-0 trust firewall. These legacy routes either used global in-memory state,
-// simulated integrations, or client-supplied account identity. The trusted
-// client no longer depends on them; keep them unavailable until replaced by
-// verified implementations.
+// Phase-0 trust firewall. These legacy routes used simulated/global state,
+// client-supplied account identity, or unverified seeded knowledge. The trusted
+// client no longer depends on them; keep them unavailable until replaced by a
+// source-backed implementation.
 const disabledLegacyPrefixes = [
   '/api/master-version',
   '/api/cook-logs',
@@ -45,6 +38,11 @@ const disabledLegacyPrefixes = [
   '/api/sync/hours',
   '/api/v1/smoker/sync',
   '/smoker/sync',
+  '/api/federated-learning',
+  '/api/smoker-database',
+  '/api/custom-smokers',
+  '/api/manufacturer-smokers',
+  '/api/verified-cuts',
   '/api/togrill',
   '/api/alexa',
   '/api/push/send-alert',
@@ -125,4 +123,4 @@ source = replaceRequired(source, oldCatch, newCatch, 'truthful CharGPT error han
 
 fs.writeFileSync(outputPath, source, 'utf8');
 console.log(`[secure-server] Generated ${path.relative(root, outputPath)}`);
-console.log('[secure-server] Verified: OWNER auth, legacy simulated routes disabled, no fake code deployment, truthful CharGPT failures.');
+console.log('[secure-server] Verified: OWNER auth, unverified/simulated legacy routes disabled, no fake code deployment, truthful CharGPT failures.');
