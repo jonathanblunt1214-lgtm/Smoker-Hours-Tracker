@@ -6,13 +6,15 @@
   "scripts": {
     "generate:secure-server": "node scripts/build-secure-server.mjs",
     "generate:trusted-client": "node scripts/build-trusted-client.mjs",
-    "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-client",
+    "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
+    "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
     "dev": "npm run generate:trusted-runtime && tsx server.secure.generated.ts",
     "build": "npm run generate:trusted-runtime && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx server.js",
+    "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/utils/storage.trusted.ts server.js",
     "lint": "npm run generate:trusted-runtime && tsc --noEmit",
-    "verify:owner-security": "npm run generate:trusted-runtime"
+    "verify:owner-security": "npm run generate:trusted-runtime",
+    "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
