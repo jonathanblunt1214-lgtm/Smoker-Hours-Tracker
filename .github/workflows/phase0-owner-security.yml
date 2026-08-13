@@ -38,30 +38,12 @@ jobs:
           grep -q "Firestore is authoritative" src/App.trusted.tsx
           grep -q "deletedCookLogIds: tombstones" src/App.trusted.tsx
           grep -q "const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE }" src/App.trusted.tsx
-          if grep -q "auth_token_default" src/App.trusted.tsx; then
-            echo "Legacy default auth token remains in trusted client"
-            exit 1
-          fi
-          if grep -q "MASTER_ADMIN_EMAIL" src/App.trusted.tsx; then
-            echo "Hard-coded owner email remains in trusted client"
-            exit 1
-          fi
-          if grep -q "autoEvolveCharGPTMemory" src/App.trusted.tsx; then
-            echo "Automatic durable AI learning remains in trusted client"
-            exit 1
-          fi
-          if grep -q "isMasterAdmin(currentUserEmail)" src/components/Navbar.trusted.tsx; then
-            echo "Navbar still trusts email for admin visibility"
-            exit 1
-          fi
-          if grep -q "hoursLogged = 6.0" src/utils/storage.trusted.ts; then
-            echo "Fabricated cook duration remains in trusted storage"
-            exit 1
-          fi
-          if grep -q "Excellent smoke ring" src/utils/storage.trusted.ts; then
-            echo "Fabricated cook notes remain in trusted storage"
-            exit 1
-          fi
+          if grep -q "auth_token_default" src/App.trusted.tsx; then echo "Legacy default auth token remains"; exit 1; fi
+          if grep -q "MASTER_ADMIN_EMAIL" src/App.trusted.tsx; then echo "Hard-coded owner email remains"; exit 1; fi
+          if grep -q "autoEvolveCharGPTMemory" src/App.trusted.tsx; then echo "Automatic durable AI learning remains"; exit 1; fi
+          if grep -q "isMasterAdmin(currentUserEmail)" src/components/Navbar.trusted.tsx; then echo "Navbar still trusts email"; exit 1; fi
+          if grep -q "hoursLogged = 6.0" src/utils/storage.trusted.ts; then echo "Fabricated cook duration remains"; exit 1; fi
+          if grep -q "Excellent smoke ring" src/utils/storage.trusted.ts; then echo "Fabricated cook notes remain"; exit 1; fi
 
       - name: Verify trusted data and UX assertions
         shell: bash
@@ -70,20 +52,11 @@ jobs:
           grep -q "schemaVersion: '0.03'" src/lib/firestoreData.ts
           grep -q "deletedCookLogIds" src/lib/firestoreData.ts
           grep -q "deleteDoc" src/lib/firestoreData.ts
-          if grep -q "schemaVersion: '0.04A'" src/lib/firestoreData.ts; then
-            echo "Legacy 0.04A Firestore schema label remains"
-            exit 1
-          fi
-          if grep -q "lastSyncedAt: userData.lastSyncedAt || new Date" src/lib/firestoreData.ts; then
-            echo "Firestore load still fabricates a sync timestamp"
-            exit 1
-          fi
+          if grep -q "schemaVersion: '0.04A'" src/lib/firestoreData.ts; then echo "Legacy 0.04A Firestore schema label remains"; exit 1; fi
+          if grep -q "lastSyncedAt: userData.lastSyncedAt || new Date" src/lib/firestoreData.ts; then echo "Firestore load fabricates sync timestamp"; exit 1; fi
           grep -q "Not yet published" src/components/AppDownloadStoreModal.tsx
           grep -q "Google Drive is a separate backup/export destination" src/components/SettingsModal.tsx
-          if grep -q "MasterVersionSyncCard\|MasterSyncEngine\|MASTER_ADMIN_EMAIL\|isAdminUser" src/components/SettingsModal.tsx; then
-            echo "Legacy admin/master-sync controls remain in normal Settings"
-            exit 1
-          fi
+          if grep -q "MasterVersionSyncCard\|MasterSyncEngine\|MASTER_ADMIN_EMAIL\|isAdminUser" src/components/SettingsModal.tsx; then echo "Legacy admin/master-sync controls remain in Settings"; exit 1; fi
 
       - name: Verify trusted server assertions
         shell: bash
@@ -94,15 +67,12 @@ jobs:
           grep -q "deploymentState: 'draft'" server.secure.generated.ts
           grep -q "deploymentState: 'not_generated'" server.secure.generated.ts
           grep -q "disabledLegacyPrefixes" server.secure.generated.ts
+          grep -q "'/api/federated-learning'" server.secure.generated.ts
+          grep -q "'/api/manufacturer-smokers'" server.secure.generated.ts
+          grep -q "'/api/verified-cuts'" server.secure.generated.ts
           grep -q "No fallback cooking advice was fabricated" server.secure.generated.ts
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "Applied Live"; then
-            echo "Fake Applied Live language remains in protected route"
-            exit 1
-          fi
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "userEmail"; then
-            echo "Client-supplied userEmail remains in protected owner route"
-            exit 1
-          fi
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "Applied Live"; then echo "Fake Applied Live language remains"; exit 1; fi
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "userEmail"; then echo "Client-supplied userEmail remains"; exit 1; fi
 
       - name: TypeScript check
         run: npm run lint
