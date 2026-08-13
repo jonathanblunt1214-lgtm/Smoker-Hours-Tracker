@@ -4,14 +4,14 @@
   "version": "0.02A",
   "type": "module",
   "scripts": {
-    "generate:secure-server": "node scripts/build-secure-server.mjs && node scripts/apply-chargpt-production-policy.mjs && node scripts/apply-verified-knowledge.mjs && node scripts/apply-verified-equipment-boundary.mjs",
-    "generate:trusted-client": "node scripts/build-trusted-client.mjs && node scripts/apply-knowledge-admin-ui.mjs && node scripts/apply-platform-integrations.mjs",
+    "generate:secure-server": "node scripts/build-secure-server.mjs && node scripts/apply-chargpt-production-policy.mjs && node scripts/apply-verified-knowledge.mjs && node scripts/apply-chargpt-companion-policy.mjs && node scripts/apply-verified-equipment-boundary.mjs",
+    "generate:trusted-client": "node scripts/build-trusted-client.mjs && node scripts/apply-knowledge-admin-ui.mjs && node scripts/apply-platform-integrations.mjs && node scripts/apply-drive-backup-verification.mjs && node scripts/apply-voice-integration-truth.mjs",
     "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
     "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
     "dev": "npm run generate:trusted-runtime && tsx server.secure.generated.ts",
     "build": "npm run generate:trusted-runtime && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/components/FuelDatabaseExplorer.trusted.tsx src/utils/storage.trusted.ts server.js",
+    "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/components/FuelDatabaseExplorer.trusted.tsx src/components/GoogleDriveSyncModal.trusted.tsx src/components/PushAndAlexaHub.trusted.tsx src/components/AIPitmasterModal.trusted.tsx src/utils/notificationAndAlexa.trusted.ts src/utils/storage.trusted.ts server.js",
     "lint": "npm run generate:trusted-runtime && tsc --noEmit",
     "verify:owner-security": "npm run generate:trusted-runtime",
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
