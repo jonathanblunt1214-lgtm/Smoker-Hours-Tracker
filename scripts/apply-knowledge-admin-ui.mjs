@@ -10,7 +10,6 @@ const typeImport = "import { CookLog, FuelLog, SmokerProfile } from '../types';"
 const staticImport = "import { KnowledgeAdminPanel } from './KnowledgeAdminPanel';\n";
 const lazyDeclaration = "const KnowledgeAdminPanel = React.lazy(() => import('./KnowledgeAdminPanel').then((module) => ({ default: module.KnowledgeAdminPanel })));";
 
-// Generate an isolated trusted modal. Never mutate the checked-in Operations source.
 modal = modal.replace(staticImport, '');
 if (!modal.includes(lazyDeclaration)) {
   if (!modal.includes(typeImport)) throw new Error('[knowledge-admin-ui] type import anchor not found');
@@ -39,6 +38,22 @@ if (sourceImportPattern.test(app)) {
 if (!app.includes("from './components/MasterAdminDashboardModal.trusted'")) {
   throw new Error('[knowledge-admin-ui] App.trusted Operations import was not redirected');
 }
+
+const overviewImport = "import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';";
+if (!app.includes("./components/HomeCommandCenter")) {
+  if (!app.includes(overviewImport)) throw new Error('[home-command-center] import anchor not found');
+  app = app.replace(overviewImport, `${overviewImport}\nimport { HomeCommandCenter } from './components/HomeCommandCenter';`);
+}
+
+if (!app.includes('<HomeCommandCenter')) {
+  const mainMarker = '      {/* Main Content Area */}';
+  if (!app.includes(mainMarker)) throw new Error('[home-command-center] mount anchor not found');
+  const panel = `      <HomeCommandCenter\n        profile={profile}\n        cookLogs={cookLogs}\n        tempUnit={tempUnit}\n        onOpenCharGPT={(prompt) => {\n          if (prompt) setAiInitialPrompt(prompt);\n          setAiInitialCookId('ALL_LOGS');\n          handleTabChange('ai-pitmaster');\n        }}\n        onOpenPlanner={() => handleTabChange('planner')}\n        onOpenNewCook={() => {\n          setPrefilledRecipe(null);\n          setEditingCook(null);\n          handleTabChange('new-cook');\n        }}\n      />\n\n`;
+  app = app.replace(mainMarker, `${panel}${mainMarker}`);
+}
+
+if (!app.includes('<HomeCommandCenter')) throw new Error('[home-command-center] mount verification failed');
 fs.writeFileSync(appTrustedPath, app, 'utf8');
 
 console.log('[knowledge-admin-ui] Generated trusted Operations modal; Knowledge workbench is mounted and lazy-loaded.');
+console.log('[home-command-center] Mounted trust-safe AI Studio command center.');
