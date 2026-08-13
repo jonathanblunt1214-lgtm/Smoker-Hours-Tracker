@@ -36,15 +36,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f .generated/server.secure.ts
-          grep -q "requireOwner as any" .generated/server.secure.ts
-          grep -q "deploymentState: 'draft'" .generated/server.secure.ts
-          grep -q "deploymentState: 'not_generated'" .generated/server.secure.ts
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' .generated/server.secure.ts | grep -q "Applied Live"; then
+          test -f server.secure.generated.ts
+          grep -q "requireOwner as any" server.secure.generated.ts
+          grep -q "deploymentState: 'draft'" server.secure.generated.ts
+          grep -q "deploymentState: 'not_generated'" server.secure.generated.ts
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "Applied Live"; then
             echo "Fake Applied Live language remains in protected route"
             exit 1
           fi
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' .generated/server.secure.ts | grep -q "userEmail"; then
+          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "userEmail"; then
             echo "Client-supplied userEmail remains in protected route"
             exit 1
           fi
