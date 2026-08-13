@@ -87,7 +87,7 @@ const navItems: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
   { id: 'accessibility', label: 'Accessibility', icon: <Smartphone className="h-4 w-4" /> },
 ];
 
-const resolveInitialTab = (initialTab: SettingsModalProps['initialTab']): Tab => {
+const resolveInitialTab = (initialTab: string | undefined): Tab => {
   switch (initialTab) {
     case 'smokers': return 'equipment';
     case 'alerts': return 'notifications';
