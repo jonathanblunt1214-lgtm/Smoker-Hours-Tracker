@@ -3,6 +3,8 @@ build/
 dist/
 .generated/
 server.secure.generated.ts
+src/App.trusted.tsx
+src/components/Navbar.trusted.tsx
 coverage/
 .DS_Store
 *.log
