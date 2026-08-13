@@ -44,8 +44,20 @@ route = route.replace(
   'Gemini API key is not configured. Please set GEMINI_API_KEY in environment variables.',
   'CharGPT model access is not configured for this runtime.',
 );
-source = source.slice(0, routeStart) + route + source.slice(routeEnd);
 
+const firstResponseBlock = `    if (response?.text) {\n      const groundingChunks = (response.candidates?.[0] as any)?.groundingMetadata?.groundingChunks || [];\n      const searchEntryPoint = (response.candidates?.[0] as any)?.groundingMetadata?.searchEntryPoint?.renderedContent || '';\n\n      return res.json({\n        text: response.text,\n        groundingChunks,\n        searchEntryPoint,\n      });\n    }`;
+
+const safeResponseBlock = `    if (response?.text) {\n      const groundingChunks = (response.candidates?.[0] as any)?.groundingMetadata?.groundingChunks || [];\n      const searchEntryPoint = (response.candidates?.[0] as any)?.groundingMetadata?.searchEntryPoint?.renderedContent || '';\n      const firstText = String(response.text || '');\n\n      const firstAnswerUnsafe =\n        /\\[(KNOWN|MFR SPECS)\\]/i.test(firstText) ||\n        /based on your saved preferences/i.test(firstText) ||\n        /(?:customized|tuned) to your .*smoker/i.test(firstText) ||\n        /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(firstText);\n\n      if (!firstAnswerUnsafe) {\n        return res.json({\n          text: firstText,\n          groundingChunks,\n          searchEntryPoint,\n          groundingStatus: 'accepted',\n        });\n      }\n\n      console.warn('CharGPT grounding rejected first answer; retrying with context-free safe grounding.');\n\n      const safeSystemInstruction = \`You are CharGPT, a BBQ cooking assistant. The previous draft was rejected because it contained unsupported personalized or equipment-specific claims.\n\nAnswer the user's original BBQ question again using ONLY the original question below. Do not use or infer any saved preference, smoker profile, hopper size, burn rate, controller stability, modification state, manufacturer specification, account history, or equipment-specific fact.\n\nAllowed evidence labels are only [GENERAL GUIDANCE], [ESTIMATED], [CALCULATED], [USER DATA], [VERIFIED], and [UNVERIFIED]. Never output [KNOWN] or [MFR SPECS]. Do not say \"your smoker\" unless the original user question itself explicitly provides the relevant smoker fact. If equipment-specific data would materially improve the answer, give useful general guidance first and then state what specific data is needed for personalization. Never claim that memory was updated.\`;
+\n      try {\n        const safeResponse = await ai.models.generateContent({\n          model: 'gemini-3.6-flash',\n          contents: prompt || 'Provide safe general BBQ guidance.',\n          config: {\n            systemInstruction: safeSystemInstruction,\n          },\n        });\n\n        const safeText = String(safeResponse?.text || '');\n        const retryStillUnsafe =\n          !safeText ||\n          /\\[(KNOWN|MFR SPECS)\\]/i.test(safeText) ||\n          /based on your saved preferences/i.test(safeText) ||\n          /(?:customized|tuned) to your .*smoker/i.test(safeText) ||\n          /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(safeText);\n\n        if (!retryStillUnsafe) {\n          return res.json({\n            text: safeText,\n            groundingChunks: [],\n            searchEntryPoint: '',\n            groundingStatus: 'safe_retry',\n          });\n        }\n      } catch (safeRetryError: any) {\n        console.warn('CharGPT safe grounding retry failed:', safeRetryError?.message || safeRetryError);\n      }\n\n      return res.status(503).json({\n        error: 'CharGPT could not produce a grounded answer after a safe retry. No unverified answer was shown.',\n        availability: 'grounding_rejected',\n        groundingStatus: 'rejected_after_retry',\n      });\n    }`;
+
+route = replaceRequired(
+  route,
+  firstResponseBlock,
+  safeResponseBlock,
+  'CharGPT safe grounding retry',
+);
+
+source = source.slice(0, routeStart) + route + source.slice(routeEnd);
 
 // SmokeStack CharGPT production grounding firewall.
 // Until verified knowledge pipelines publish provenance-bearing equipment data,
@@ -163,4 +175,4 @@ source = source.replace(
 );
 
 fs.writeFileSync(targetPath, source, 'utf8');
-console.log('[chargpt-production] Applied Cloud Run PORT, Vertex AI auth, and strict CharGPT evidence policy.');
+console.log('[chargpt-production] Applied Cloud Run PORT, Vertex AI auth, strict CharGPT evidence policy, and safe grounding retry.');
