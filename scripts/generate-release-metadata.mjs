@@ -23,7 +23,7 @@ const release = {
   buildId,
   channel: packageJson.smokestack?.channel || 'alpha',
   releasedAt,
-  webUrl: packageJson.smokestack?.webUrl || 'https://smoke-stack-1.ai.studio/',
+  webUrl: packageJson.smokestack?.webUrl || '/',
   minimumSupportedVersion: packageJson.smokestack?.minimumSupportedVersion || packageJson.version,
 };
 

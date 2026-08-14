@@ -93,9 +93,10 @@ export async function activateReleaseUpdate(): Promise<void> {
   registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
 
   const latestUrl = state.latest?.webUrl;
+  const latestTarget = latestUrl ? new URL(latestUrl, window.location.href) : null;
   const isNativeWrapper = typeof window !== 'undefined' && Boolean((window as Window & { Capacitor?: unknown }).Capacitor);
-  if (isNativeWrapper && latestUrl && window.location.origin !== new URL(latestUrl).origin) {
-    window.location.replace(latestUrl);
+  if (isNativeWrapper && latestTarget && window.location.origin !== latestTarget.origin) {
+    window.location.replace(latestTarget.href);
     return;
   }
 

@@ -5,7 +5,7 @@
   "smokestack": {
     "buildNumber": 2814,
     "channel": "alpha",
-    "webUrl": "https://smoke-stack-1.ai.studio/",
+    "webUrl": "/",
     "minimumSupportedVersion": "0.02A"
   },
   "type": "module",

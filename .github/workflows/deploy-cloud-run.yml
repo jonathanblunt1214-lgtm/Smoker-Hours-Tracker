@@ -1,0 +1,111 @@
+name: Deploy Smoke Stack to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: smokestack-production
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: smoker-log-app
+  GCP_REGION: us-central1
+  CLOUD_RUN_SERVICE: smoke-stack
+  ARTIFACT_REPOSITORY: smokestack
+  DEPLOYER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: smokestack-runtime@smoker-log-app.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/618104708054/locations/global/workloadIdentityPools/github/providers/smokestack
+
+jobs:
+  deploy:
+    name: Verify, build, and deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify trusted runtime
+        run: npm run lint
+
+      - name: Build release
+        run: npm run build
+
+      - id: auth
+        name: Authenticate to Google Cloud without a stored key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and publish immutable container
+        env:
+          IMAGE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPOSITORY }}/${{ env.CLOUD_RUN_SERVICE }}:${{ github.sha }}
+        run: |
+          docker build \
+            --build-arg GITHUB_SHA="${GITHUB_SHA}" \
+            --build-arg SMOKESTACK_RELEASED_AT="$(git show -s --format=%cI HEAD)" \
+            --tag "${IMAGE}" \
+            .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - id: deploy
+        name: Deploy reviewed image to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          region: ${{ env.GCP_REGION }}
+          service: ${{ env.CLOUD_RUN_SERVICE }}
+          image: ${{ env.IMAGE }}
+          env_vars: |-
+            GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}
+            GCLOUD_PROJECT=${{ env.GCP_PROJECT_ID }}
+            GOOGLE_CLOUD_LOCATION=global
+            GOOGLE_GENAI_USE_VERTEXAI=true
+            FIREBASE_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
+          flags: >-
+            --allow-unauthenticated
+            --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
+            --port=8080
+            --memory=1Gi
+            --cpu=1
+            --min-instances=0
+            --max-instances=5
+
+      - name: Verify deployed service health
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${SERVICE_URL}/api/health"
+
+      - name: Record deployment result
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          echo "## Smoke Stack production deployment" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Commit: ${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Service: ${CLOUD_RUN_SERVICE}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Region: ${GCP_REGION}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- URL: ${SERVICE_URL}" >> "${GITHUB_STEP_SUMMARY}"
