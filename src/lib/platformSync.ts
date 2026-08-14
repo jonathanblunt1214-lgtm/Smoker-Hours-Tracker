@@ -7,6 +7,8 @@ export interface PlatformSyncHandlers {
   onCookLogs?: (logs: CookLog[]) => void;
   onFuelLogs?: (logs: FuelLog[]) => void;
   onStatus?: (status: 'synced' | 'syncing' | 'offline' | 'error') => void;
+  /** Fires once after the initial user, cook-log, and fuel-log snapshots resolve. */
+  onHydrated?: () => void;
 }
 
 function getDeviceId(): string {
@@ -56,12 +58,26 @@ export function startAuthoritativePlatformSync(uid: string, handlers: PlatformSy
   }, 5 * 60 * 1000);
 
   let tombstones = new Set<string>();
+  let userReady = false;
+  let cooksReady = false;
+  let fuelReady = false;
+  let hydrated = false;
+
+  const maybeHydrated = () => {
+    if (hydrated || !userReady || !cooksReady || !fuelReady) return;
+    hydrated = true;
+    handlers.onHydrated?.();
+  };
+
   const unsubUser = onSnapshot(doc(db, 'users', uid), { includeMetadataChanges: true }, (snap) => {
-    if (!snap.exists()) return;
-    const data: any = snap.data();
-    tombstones = new Set(Array.isArray(data.deletedCookLogIds) ? data.deletedCookLogIds : []);
-    if (data.profile) handlers.onProfile?.(data.profile as SmokerProfile);
+    if (snap.exists()) {
+      const data: any = snap.data();
+      tombstones = new Set(Array.isArray(data.deletedCookLogIds) ? data.deletedCookLogIds : []);
+      if (data.profile) handlers.onProfile?.(data.profile as SmokerProfile);
+    }
+    userReady = true;
     handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 
   const unsubCooks = onSnapshot(collection(db, 'users', uid, 'cookLogs'), { includeMetadataChanges: true }, (snap) => {
@@ -69,12 +85,16 @@ export function startAuthoritativePlatformSync(uid: string, handlers: PlatformSy
       .map((d) => d.data() as CookLog)
       .filter((log) => log?.id && !tombstones.has(log.id));
     handlers.onCookLogs?.(logs);
+    cooksReady = true;
     handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 
   const unsubFuel = onSnapshot(collection(db, 'users', uid, 'fuelLogs'), { includeMetadataChanges: true }, (snap) => {
     handlers.onFuelLogs?.(snap.docs.map((d) => d.data() as FuelLog).filter((log) => !!log?.id));
+    fuelReady = true;
     handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 
   return () => {

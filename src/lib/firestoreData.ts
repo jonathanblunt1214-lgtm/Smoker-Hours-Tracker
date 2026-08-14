@@ -65,31 +65,51 @@ export async function loadUserBundleFromFirestore(uid: string): Promise<UserFire
   }
 }
 
+async function resolveExistingTombstones(uid: string): Promise<string[]> {
+  const userSnap = await getDoc(doc(db, 'users', uid));
+  const metaSnap = await getDoc(doc(db, 'users', uid, 'meta', 'sync'));
+  const userData: any = userSnap.exists() ? userSnap.data() : {};
+  const metaData: any = metaSnap.exists() ? metaSnap.data() : {};
+  return Array.from(new Set([
+    ...(Array.isArray(userData.deletedCookLogIds) ? userData.deletedCookLogIds : []),
+    ...(Array.isArray(metaData.deletedCookLogIds) ? metaData.deletedCookLogIds : []),
+  ].filter(Boolean)));
+}
+
 /**
  * Saves authoritative user data for the verified Firebase UID. Firestore rules
- * independently enforce request.auth.uid == uid. Cook tombstones are persisted
- * so a deleted record cannot reappear on the next load.
+ * independently enforce request.auth.uid == uid. Omitted root fields are left
+ * untouched so a partial platform sync cannot silently erase account state.
+ * Existing cook tombstones are preserved when a caller does not explicitly
+ * supply them, preventing stale/offline clients from resurrecting deleted logs.
  */
 export async function saveUserBundleToFirestore(uid: string, bundle: UserFirestoreBundle): Promise<boolean> {
   if (!uid) return false;
   try {
     const userDocRef = doc(db, 'users', uid);
     const nowIso = new Date().toISOString();
-    const deletedCookLogIds = Array.from(new Set((bundle.deletedCookLogIds || []).filter(Boolean)));
+    const hasOwn = (key: keyof UserFirestoreBundle) => Object.prototype.hasOwnProperty.call(bundle, key);
+
+    let deletedCookLogIds: string[];
+    if (hasOwn('deletedCookLogIds')) {
+      deletedCookLogIds = Array.from(new Set((bundle.deletedCookLogIds || []).filter(Boolean)));
+    } else if (Array.isArray(bundle.cookLogs)) {
+      deletedCookLogIds = await resolveExistingTombstones(uid);
+    } else {
+      deletedCookLogIds = [];
+    }
     const deletedSet = new Set(deletedCookLogIds);
 
-    await setDoc(
-      userDocRef,
-      {
-        profile: bundle.profile || null,
-        userAccount: bundle.userAccount || null,
-        charGPTMemory: bundle.charGPTMemory || null,
-        deletedCookLogIds,
-        lastSyncedAt: nowIso,
-        schemaVersion: '0.03',
-      },
-      { merge: true }
-    );
+    const rootPatch: Record<string, unknown> = {
+      lastSyncedAt: nowIso,
+      schemaVersion: '0.03',
+    };
+    if (hasOwn('profile')) rootPatch.profile = bundle.profile ?? null;
+    if (hasOwn('userAccount')) rootPatch.userAccount = bundle.userAccount ?? null;
+    if (hasOwn('charGPTMemory')) rootPatch.charGPTMemory = bundle.charGPTMemory ?? null;
+    if (hasOwn('deletedCookLogIds')) rootPatch.deletedCookLogIds = deletedCookLogIds;
+
+    await setDoc(userDocRef, rootPatch, { merge: true });
 
     if (Array.isArray(bundle.cookLogs)) {
       for (const cook of bundle.cookLogs) {
@@ -113,12 +133,14 @@ export async function saveUserBundleToFirestore(uid: string, bundle: UserFiresto
       }
     }
 
-    const syncMetaRef = doc(db, 'users', uid, 'meta', 'sync');
-    await setDoc(syncMetaRef, {
+    const syncMetaPatch: Record<string, unknown> = {
       lastSyncedAt: nowIso,
       schemaVersion: '0.03',
-      deletedCookLogIds,
-    }, { merge: true });
+    };
+    if (hasOwn('deletedCookLogIds') || Array.isArray(bundle.cookLogs)) {
+      syncMetaPatch.deletedCookLogIds = deletedCookLogIds;
+    }
+    await setDoc(doc(db, 'users', uid, 'meta', 'sync'), syncMetaPatch, { merge: true });
 
     return true;
   } catch (error) {
