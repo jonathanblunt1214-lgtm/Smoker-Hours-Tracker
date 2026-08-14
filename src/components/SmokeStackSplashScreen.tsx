@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Flame, Sparkles, CheckCircle2 } from 'lucide-react';
 import { autoOptimizeScreenOnLoadAndResize, getDetectedScreenMetrics, getFullHardwareProfile, applyHardwareAndWorkloadOptimization } from '../utils/screenOptimizer';
 import { compactAndOptimizeStorage, checkAndRunAutoCacheClear, getStorageStats } from '../utils/storage';
+import { CURRENT_RELEASE } from '../generated/release';
 
 interface SmokeStackSplashScreenProps {
   onComplete: () => void;
@@ -340,7 +341,7 @@ export const SmokeStackSplashScreen: React.FC<SmokeStackSplashScreenProps> = ({
       <div className="relative z-20 w-full max-w-5xl mx-auto px-6 pt-6 flex items-center justify-center">
         <div className="flex items-center space-x-2 text-xs font-mono font-bold tracking-widest text-amber-500/80 uppercase">
           <span className="inline-block w-2 h-2 rounded-full bg-orange-500 animate-ping" />
-          <span>SMOKE STACK v2.4</span>
+          <span>SMOKE STACK v{CURRENT_RELEASE.version}</span>
         </div>
       </div>
 

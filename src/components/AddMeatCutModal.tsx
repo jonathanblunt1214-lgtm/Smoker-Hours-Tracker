@@ -12,7 +12,6 @@ import {
   determineSeafoodSubcategory,
 } from '../data/proteinTemps';
 import { addOrUpdateVerifiedMeatCut } from '../utils/storage';
-import { triggerMasterVersionSync } from '../services/masterVersionSyncService';
 
 interface AddMeatCutModalProps {
   isOpen: boolean;
@@ -145,10 +144,8 @@ export const AddMeatCutModal: React.FC<AddMeatCutModalProps> = ({
         console.warn('Backend endpoint unavailable, cut saved locally and queued for auto-sync:', err);
       }
 
-      // 3. Trigger Master Version Sync across community database
-      triggerMasterVersionSync();
-
-      // 4. Dispatch custom event for reactive UI components
+      // 3. Notify local views. Verified catalog publication is a separate,
+      // authenticated knowledge-pipeline operation.
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('verified_meat_cuts_updated', { detail: newCut }));
       }

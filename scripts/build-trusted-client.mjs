@@ -35,7 +35,8 @@ app = app.replace('  isMasterAdminVerifiedDevice,\n', '');
 app = app.replace("import { initMasterLiveUpdateRunner } from './services/masterLiveUpdateService';\n", '');
 app = app.replace("import { MASTER_SYNC_DATA_MERGED_EVENT, triggerMasterVersionSync, masterVersionSyncService } from './services/masterVersionSyncService';\n", '');
 app = app.replace('  autoEvolveCharGPTMemory,\n', '');
-app = app.replace("import { Navbar } from './components/Navbar';", "import { Navbar } from './components/Navbar.trusted';");
+app = app.replace("from './components/Navbar';", "from './components/Navbar.trusted';");
+if (!app.includes("from './components/Navbar.trusted'")) throw new Error('[trusted-client] trusted Navbar import missing');
 app = requiredReplace(
   app,
   '  loadDeletedCookLogIds,\n  addDeletedCookLogId,',

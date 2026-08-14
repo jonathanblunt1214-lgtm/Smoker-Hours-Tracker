@@ -18,7 +18,6 @@ import {
   determineProteinSubcategory,
 } from '../data/proteinTemps';
 import { sendCharGPTPushNotification, speakAlexaVoice, loadPushConfig, loadAlexaConfig } from '../utils/notificationAndAlexa';
-import { triggerMasterVersionSync } from '../services/masterVersionSyncService';
 import { SmokerUnitProfileChart } from './SmokerUnitProfileChart';
 import {
   ResponsiveContainer,
@@ -2282,7 +2281,6 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                           });
 
                           setVerifiedCutCatalog(updatedList);
-                          triggerMasterVersionSync();
                           alert(`🎉 Successfully synced ${count} analysed meat cuts from cook logs into the Meat Safety & BBQ Cook Target Temps Guide!`);
                         }}
                         className="px-3 py-1.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-300 hover:text-purple-200 font-bold text-xs rounded-lg transition-all cursor-pointer flex items-center space-x-1.5 shrink-0"

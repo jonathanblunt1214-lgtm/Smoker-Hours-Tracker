@@ -79,7 +79,6 @@ import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { calculateMassCookSchedule, MassCookInput, MassCookResult } from '../utils/massCalculator';
 import { PushAndAlexaHub } from './PushAndAlexaHub';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME, AI_ADVISOR_NAME } from '../constants/appName';
-import { triggerMasterVersionSync } from '../services/masterVersionSyncService';
 import { validateBBQTopicConstraint, getCharGPTDeveloperOverride, isMasterAdmin } from '../utils/adminAuth';
 
 interface AIPitmasterModalProps {
@@ -556,7 +555,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
     const updated = addOrUpdateVerifiedMeatCut(newCut);
     setVerifiedCuts(updated);
-    triggerMasterVersionSync();
 
     setTeachSuccessNotice(`✅ Added analysed cut "${cutName}" to Meat Safety & BBQ Cook Target Temps Guide!`);
     setTimeout(() => setTeachSuccessNotice(null), 5000);
@@ -608,7 +606,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     });
 
     setVerifiedCuts(currentList);
-    triggerMasterVersionSync();
 
     setTeachSuccessNotice(`🎉 Successfully imported ${addedCount} analysed cuts from cook logs to Meat Safety & Target Temps Guide!`);
     setTimeout(() => setTeachSuccessNotice(null), 5000);
