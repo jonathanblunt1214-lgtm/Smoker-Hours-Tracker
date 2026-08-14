@@ -55,9 +55,7 @@ gcloud firestore databases describe \
 gcloud storage buckets describe "gs://${BACKUP_BUCKET}" --project="${PROJECT_ID}" >/dev/null
 
 bucket_admins="$(gcloud storage buckets get-iam-policy "gs://${BACKUP_BUCKET}" \
-  --flatten='bindings[].members' \
-  --filter='bindings.role:roles/storage.admin' \
-  --format='value(bindings.members)')"
+  --format=json | jq -r '.bindings[]? | select(.role == "roles/storage.admin") | .members[]?')"
 for required_principal in \
   "serviceAccount:${DEPLOYER_EMAIL}" \
   "serviceAccount:service-${project_number}@gcp-sa-firestore.iam.gserviceaccount.com"
