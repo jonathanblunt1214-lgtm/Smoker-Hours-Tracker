@@ -5,7 +5,6 @@ import {
   Brain,
   CheckCircle2,
   ChevronRight,
-  Code2,
   Database,
   GitBranch,
   History,
@@ -33,7 +32,7 @@ interface MasterAdminDashboardModalProps {
 }
 
 type Role = 'owner' | 'admin' | 'user';
-type Tab = 'overview' | 'chargpt' | 'health' | 'sync' | 'knowledge' | 'access' | 'releases' | 'data' | 'audit' | 'developer';
+type Tab = 'overview' | 'chargpt' | 'health' | 'sync' | 'knowledge' | 'access' | 'releases' | 'data' | 'audit';
 
 type ServiceState = { status: string; detail?: string | null };
 type KnowledgePipeline = { id: string; label: string; status: string; sourcePolicy: string };
@@ -93,7 +92,7 @@ type AdminRoleRecord = {
   updatedAt: string | null;
 };
 
-const NAV: Array<{ id: Tab; label: string; icon: React.ReactNode; ownerOnly?: boolean; developerOnly?: boolean }> = [
+const NAV: Array<{ id: Tab; label: string; icon: React.ReactNode; ownerOnly?: boolean }> = [
   { id: 'overview', label: 'Command Center', icon: <Activity className="h-4 w-4" /> },
   { id: 'chargpt', label: 'CharGPT', icon: <Brain className="h-4 w-4" /> },
   { id: 'health', label: 'System Health', icon: <Server className="h-4 w-4" /> },
@@ -103,7 +102,6 @@ const NAV: Array<{ id: Tab; label: string; icon: React.ReactNode; ownerOnly?: bo
   { id: 'releases', label: 'Releases', icon: <GitBranch className="h-4 w-4" /> },
   { id: 'data', label: 'Data Operations', icon: <Settings2 className="h-4 w-4" /> },
   { id: 'audit', label: 'Audit Log', icon: <History className="h-4 w-4" /> },
-  { id: 'developer', label: 'Developer Tools', icon: <Code2 className="h-4 w-4" />, developerOnly: true },
 ];
 
 async function authorizedFetch(path: string, init: RequestInit = {}) {
@@ -183,8 +181,6 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
   const [roles, setRoles] = useState<AdminRoleRecord[]>([]);
   const [targetUid, setTargetUid] = useState('');
   const [grantDeveloper, setGrantDeveloper] = useState(false);
-  const [codePrompt, setCodePrompt] = useState('');
-  const [generatedDraft, setGeneratedDraft] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [sectionLoading, setSectionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +192,7 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
     hours: Number(profile.currentHours || 0).toFixed(1),
   }), [cookLogs.length, fuelLogs.length, profile.currentHours]);
 
-  const tabs = useMemo(() => NAV.filter((item) => (!item.ownerOnly || me?.permissions.owner) && (!item.developerOnly || me?.permissions.developer)), [me]);
+  const tabs = useMemo(() => NAV.filter((item) => !item.ownerOnly || me?.permissions.owner), [me]);
 
   const loadHealth = async () => {
     const res = await authorizedFetch('/api/admin/health');
@@ -290,21 +286,6 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
       await loadRoles();
     } catch (err: any) {
       showToast(err?.message || 'Could not revoke administrator access.');
-    } finally { setBusy(null); }
-  };
-
-  const generateDraft = async () => {
-    if (!me?.permissions.owner || !codePrompt.trim()) return;
-    setBusy('draft');
-    setGeneratedDraft(null);
-    try {
-      const res = await authorizedFetch('/api/master/generate-code-patch', { method: 'POST', body: JSON.stringify({ prompt: codePrompt.trim(), category: 'TypeScript / Module' }) });
-      const data = await res.json();
-      if (!res.ok || !data?.success) throw new Error(data?.error || 'Draft generation failed.');
-      setGeneratedDraft({ ...data.result, deploymentState: data.deploymentState || 'draft' });
-      showToast('Code draft generated. Nothing was deployed.');
-    } catch (err: any) {
-      showToast(err?.message || 'Code draft generation unavailable.');
     } finally { setBusy(null); }
   };
 
@@ -421,11 +402,7 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
       {auditEvents.length === 0 ? <p className="text-sm text-zinc-500">No audit events returned.</p> : <div className="divide-y divide-zinc-800">{auditEvents.map((event) => <div key={event.id} className="py-3"><div className="flex flex-col justify-between gap-1 sm:flex-row"><span className="text-sm font-medium text-zinc-200">{humanStatus(event.action)}</span><span className="text-xs text-zinc-600">{formatDate(event.createdAt)}</span></div><div className="mt-1 text-xs text-zinc-500">Actor {event.actorRole || 'unknown'} · Target {event.targetUid || 'system'}</div></div>)}</div>}
     </Panel>;
 
-    return <div className="space-y-5"><Panel title="Owner developer tools" subtitle="Draft generation is not deployment. GitHub/CI remain release authority." icon={<Code2 className="h-4 w-4" />}>
-      <textarea value={codePrompt} onChange={(e) => setCodePrompt(e.target.value)} placeholder="Describe a code change to draft..." className="min-h-32 w-full rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-white outline-none focus:border-orange-500" />
-      <button disabled={!codePrompt.trim() || busy !== null} onClick={() => void generateDraft()} className="mt-3 rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50">Generate draft only</button>
-      {generatedDraft && <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4"><div className="text-xs font-semibold uppercase text-amber-300">{humanStatus(generatedDraft.deploymentState || 'draft')}</div><pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-xs text-zinc-400">{generatedDraft.code || generatedDraft.patch || JSON.stringify(generatedDraft, null, 2)}</pre></div>}
-    </Panel></div>;
+    return null;
   };
 
   return <div className="fixed inset-0 z-[120] overflow-y-auto bg-black/80 p-0 backdrop-blur-sm sm:p-4">

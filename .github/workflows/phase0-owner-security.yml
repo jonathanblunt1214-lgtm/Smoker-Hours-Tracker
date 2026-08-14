@@ -63,16 +63,15 @@ jobs:
         run: |
           set -euo pipefail
           test -f server.secure.generated.ts
-          grep -q "requireOwner as any" server.secure.generated.ts
-          grep -q "deploymentState: 'draft'" server.secure.generated.ts
-          grep -q "deploymentState: 'not_generated'" server.secure.generated.ts
           grep -q "disabledLegacyPrefixes" server.secure.generated.ts
+          grep -q "'/api/master/generate-code-patch'" server.secure.generated.ts
+          grep -q "In-app code generation has been removed" server.secure.generated.ts
+          grep -q "Legacy Master Web synchronization has been removed" server.secure.generated.ts
           grep -q "'/api/federated-learning'" server.secure.generated.ts
           grep -q "'/api/manufacturer-smokers'" server.secure.generated.ts
           grep -q "'/api/verified-cuts'" server.secure.generated.ts
           grep -q "No fallback cooking advice was fabricated" server.secure.generated.ts
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "Applied Live"; then echo "Fake Applied Live language remains"; exit 1; fi
-          if sed -n '/Master Admin Air-Gapped AI Code Generator Endpoint/,/\/\/ Health check/p' server.secure.generated.ts | grep -q "userEmail"; then echo "Client-supplied userEmail remains"; exit 1; fi
+          if grep -q "Air-Gapped AI Code Generator\|Applied Live\|Ready to deploy live" server.secure.generated.ts; then echo "Legacy AI Studio deployment authority remains"; exit 1; fi
 
       - name: TypeScript check
         run: npm run lint

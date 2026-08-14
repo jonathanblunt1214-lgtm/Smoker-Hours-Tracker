@@ -2,9 +2,9 @@
   "app": "Smoke Stack",
   "version": "0.02A",
   "buildNumber": 2814,
-  "buildId": "712d0d857712",
+  "buildId": "4a465befa1e3",
   "channel": "alpha",
-  "releasedAt": "2026-08-14T00:12:48-04:00",
+  "releasedAt": "2026-08-14T18:15:50-04:00",
   "webUrl": "https://smoke-stack-1.ai.studio/",
   "minimumSupportedVersion": "0.02A"
 }

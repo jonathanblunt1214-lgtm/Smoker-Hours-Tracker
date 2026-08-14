@@ -10,6 +10,13 @@ Smoke Stack ships one responsive web client. The supported no-manual-update mobi
 4. A newer deployed build refreshes automatically unless a New Cook form is active. An active form gets an update banner so the user can save before refreshing.
 5. Application refresh only changes client code. It never force-aligns, merges, or overwrites account data.
 
+## Development and release authority
+
+- ChatGPT/Codex prepares application changes in the repository.
+- GitHub branches, review, CI checks, and the approved deployment are the only path to production.
+- The running app contains no AI Studio code-generation, live-patch, data-merge, or deployment authority.
+- CharGPT remains a cooking assistant feature; it cannot change application code or publish releases.
+
 ## Android launcher
 
 The PWA manifest now points to the Smoke Stack launcher assets in `public/`. `assets/icon.png` and `assets/icon-maskable.png` are the source images for native packaging.
