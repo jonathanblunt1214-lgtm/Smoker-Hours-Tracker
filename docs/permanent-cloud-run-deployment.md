@@ -18,12 +18,15 @@ Cloud Shell authorization cannot be permanent. Sign in to Cloud Shell in your ow
 ```bash
 cd ~/Smoker-Hours-Tracker
 git fetch origin
-git checkout fix/mobile-web-parity-updater
-git pull --ff-only origin fix/mobile-web-parity-updater
+git checkout agent/firebase-project-automation
+git pull --ff-only origin agent/firebase-project-automation
 bash scripts/bootstrap-cloudrun-github.sh
+bash scripts/verify-google-automation.sh
 ```
 
 The script is idempotent: rerunning it verifies or updates the same named service accounts, Artifact Registry repository, workload identity pool/provider, and IAM bindings.
+
+Firestore configuration deployment and backups use the same keyless identity. See [Permanent Google Cloud and Firebase automation](permanent-google-firebase-automation.md) for their scope and recovery boundary.
 
 ## Permanent release flow
 

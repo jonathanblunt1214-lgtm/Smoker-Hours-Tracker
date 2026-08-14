@@ -8,6 +8,8 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-jonathanblunt1214-lgtm/Smoker-Hours-Trac
 POOL_ID="${POOL_ID:-github}"
 PROVIDER_ID="${PROVIDER_ID:-smokestack}"
 ARTIFACT_REPOSITORY="${ARTIFACT_REPOSITORY:-smokestack}"
+BACKUP_BUCKET="${BACKUP_BUCKET:-${PROJECT_ID}-firestore-backups}"
+BACKUP_LOCATION="${BACKUP_LOCATION:-us-central1}"
 DEPLOYER_NAME="${DEPLOYER_NAME:-smokestack-github}"
 RUNTIME_NAME="${RUNTIME_NAME:-smokestack-runtime}"
 
@@ -33,11 +35,13 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   compute.googleapis.com \
   firebase.googleapis.com \
+  firebaserules.googleapis.com \
   firestore.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
   identitytoolkit.googleapis.com \
   run.googleapis.com \
+  storage.googleapis.com \
   sts.googleapis.com \
   aiplatform.googleapis.com
 
@@ -57,6 +61,18 @@ if ! gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" --location=
     --repository-format=docker \
     --description="Reviewed Smoke Stack production images"
 fi
+
+if ! gcloud storage buckets describe "gs://${BACKUP_BUCKET}" >/dev/null 2>&1; then
+  gcloud storage buckets create "gs://${BACKUP_BUCKET}" \
+    --project="${PROJECT_ID}" \
+    --location="${BACKUP_LOCATION}" \
+    --uniform-bucket-level-access
+fi
+
+gcloud beta services identity create \
+  --service=firestore.googleapis.com \
+  --project="${PROJECT_ID}" \
+  --quiet >/dev/null
 
 if ! gcloud iam workload-identity-pools describe "${POOL_ID}" --location=global >/dev/null 2>&1; then
   gcloud iam workload-identity-pools create "${POOL_ID}" \
@@ -91,6 +107,10 @@ gcloud iam service-accounts add-iam-policy-binding "${DEPLOYER_EMAIL}" \
 
 for role in \
   roles/artifactregistry.writer \
+  roles/datastore.importExportAdmin \
+  roles/datastore.indexAdmin \
+  roles/firebase.viewer \
+  roles/firebaserules.admin \
   roles/run.admin \
   roles/serviceusage.serviceUsageConsumer
 do
@@ -98,6 +118,14 @@ do
     --member="serviceAccount:${DEPLOYER_EMAIL}" \
     --role="${role}" \
     --condition=None
+done
+
+FIRESTORE_SERVICE_AGENT="service-${PROJECT_NUMBER}@gcp-sa-firestore.iam.gserviceaccount.com"
+for principal_email in "${DEPLOYER_EMAIL}" "${FIRESTORE_SERVICE_AGENT}"
+do
+  gcloud storage buckets add-iam-policy-binding "gs://${BACKUP_BUCKET}" \
+    --member="serviceAccount:${principal_email}" \
+    --role=roles/storage.admin
 done
 
 gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_EMAIL}" \
@@ -123,5 +151,7 @@ echo "Provider: projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPool
 echo "Deployer: ${DEPLOYER_EMAIL}"
 echo "Runtime: ${RUNTIME_EMAIL}"
 echo "Artifact Registry: ${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+echo "Firebase config: reviewed Firestore rules and indexes deploy from main"
+echo "Firestore backups: gs://${BACKUP_BUCKET}/scheduled (weekly and manual)"
 echo
 echo "Merge the reviewed deployment workflow to main to start the first deployment."
