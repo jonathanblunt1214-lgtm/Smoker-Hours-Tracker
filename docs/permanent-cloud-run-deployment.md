@@ -4,7 +4,7 @@ Smoke Stack production releases are deployed from reviewed commits on `main`. Gi
 
 ## Fixed production target
 
-- Google Cloud project: `smoker-log-app` (`618104708054`)
+- Google Cloud project: `smoker-log-app` (`562567954075`)
 - Cloud Run service: `smoke-stack`
 - Region: `us-central1`
 - Artifact Registry repository: `smokestack`

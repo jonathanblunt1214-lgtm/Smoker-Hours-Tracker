@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-smoker-log-app}"
-PROJECT_NUMBER="${PROJECT_NUMBER:-618104708054}"
+PROJECT_NUMBER="${PROJECT_NUMBER:-}"
 REGION="${REGION:-us-central1}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-jonathanblunt1214-lgtm/Smoker-Hours-Tracker}"
 POOL_ID="${POOL_ID:-github}"
@@ -21,10 +21,11 @@ if [[ -z "${active_account}" ]]; then
 fi
 
 actual_project_number="$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')"
-if [[ "${actual_project_number}" != "${PROJECT_NUMBER}" ]]; then
+if [[ -n "${PROJECT_NUMBER}" && "${actual_project_number}" != "${PROJECT_NUMBER}" ]]; then
   echo "Project number mismatch: expected ${PROJECT_NUMBER}, received ${actual_project_number}." >&2
   exit 1
 fi
+PROJECT_NUMBER="${actual_project_number}"
 
 echo "Configuring ${PROJECT_ID} as ${active_account}..."
 gcloud config set project "${PROJECT_ID}"

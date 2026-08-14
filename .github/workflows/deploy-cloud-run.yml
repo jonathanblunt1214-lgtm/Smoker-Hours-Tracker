@@ -20,7 +20,7 @@ env:
   ARTIFACT_REPOSITORY: smokestack
   DEPLOYER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
   RUNTIME_SERVICE_ACCOUNT: smokestack-runtime@smoker-log-app.iam.gserviceaccount.com
-  WORKLOAD_IDENTITY_PROVIDER: projects/618104708054/locations/global/workloadIdentityPools/github/providers/smokestack
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
 
 jobs:
   deploy:
