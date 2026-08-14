@@ -293,12 +293,6 @@ export function saveCharGPTMemory(memory: CharGPTMemory): void {
     }
   } catch (e) {}
 
-  try {
-    if (typeof window !== 'undefined') {
-      const { triggerMasterVersionSync } = require('../services/masterVersionSyncService');
-      triggerMasterVersionSync().catch(() => {});
-    }
-  } catch (e) {}
 }
 
 export interface SavedCharGPTRecipeAnalysis {
@@ -1239,62 +1233,6 @@ export function clearAllCookLogsAndArchives(): { success: boolean; message: stri
   };
 }
 
-export interface MasterLiveUpdateConfig {
-  liveUpdatesEnabled: boolean;
-  autoDeployCommits: boolean;
-  versionTag: string;
-  lastDeployedAt: string;
-  updateChannel: 'Production Live' | 'Staging Canary' | 'Master Sandbox';
-  strictAIIsolationActive: boolean;
-}
-
-export interface MasterCodePatch {
-  id: string;
-  title: string;
-  category: 'TypeScript / Module' | 'HTML/CSS UI Patch' | 'Server Logic / API' | 'Custom Smoker Algorithm';
-  code: string;
-  status: 'Applied Live' | 'Draft Sandbox' | 'Archived';
-  createdAt: string;
-  updatedAt: string;
-  deployedAt?: string;
-  isIsolatedFromCharGPT: true;
-}
-
-export function loadMasterLiveUpdateConfig(): MasterLiveUpdateConfig {
-  try {
-    const raw = localStorage.getItem(KEYS.MASTER_LIVE_UPDATES);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to load master live update config', e);
-  }
-  return {
-    liveUpdatesEnabled: true,
-    autoDeployCommits: true,
-    versionTag: '0.02A',
-    lastDeployedAt: new Date().toISOString(),
-    updateChannel: 'Production Live',
-    strictAIIsolationActive: true,
-  };
-}
-
-export function saveMasterLiveUpdateConfig(config: MasterLiveUpdateConfig): void {
-  safeSetItem(KEYS.MASTER_LIVE_UPDATES, JSON.stringify(config));
-}
-
-export function loadMasterCodePatches(): MasterCodePatch[] {
-  try {
-    const raw = localStorage.getItem(KEYS.MASTER_CODE_PATCHES);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to load master code patches', e);
-  }
-  return [];
-}
-
-export function saveMasterCodePatches(patches: MasterCodePatch[]): void {
-  safeSetItem(KEYS.MASTER_CODE_PATCHES, JSON.stringify(patches));
-}
-
 export function loadLocalUserProfile(): LocalUserProfile | undefined {
   if (typeof window === 'undefined') return undefined;
   try {
@@ -1329,8 +1267,6 @@ export function save10kHoursSimulated(simulated: boolean): void {
     localStorage.setItem(SIMULATED_10K_HOURS_KEY, simulated ? 'true' : 'false');
   } catch (e) {}
 }
-
-
 
 
 

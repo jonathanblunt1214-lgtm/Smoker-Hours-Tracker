@@ -73,7 +73,7 @@ export const AppDownloadStoreModal: React.FC<AppDownloadStoreModalProps> = ({
               <div className="rounded-xl bg-orange-500/15 p-2.5 text-orange-400"><Download className="h-5 w-5" /></div>
               <div>
                 <h3 className="font-semibold text-white">Web app / PWA</h3>
-                <p className="mt-1 text-sm leading-6 text-zinc-400">Use the current SmokeStack web application and install it from supported browsers.</p>
+                <p className="mt-1 text-sm leading-6 text-zinc-400">Install the same responsive Smoke Stack release used on the web. The installed PWA checks the deployed release automatically, so normal feature updates do not require another APK.</p>
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2 text-sm text-zinc-300">

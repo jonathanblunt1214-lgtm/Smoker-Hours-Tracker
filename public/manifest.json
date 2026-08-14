@@ -1,8 +1,10 @@
 {
   "name": "Smoke Stack • Pitmaster Cook & Fuel Log",
   "short_name": "Smoke Stack",
+  "id": "/",
   "description": "Pitmaster BBQ smoke logger, fuel calculator, CharGPT AI advisor, and multi-pit manager delivered as an installable web app.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#121212",
   "theme_color": "#121212",
@@ -13,14 +15,25 @@
       "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    { "name": "Start Cook", "short_name": "Cook", "url": "/?view=new-cook", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "CharGPT", "short_name": "CharGPT", "url": "/?view=ai-pitmaster", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Cook Logs", "short_name": "Logs", "url": "/?view=logs", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
   ],
   "screenshots": [],
   "related_applications": [],

@@ -54,6 +54,7 @@ import {
 import { getActiveUserSession, saveActiveUserSession, UserAuthSession } from '../utils/userAuthSession';
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
+import { CURRENT_RELEASE } from '../generated/release';
 
 interface PushAndAlexaHubProps {
   activeCook?: CookLog;
@@ -768,7 +769,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">
                 Smoke Stack Push Notifications & Amazon Alexa Hub
                 <span className="text-[10px] font-mono uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">
-                  0.02A Live
+                  {CURRENT_RELEASE.version}
                 </span>
               </h3>
               <p className="text-xs text-zinc-300">

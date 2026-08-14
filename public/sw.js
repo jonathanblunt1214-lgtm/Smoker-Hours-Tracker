@@ -1,5 +1,5 @@
 // Smoke Stack Pitmaster - Progressive Web App & Cross-Format Service Worker
-const CACHE_NAME = 'smokestack-cache-v2';
+const CACHE_NAME = 'smokestack-shell-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -28,6 +28,10 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', (event) => {
   // Navigation strategy: Network first with cache fallback
   if (event.request.mode === 'navigate') {
@@ -39,7 +43,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-while-revalidate for static assets
+  // Never cache release metadata; installed clients must see the deployment's
+  // current build before deciding whether to refresh.
+  if (new URL(event.request.url).pathname === '/version.json') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Stale-while-revalidate for immutable, content-hashed static assets.
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -106,4 +117,3 @@ self.addEventListener('notificationclick', (event) => {
     );
   }
 });
-

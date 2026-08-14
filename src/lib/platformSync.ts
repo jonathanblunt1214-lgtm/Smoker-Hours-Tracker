@@ -1,6 +1,7 @@
 import { collection, doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 import { CookLog, FuelLog, SmokerProfile } from '../types';
+import { CURRENT_RELEASE } from '../generated/release';
 
 export interface PlatformSyncHandlers {
   onProfile?: (profile: SmokerProfile) => void;
@@ -44,7 +45,7 @@ async function registerDevice(uid: string) {
     platform: platformLabel(),
     installMode: installMode(),
     userAgent: navigator.userAgent,
-    appVersion: '0.03',
+    appVersion: CURRENT_RELEASE.version,
     lastSeenAt: serverTimestamp(),
   }, { merge: true });
 }

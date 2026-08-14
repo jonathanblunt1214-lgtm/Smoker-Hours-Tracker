@@ -70,5 +70,5 @@ if (!app.includes('<FuelMarketTracker')) throw new Error('[fuel-market] mount ve
 fs.writeFileSync(appTrustedPath, app, 'utf8');
 
 console.log('[knowledge-admin-ui] Generated trusted Operations modal with Knowledge and Meat Source Harvester panels.');
-console.log('[home-command-center] Mounted trust-safe AI Studio command center.');
+console.log('[home-command-center] Mounted the Smoke Stack command center.');
 console.log('[fuel-market] Mounted account-linked observed price tracker; no synthetic market movement.');

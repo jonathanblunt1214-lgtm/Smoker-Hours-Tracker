@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { SmokerProfile, CookLog, FuelLog, CustomSmokerSpec, ManufacturerSmokerSpec, LowPowerModeSettings } from './types';
 import {
@@ -25,8 +25,13 @@ import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from './constants/appName';
 import { initAuth, saveToGoogleDrive, getAccessToken, logout } from './lib/driveSync';
 import { loadUserBundleFromFirestore, saveUserBundleToFirestore, SyncStateStatus } from './lib/firestoreData';
 import { MASTER_ADMIN_EMAIL } from './utils/adminAuth';
-import { Navbar } from './components/Navbar';
+import { Navbar, AppTab, SettingsDestination } from './components/Navbar';
 import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';
+import { HomeCommandCenter } from './components/HomeCommandCenter';
+import { BrowserInstallShareWidget } from './components/BrowserInstallShareWidget';
+import { ReleaseUpdateBanner } from './components/ReleaseUpdateBanner';
+import { startAuthoritativePlatformSync } from './lib/platformSync';
+import { startAutomaticReleaseUpdates } from './services/releaseUpdateService';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { CookLogList } from './components/CookLogList';
 import { CookLogSheetModal } from './components/CookLogSheetModal';
@@ -168,7 +173,8 @@ export default function App() {
     showToast(next ? '⚡ Auto-sync new cook logs to cloud enabled' : '💾 Manual upload mode enabled (Cooks save locally to account)');
   };
 
-  const [activeTab, setActiveTab] = useState<'analytics' | 'logs' | 'planner' | 'new-cook' | 'maintenance' | 'ai-pitmaster'>('analytics');
+  const [activeTab, setActiveTab] = useState<AppTab>('home');
+  const activeTabRef = useRef<AppTab>(activeTab);
   const [selectedSheetCook, setSelectedSheetCook] = useState<CookLog | null>(null);
   const [selectedCertificateCook, setSelectedCertificateCook] = useState<CookLog | null>(null);
   const [prefilledRecipe, setPrefilledRecipe] = useState<RecipeSuggestion | null>(null);
@@ -255,7 +261,7 @@ export default function App() {
 
   // Settings, Custom Smokers, Master Admin, Google Drive & Download App Modal States
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'appearance' | 'alerts' | 'cloud' | 'data'>('appearance');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsDestination>('root');
   const [isCustomSmokerModalOpen, setIsCustomSmokerModalOpen] = useState(false);
   const [isMasterAdminModalOpen, setIsMasterAdminModalOpen] = useState(false);
   const [isDownloadStoreModalOpen, setIsDownloadStoreModalOpen] = useState(false);
@@ -587,10 +593,16 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const handleTabChange = (tab: 'analytics' | 'logs' | 'planner' | 'new-cook' | 'maintenance' | 'ai-pitmaster') => {
+  const handleTabChange = (tab: AppTab) => {
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => startAutomaticReleaseUpdates(() => activeTabRef.current !== 'new-cook'), []);
 
   const handleSaveCook = (newCook: CookLog) => {
     const cookToSave = {
@@ -917,11 +929,13 @@ export default function App() {
       
       {/* Toast Banner */}
       {notification && (
-        <div className="fixed bottom-5 right-5 z-50 bg-[#1a1a1a] text-orange-400 px-4 py-3 rounded-xl font-medium text-xs shadow-2xl flex items-center space-x-2 border border-[#2a2a2a] animate-bounce">
+        <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-3 z-50 bg-[#1a1a1a] text-orange-400 px-4 py-3 rounded-xl font-medium text-xs shadow-2xl flex items-center space-x-2 border border-[#2a2a2a] md:bottom-5 md:right-5">
           <span className="text-orange-500 font-bold">🔥</span>
           <span>{notification}</span>
         </div>
       )}
+
+      <ReleaseUpdateBanner deferAutomaticReload={activeTab === 'new-cook'} />
 
       {/* Top Navbar */}
       <Navbar
@@ -931,7 +945,7 @@ export default function App() {
         smokerName={profile.name}
         tempUnit={tempUnit}
         onOpenSettings={(tab) => {
-          setSettingsInitialTab(tab || 'appearance');
+          setSettingsInitialTab(tab || 'root');
           setIsSettingsModalOpen(true);
         }}
         isDriveConnected={!!currentUser && !!accessToken}
@@ -945,7 +959,8 @@ export default function App() {
         onOpenSyncDashboard={() => setIsSyncDashboardOpen(true)}
       />
 
-      {/* Smoker Overview Metric Banner */}
+      {/* Home is the only mobile surface that carries the global overview. */}
+      {activeTab === 'home' && <>
       <SmokerOverviewBanner
         profile={profile}
         cookLogs={cookLogs}
@@ -965,8 +980,41 @@ export default function App() {
         onOpenAlexaPush={() => handleTabChange('ai-pitmaster')}
       />
 
+      <div className="mx-auto w-full max-w-7xl px-3 pt-3 sm:px-4 md:px-6 lg:px-8">
+        <HomeCommandCenter
+          profile={profile}
+          cookLogs={cookLogs}
+          tempUnit={tempUnit}
+          onOpenCharGPT={(prompt) => {
+            if (prompt) setAiInitialPrompt(prompt);
+            setAiInitialCookId('ALL_LOGS');
+            handleTabChange('ai-pitmaster');
+          }}
+          onOpenPlanner={() => handleTabChange('planner')}
+          onOpenNewCook={() => {
+            setPrefilledRecipe(null);
+            setEditingCook(null);
+            handleTabChange('new-cook');
+          }}
+        />
+      </div>
+
+      <BrowserInstallShareWidget
+        onOpenPlanner={() => handleTabChange('planner')}
+        onStartCook={() => {
+          setPrefilledRecipe(null);
+          setEditingCook(null);
+          handleTabChange('new-cook');
+        }}
+        onOpenCharGPT={() => {
+          setAiInitialCookId('ALL_LOGS');
+          handleTabChange('ai-pitmaster');
+        }}
+      />
+      </>}
+
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-12 overflow-x-hidden">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-28 md:pb-12 overflow-x-hidden">
         {activeTab === 'analytics' && (
           <AnalyticsDashboard
             cookLogs={cookLogs}

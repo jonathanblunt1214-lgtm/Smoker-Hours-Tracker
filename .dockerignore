@@ -1,0 +1,11 @@
+.git
+.github
+.tools
+node_modules
+dist
+*.patch
+.env
+.env.*
+upload
+project_sources
+npm-debug.log*

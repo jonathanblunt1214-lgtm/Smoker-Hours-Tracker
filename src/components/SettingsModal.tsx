@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   Bell,
+  ArrowLeft,
   Cloud,
+  Info,
   LogOut,
   Monitor,
   Settings,
@@ -18,6 +20,9 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import type { SettingsDestination } from './Navbar';
+import { CURRENT_RELEASE } from '../generated/release';
+import { checkForReleaseUpdate, getReleaseUpdateState, RELEASE_UPDATE_EVENT, ReleaseUpdateState, activateReleaseUpdate } from '../services/releaseUpdateService';
 import { CookLog, FuelLog, LocalUserProfile, LowPowerModeSettings, SmokerProfile } from '../types';
 import {
   DEFAULT_GRANULAR_SHARING,
@@ -29,7 +34,7 @@ import {
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'appearance' | 'alerts' | 'cloud' | 'data' | 'smokers';
+  initialTab?: SettingsDestination;
   tempUnit: 'F' | 'C';
   onToggleTempUnit: () => void;
   themeMode: 'dark' | 'light';
@@ -75,7 +80,7 @@ interface SettingsModalProps {
   onOpenMasterAdmin?: () => void;
 }
 
-type Tab = 'account' | 'appearance' | 'notifications' | 'equipment' | 'sync' | 'privacy' | 'accessibility';
+type Tab = 'account' | 'appearance' | 'notifications' | 'equipment' | 'sync' | 'privacy' | 'accessibility' | 'advanced';
 
 const navItems: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
   { id: 'account', label: 'Account', icon: <UserIcon className="h-4 w-4" /> },
@@ -85,6 +90,7 @@ const navItems: Array<{ id: Tab; label: string; icon: React.ReactNode }> = [
   { id: 'sync', label: 'Data & Sync', icon: <Cloud className="h-4 w-4" /> },
   { id: 'privacy', label: 'Privacy', icon: <ShieldCheck className="h-4 w-4" /> },
   { id: 'accessibility', label: 'Accessibility', icon: <Smartphone className="h-4 w-4" /> },
+  { id: 'advanced', label: 'Advanced', icon: <Info className="h-4 w-4" /> },
 ];
 
 const resolveInitialTab = (initialTab: string | undefined): Tab => {
@@ -93,6 +99,8 @@ const resolveInitialTab = (initialTab: string | undefined): Tab => {
     case 'alerts': return 'notifications';
     case 'cloud':
     case 'data': return 'sync';
+    case 'account': return 'account';
+    case 'sync': return 'sync';
     case 'appearance': return 'appearance';
     default: return 'appearance';
   }
@@ -112,19 +120,19 @@ const Toggle: React.FC<{ checked: boolean; onChange: () => void; label: string }
 );
 
 const Row: React.FC<{ title: string; description?: string; control: React.ReactNode }> = ({ title, description, control }) => (
-  <div className="flex min-h-[62px] items-center justify-between gap-4 border-b border-zinc-800/70 py-3 last:border-0">
+  <div className="flex min-h-[62px] flex-col items-stretch justify-between gap-3 border-b border-zinc-800/70 py-3 last:border-0 sm:flex-row sm:items-center sm:gap-4">
     <div className="min-w-0">
       <div className="text-sm font-medium text-zinc-100">{title}</div>
       {description && <div className="mt-1 text-xs leading-5 text-zinc-500">{description}</div>}
     </div>
-    <div className="shrink-0">{control}</div>
+    <div className="shrink-0 self-start sm:self-auto">{control}</div>
   </div>
 );
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
-  initialTab = 'appearance',
+  initialTab = 'root',
   tempUnit,
   onToggleTempUnit,
   themeMode,
@@ -153,12 +161,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleLowPowerMode,
 }) => {
   const [tab, setTab] = useState<Tab>(() => resolveInitialTab(initialTab));
+  const [mobilePage, setMobilePage] = useState<'list' | 'detail'>(() => initialTab === 'root' ? 'list' : 'detail');
   const [privacyConfig, setPrivacyConfig] = useState(() => loadFederatedLearningConfig());
 
   const dataCounts = useMemo(() => ({
     cooks: currentAppData?.cookLogs?.length || 0,
     fuels: currentAppData?.fuelLogs?.length || 0,
   }), [currentAppData]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setTab(resolveInitialTab(initialTab));
+    setMobilePage(initialTab === 'root' ? 'list' : 'detail');
+  }, [initialTab, isOpen]);
 
   if (!isOpen) return null;
 
@@ -172,28 +187,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/80 p-0 sm:p-5 backdrop-blur-sm overflow-y-auto">
-      <div className="mx-auto flex min-h-full max-w-5xl flex-col overflow-hidden bg-[#111] sm:min-h-0 sm:rounded-2xl sm:border sm:border-zinc-800 sm:shadow-2xl md:flex-row">
-        <aside className="border-b border-zinc-800 bg-zinc-950/80 p-4 md:w-60 md:border-b-0 md:border-r">
-          <div className="mb-4 flex items-center gap-3 px-2">
+      <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col overflow-hidden bg-[#111] sm:min-h-0 sm:rounded-2xl sm:border sm:border-zinc-800 sm:shadow-2xl md:flex-row">
+        <aside data-testid="settings-mobile-list" className={`${mobilePage === 'detail' ? 'hidden' : 'block'} min-w-0 w-full max-w-full border-b border-zinc-800 bg-zinc-950/80 p-4 md:block md:w-60 md:shrink-0 md:border-b-0 md:border-r`}>
+          <div className="mb-4 flex min-h-12 items-center gap-3 px-2">
             <div className="rounded-xl bg-orange-500/15 p-2 text-orange-400"><Settings className="h-5 w-5" /></div>
-            <div><div className="font-semibold text-white">Settings</div><div className="text-xs text-zinc-500">SmokeStack</div></div>
+            <div className="min-w-0 flex-1"><div className="font-semibold text-white">Settings</div><div className="text-xs text-zinc-500">Smoke Stack</div></div>
+            <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-xl text-zinc-400 md:hidden" aria-label="Close settings"><X className="mx-auto h-5 w-5" /></button>
           </div>
-          <nav className="flex gap-2 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible">
+          <nav className="w-full space-y-1">
             {navItems.map((item) => (
-              <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-sm transition md:w-full ${tab === item.id ? 'bg-orange-500/15 text-orange-300' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'}`}>
-                {item.icon}<span>{item.label}</span>
+              <button key={item.id} type="button" onClick={() => { setTab(item.id); setMobilePage('detail'); }} className={`flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition ${tab === item.id ? 'bg-orange-500/15 text-orange-300' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'}`}>
+                {item.icon}<span className="flex-1">{item.label}</span><span className="text-zinc-700 md:hidden">›</span>
               </button>
             ))}
           </nav>
         </aside>
 
-        <section className="min-w-0 flex-1">
-          <header className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-[#111]/95 px-5 py-4 backdrop-blur">
-            <div><h2 className="text-lg font-semibold text-white">{navItems.find((x) => x.id === tab)?.label}</h2><p className="mt-0.5 text-xs text-zinc-500">Production settings use real account and integration state.</p></div>
-            <button type="button" onClick={onClose} className="rounded-lg p-2 text-zinc-400 hover:bg-zinc-900 hover:text-white" aria-label="Close settings"><X className="h-5 w-5" /></button>
+        <section data-testid="settings-mobile-detail" className={`${mobilePage === 'list' ? 'hidden' : 'block'} min-w-0 w-full flex-1 overflow-x-hidden md:block`}>
+          <header className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-2 border-b border-zinc-800 bg-[#111]/95 px-3 py-3 backdrop-blur sm:px-5 sm:py-4">
+            <button type="button" onClick={() => setMobilePage('list')} className="min-h-11 min-w-11 rounded-xl text-zinc-300 md:hidden" aria-label="Back to settings categories"><ArrowLeft className="mx-auto h-5 w-5" /></button>
+            <div className="min-w-0 flex-1"><h2 className="break-words text-lg font-semibold text-white">{navItems.find((x) => x.id === tab)?.label}</h2><p className="mt-0.5 text-xs leading-5 text-zinc-500">Production settings use real account and integration state.</p></div>
+            <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-xl text-zinc-400 hover:bg-zinc-900 hover:text-white" aria-label="Close settings"><X className="mx-auto h-5 w-5" /></button>
           </header>
 
-          <div className="space-y-5 p-5 sm:p-6">
+          <div className="min-w-0 space-y-5 p-4 sm:p-6">
             {tab === 'account' && <Card title="Account">
               <Row title="Signed-in account" description="Identity comes from Firebase Authentication." control={<div className="max-w-[220px] truncate text-sm text-zinc-300">{currentUser?.email || 'Not signed in'}</div>} />
               <Row title="Account status" description="Administrator privileges are not configured from Settings." control={<span className="rounded-lg bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300">{currentUser ? 'Authenticated' : 'Signed out'}</span>} />
@@ -245,6 +262,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {lowPowerSettings && onToggleLowPowerMode && <Row title="Reduce motion / effects" description="Use simpler transitions and lower-cost rendering." control={<Toggle checked={Boolean(lowPowerSettings.enabled)} onChange={() => onToggleLowPowerMode()} label="Reduce motion and effects" />} />}
               <div className="pt-3 text-xs leading-5 text-zinc-500">SmokeStack controls must remain keyboard reachable and screen-reader labeled. Device-specific accessibility features depend on the host browser/platform.</div>
             </Card>}
+
+            {tab === 'advanced' && <ReleaseSettings />}
           </div>
         </section>
       </div>
@@ -258,3 +277,21 @@ const Card: React.FC<{ title: string; children: React.ReactNode }> = ({ title, c
     {children}
   </section>
 );
+
+const ReleaseSettings: React.FC = () => {
+  const [release, setRelease] = useState<ReleaseUpdateState>(getReleaseUpdateState);
+
+  useEffect(() => {
+    const update = (event: Event) => setRelease((event as CustomEvent<ReleaseUpdateState>).detail);
+    window.addEventListener(RELEASE_UPDATE_EVENT, update);
+    return () => window.removeEventListener(RELEASE_UPDATE_EVENT, update);
+  }, []);
+
+  return <Card title="Release & client version status">
+    <Row title="Current app version" description={`Release channel: ${CURRENT_RELEASE.channel}`} control={<span className="font-mono text-xs text-zinc-200">{CURRENT_RELEASE.version}</span>} />
+    <Row title="Current build" description={`Source build ${CURRENT_RELEASE.buildId}`} control={<span className="font-mono text-xs text-zinc-200">#{CURRENT_RELEASE.buildNumber}</span>} />
+    <Row title="Latest supported client" description={release.lastCheckedAt ? `Checked ${new Date(release.lastCheckedAt).toLocaleString()}` : 'Not checked during this session.'} control={<span className="font-mono text-xs text-zinc-200">{release.latest?.version || 'Unknown'}</span>} />
+    <Row title="Application update" description={release.error ? `Unable to check: ${release.error}` : release.updateAvailable ? 'A newer deployed web build is ready.' : release.lastCheckedAt ? 'This client matches the deployed release.' : 'Smoke Stack checks automatically at startup, when connectivity returns, and every 15 minutes.'} control={<div className="flex flex-wrap gap-2"><button type="button" onClick={() => void checkForReleaseUpdate()} disabled={release.checking} className="min-h-11 rounded-xl border border-zinc-700 px-3 text-xs font-semibold text-zinc-200 disabled:opacity-50">{release.checking ? 'Checking…' : 'Check for update'}</button>{release.updateAvailable && <button type="button" onClick={() => void activateReleaseUpdate()} className="min-h-11 rounded-xl bg-orange-500 px-3 text-xs font-bold text-zinc-950">Refresh application</button>}</div>} />
+    <div className="pt-3 text-xs leading-5 text-zinc-500">App-code releases come from the repository and deployment pipeline. Account sync and Google Drive backup are separate and are never overwritten by an app refresh.</div>
+  </Card>;
+};

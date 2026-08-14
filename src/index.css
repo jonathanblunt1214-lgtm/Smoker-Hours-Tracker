@@ -224,3 +224,39 @@
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* Mobile application shell parity */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 767px) {
+  button,
+  [role='button'],
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  input,
+  select,
+  textarea {
+    max-width: 100%;
+    font-size: 16px;
+  }
+
+  table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  [role='dialog'] {
+    max-width: 100vw;
+  }
+}

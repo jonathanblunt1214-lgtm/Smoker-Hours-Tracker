@@ -475,8 +475,6 @@ END:VCALENDAR`;
     setSavedPlans(updated);
     try {
       localStorage.setItem('smoker_saved_cook_plans_v1', JSON.stringify(updated));
-      const { triggerMasterVersionSync } = require('../services/masterVersionSyncService');
-      triggerMasterVersionSync().catch(() => {});
     } catch (e) {}
 
     setPlanSavedNotice(`💾 Saved "${cutTitle}" plan to your account library!`);
@@ -502,8 +500,6 @@ END:VCALENDAR`;
     setSavedPlans(updated);
     try {
       localStorage.setItem('smoker_saved_cook_plans_v1', JSON.stringify(updated));
-      const { triggerMasterVersionSync } = require('../services/masterVersionSyncService');
-      triggerMasterVersionSync().catch(() => {});
     } catch (e) {}
   };
 

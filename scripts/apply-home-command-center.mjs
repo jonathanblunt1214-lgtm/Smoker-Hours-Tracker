@@ -17,4 +17,4 @@ if (!source.includes('<HomeCommandCenter')) {
 }
 
 fs.writeFileSync(target, source, 'utf8');
-console.log('[home-command-center] Mounted trust-safe AI Studio command center.');
+console.log('[home-command-center] Mounted the Smoke Stack command center.');
