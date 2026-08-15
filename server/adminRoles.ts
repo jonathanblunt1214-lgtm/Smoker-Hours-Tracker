@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth, requireOwner } from './authMiddleware';
+import { getGeminiApiKey, getGeminiModel } from './geminiConfig';
 
 export const adminRolesRouter = Router();
 
@@ -39,10 +40,11 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
     firestoreError = error?.message || 'Firestore health check failed.';
   }
 
-  const vertexConfigured = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE);
-  const aiConfigured = vertexConfigured || Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY);
-  const aiProvider = process.env.CHARGPT_PROVIDER || (vertexConfigured ? 'Vertex' : process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'Gemini' : process.env.API_KEY ? 'Configured provider' : null);
-  const aiModel = process.env.CHARGPT_MODEL || (vertexConfigured ? 'gemini-2.5-flash' : null);
+  const vertexConfigured = (process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE))
+    && Boolean(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT);
+  const aiConfigured = vertexConfigured || Boolean(getGeminiApiKey());
+  const aiProvider = process.env.CHARGPT_PROVIDER || (vertexConfigured ? 'Vertex' : aiConfigured ? 'Gemini' : null);
+  const aiModel = aiConfigured ? getGeminiModel() : null;
   const commit = process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null;
   const revision = process.env.K_REVISION || null;
 
