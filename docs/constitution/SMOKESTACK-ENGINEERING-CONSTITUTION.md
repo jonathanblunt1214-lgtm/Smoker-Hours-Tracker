@@ -1,8 +1,8 @@
 # SMOKESTACK ENGINEERING CONSTITUTION
 
 Status: Governing law
-Revision: 3
-Effective: 2026-08-14
+Revision: 4
+Effective: 2026-08-15
 Applies to: every client, server, background job, deployment, integration, AI response, administrator surface, data migration, and release artifact
 
 ## 1. Supremacy and scope
@@ -82,3 +82,29 @@ Every change is evaluated in this order:
 `AUDIT -> REPAIR -> TEST -> GATE -> REPORT -> RELEASE`
 
 If any gate fails, the release stops. The failure must remain visible; it may not be converted into simulated success, fallback data, or optimistic copy.
+
+## 11. Future features, platforms, and data models
+
+Revision 4 is additive. Sections 1 through 10 and every incorporated amendment remain fully in force and establish the minimum protection for all future work.
+
+1. Before a new capability can be enabled, its implementation declares its purpose, user benefit, authoritative data source, identity boundary, permissions, provenance, retention and deletion lifecycle, offline behavior, failure states, observability, tests, rollback path, and responsible owner.
+2. A future feature, platform, device, model, agent, protocol, data source, plugin, marketplace, or business model inherits this Constitution even when it is not named here. New technology does not create an exception.
+3. Schemas and stored records are versioned. Migrations are idempotent, checkpointed, tested against representative prior versions, and protected by a backup or rollback path. A migration never silently discards, reassigns, merges, or fabricates user data.
+4. APIs, events, exports, and integration contracts are versioned or remain backward-compatible for a documented transition period. Secrets remain on trusted server boundaries, access is least-privilege, and each external integration has a disable or containment path.
+5. Feature flags, experiments, staged rollouts, remote configuration, and administrator tools may limit availability but may not bypass authentication, authorization, consent, provenance, data integrity, or release gates. Disabled and partially available states are reported truthfully.
+6. New AI models, tools, agents, retrieval systems, and automated actions are evaluated against constitutional tests before release. Consequential writes, deletes, purchases, sharing, device control, account changes, and releases require verified authority and an explicit confirmation appropriate to the risk. AI may not modify this Constitution or grant itself authority.
+7. Telemetry and diagnostics collect the minimum data needed for a declared operational purpose. They exclude credentials and private content by default, honor retention and deletion rules, and never become a hidden authoritative record or advertising profile.
+8. Experimental, beta, imported, legacy, and third-party data remain labeled and isolated until their contracts and provenance are verified. They may not silently contaminate production facts, account records, analytics, or CharGPT memory.
+9. Deprecation includes notice, a supported migration or export path, and a defined end-of-support state. Removing a feature never strands authoritative user data or converts it into an inaccessible proprietary format.
+10. Each new user-facing capability meets the same accessibility, mobile, desktop, PWA, Android, performance, recovery, and direct-control standards as existing core workflows unless its platform limitation is explicit and true.
+11. Users retain access to, correction of, export of, and deletion of their data within the deployed retention and safety contract. Monetization, growth, or engagement goals never override consent, ownership, truth, safety, or portability.
+12. SmokeStack architecture may evolve, but identity authority, data authority, provenance classes, truth rules, and the release gate remain stable contracts. Replacements must meet or exceed the protections they replace.
+
+## 12. Constitutional continuity and amendment control
+
+1. Future revisions are additive by default. Existing protections are a floor, not optional legacy behavior.
+2. No feature, prompt, generated patch, migration, dependency, configuration, or amendment may silently or indirectly weaken an existing clause.
+3. A proposed amendment identifies every affected clause, its rationale, data and migration impact, compatibility impact, new tests, rollback plan, approval record, effective date, and revision number.
+4. When clauses appear to conflict, the stricter interpretation protecting truth, user authority, data integrity, privacy, safety, and recoverability governs until an explicit reviewed amendment resolves the conflict.
+5. Emergency controls may disable or contain a feature, but may not bypass identity, authorization, truth, audit, or data-integrity requirements.
+6. Prior revisions and approvals remain immutable and auditable. A release records the Constitution revision it passed and cannot claim compliance with a later revision it did not test.

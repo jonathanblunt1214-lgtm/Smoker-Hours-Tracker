@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { accountSyncLabel, charGPTAvailabilityLabel, maintenanceStatusLabel, CONSTITUTION_REVISION } from '../src/lib/constitution';
 
 test('constitution revision is explicit', () => {
-  assert.equal(CONSTITUTION_REVISION, 3);
+  assert.equal(CONSTITUTION_REVISION, 4);
 });
 test('signed-out users are never described as synchronized', () => {
   assert.equal(accountSyncLabel({ authenticated: false, online: true, state: 'synced' }), 'Sign in to sync');

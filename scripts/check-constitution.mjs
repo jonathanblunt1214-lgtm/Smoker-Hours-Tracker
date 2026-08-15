@@ -46,8 +46,12 @@ forbidText('src/utils/adminAuth.ts', 'MASTER_ADMIN_EMAIL', 'client code may not 
 forbidText('src/utils/adminAuth.ts', 'localStorage', 'client storage may not establish administrator authority');
 
 requireText('src/lib/constitution.ts', 'unknownMeansUnknown: true', 'constitutional runtime contract missing');
+requireText('src/lib/constitution.ts', 'futureFeaturesInheritConstitution: true', 'future-feature inheritance contract missing');
 requireText('docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt', 'AUDIT -> REPAIR -> TEST -> GATE -> REPORT -> RELEASE', 'plain-text governing Constitution is missing');
 requireText('docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt', 'content hash are retained', 'manufacturer-site fact policy is missing');
+requireText('docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt', 'Existing protections are a', 'additive amendment protection is missing');
+requireText('docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt', 'AI may not modify this Constitution or grant itself authority.', 'future AI authority boundary is missing');
+requireText('docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt', 'Replacements must meet or exceed the protections they replace.', 'future architecture compatibility rule is missing');
 requireText('docs/constitution/CHARGPT-CAPABILITIES.txt', 'It does not generate disguised fallback advice.', 'CharGPT capability contract is missing');
 requireText('src/lib/firestoreData.ts', "schemaVersion: '0.03'", 'authoritative schema version missing');
 requireText('src/lib/firestoreData.ts', 'deletedCookLogIds', 'delete tombstones missing');
@@ -67,4 +71,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log('SmokeStack Constitution revision 3 gate passed.');
+console.log('SmokeStack Constitution revision 4 gate passed.');
