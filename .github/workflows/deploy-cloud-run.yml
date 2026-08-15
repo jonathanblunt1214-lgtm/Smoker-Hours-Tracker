@@ -30,10 +30,10 @@ jobs:
 
     steps:
       - name: Checkout reviewed source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -46,6 +46,10 @@ jobs:
 
       - name: Build release
         run: npm run build
+
+      - id: release_metadata
+        name: Read immutable release metadata
+        run: echo "app_version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
 
       - id: auth
         name: Authenticate to Google Cloud without a stored key
@@ -86,6 +90,9 @@ jobs:
             GOOGLE_CLOUD_LOCATION=global
             GOOGLE_GENAI_USE_VERTEXAI=true
             FIREBASE_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
+            APP_VERSION=${{ steps.release_metadata.outputs.app_version }}
+            GIT_COMMIT_SHA=${{ github.sha }}
+            CHARGPT_MODEL=gemini-2.5-flash
           flags: >-
             --allow-unauthenticated
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
