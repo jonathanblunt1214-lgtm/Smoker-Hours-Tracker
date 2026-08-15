@@ -20,6 +20,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/components/FuelDatabaseExplorer.trusted.tsx src/components/SettingsModal.trusted.tsx src/components/GoogleDriveSyncModal.trusted.tsx src/components/PushAndAlexaHub.trusted.tsx src/components/AIPitmasterModal.trusted.tsx src/utils/notificationAndAlexa.trusted.ts src/utils/storage.trusted.ts server.js",
     "lint": "npm run generate:trusted-runtime && tsc --noEmit",
+    "test:firestore-rules": "npx --yes firebase-tools@15.27.0 emulators:exec --project=smokestack-rules-test --only firestore \"node scripts/test-firestore-rules.mjs\"",
     "verify:owner-security": "npm run generate:trusted-runtime",
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
   },
@@ -44,6 +45,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/pdf-parse": "^1.1.5",

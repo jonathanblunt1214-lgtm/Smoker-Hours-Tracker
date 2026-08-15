@@ -1,0 +1,73 @@
+name: Deploy Smoke Stack Firebase Configuration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firestore.rules
+      - firestore.indexes.json
+      - firebase.json
+      - scripts/test-firestore-rules.mjs
+      - package.json
+      - package-lock.json
+      - .github/workflows/deploy-firebase-config.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: smokestack-firebase-configuration
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: smoker-log-app
+  DEPLOYER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
+
+jobs:
+  deploy-firestore-configuration:
+    name: Verify and deploy Firestore configuration
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up Java for the Firestore emulator
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify Firestore ownership rules locally
+        run: npm run test:firestore-rules
+
+      - id: auth
+        name: Authenticate without a stored Google key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Deploy reviewed Firestore rules and indexes
+        run: npx --yes firebase-tools@15.27.0 deploy --project "${GCP_PROJECT_ID}" --only firestore:rules,firestore:indexes --non-interactive
+
+      - name: Record Firebase configuration result
+        run: |
+          echo "## Smoke Stack Firebase configuration" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Commit: ${GITHUB_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Project: ${GCP_PROJECT_ID}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Firestore rules: deployed after emulator verification" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Firestore indexes: deployed from source control" >> "${GITHUB_STEP_SUMMARY}"
