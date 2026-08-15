@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Smoke Stack Pitmaster Companion</string>
+    <string name="title_activity_main">Smoke Stack Pitmaster Companion</string>
+    <string name="package_name">com.smokestack.pitmaster</string>
+    <string name="custom_url_scheme">com.smokestack.pitmaster</string>
+</resources>

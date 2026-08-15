@@ -2,11 +2,15 @@ import { initializeApp, getApps } from 'firebase/app';
 import {
   getAuth,
   signInWithPopup,
+  signInWithCredential,
   GoogleAuthProvider,
   onAuthStateChanged,
   signOut,
   User,
 } from 'firebase/auth';
+
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { SmokerProfile, CookLog, FuelLog, LocalUserProfile } from '../types';
 
@@ -48,22 +52,69 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (): Promise<{
+  user: User;
+  accessToken: string;
+} | null> => {
   try {
     isSigningIn = true;
+
+    if (Capacitor.isNativePlatform()) {
+      const nativeResult =
+        await FirebaseAuthentication.signInWithGoogle({
+          useCredentialManager: true,
+        });
+
+      const idToken = nativeResult.credential?.idToken;
+
+      if (!idToken) {
+        throw new Error('Google native sign-in did not return an ID token.');
+      }
+
+      const credential = GoogleAuthProvider.credential(idToken);
+      const firebaseResult = await signInWithCredential(auth, credential);
+
+      const accessToken = nativeResult.credential?.accessToken || '';
+
+      if (accessToken) {
+        cachedAccessToken = accessToken;
+        try {
+          localStorage.setItem(GOOGLE_OAUTH_TOKEN_KEY, accessToken);
+        } catch (e) {
+          console.warn('Could not store Google OAuth token:', e);
+        }
+      }
+
+      return {
+        user: firebaseResult.user,
+        accessToken,
+      };
+    }
+
     const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
+
+    const credential =
+      GoogleAuthProvider.credentialFromResult(result);
+
     if (!credential?.accessToken) {
       throw new Error('Failed to retrieve Google OAuth access token');
     }
 
     cachedAccessToken = credential.accessToken;
+
     try {
-      localStorage.setItem(GOOGLE_OAUTH_TOKEN_KEY, cachedAccessToken);
+      localStorage.setItem(
+        GOOGLE_OAUTH_TOKEN_KEY,
+        cachedAccessToken
+      );
     } catch (e) {
       console.warn('Could not store Google OAuth token:', e);
     }
-    return { user: result.user, accessToken: cachedAccessToken };
+
+    return {
+      user: result.user,
+      accessToken: cachedAccessToken,
+    };
   } catch (error: any) {
     console.error('Sign-in error:', error);
     throw error;

@@ -26,6 +26,9 @@
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "^8.4.0",
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@types/multer": "^2.2.0",
@@ -46,6 +49,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@firebase/rules-unit-testing": "5.0.1",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
