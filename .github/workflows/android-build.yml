@@ -26,7 +26,7 @@ jobs:
   debug-apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Detect native Android source
         id: native
@@ -41,7 +41,7 @@ jobs:
             echo "The native Android source is not present on this branch. Reconcile and merge the existing Android branch to activate APK builds." >> "${GITHUB_STEP_SUMMARY}"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         if: steps.native.outputs.present == 'true'
         with:
           node-version: 22
