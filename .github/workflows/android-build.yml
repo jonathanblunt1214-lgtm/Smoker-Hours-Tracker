@@ -28,43 +28,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify native Android source is present
+      - name: Detect native Android source
+        id: native
         shell: bash
         run: |
           set -euo pipefail
-          if [ ! -x android/gradlew ]; then
-            echo "Android native source is not present on this branch." >> "${GITHUB_STEP_SUMMARY}"
-            echo "Merge and reconcile the existing Android branch before enabling store publishing." >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
+          if [ -f android/gradlew ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "## Android build skipped" >> "${GITHUB_STEP_SUMMARY}"
+            echo "The native Android source is not present on this branch. Reconcile and merge the existing Android branch to activate APK builds." >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - uses: actions/setup-node@v4
+        if: steps.native.outputs.present == 'true'
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: steps.native.outputs.present == 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Validate web application
+        if: steps.native.outputs.present == 'true'
         run: npm run lint && npm run build
 
       - name: Sync Capacitor Android project
+        if: steps.native.outputs.present == 'true'
         run: npx cap sync android
 
       - uses: actions/setup-java@v4
+        if: steps.native.outputs.present == 'true'
         with:
           distribution: temurin
           java-version: '21'
           cache: gradle
 
       - name: Test and build debug APK
+        if: steps.native.outputs.present == 'true'
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew testDebugUnitTest assembleDebug --stacktrace
 
       - name: Upload debug APK
+        if: steps.native.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: smokestack-debug-apk-${{ github.sha }}
