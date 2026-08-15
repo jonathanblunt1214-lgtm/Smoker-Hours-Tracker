@@ -42,10 +42,10 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
     createdAt: new Date().toISOString().slice(0, 10),
   };
 
-  const isLinked = safeUserAccount.charGPTLinked ?? true; // Default linked for seamless UX
-  const profileId = safeUserAccount.charGPTProfileId || `chargpt-${(safeUserAccount.email || 'user').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 8)}-${Date.now().toString().slice(-4)}`;
+  const isLinked = safeUserAccount.charGPTLinked === true;
+  const profileId = safeUserAccount.charGPTProfileId || `chargpt-${(safeUserAccount.email || 'local-user').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(0, 24)}`;
   const currentPersona = safeUserAccount.charGPTPersona || 'Master Pitmaster';
-  const autoSync = safeUserAccount.charGPTAutoSyncMemory ?? true;
+  const autoSync = safeUserAccount.charGPTAutoSyncMemory === true;
   const customInstructions = safeUserAccount.charGPTCustomInstructions || '';
 
   const handleToggleLink = () => {
@@ -68,8 +68,8 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
       setIsLinking(false);
       setFeedbackMsg(
         nextLinked
-          ? `✅ Linked ${AI_PITMASTER_NAME} Profile (ID: ${profileId}) to ${safeUserAccount.name || safeUserAccount.email || 'Pitmaster'}!`
-          : `⚠️ Unlinked ${AI_PITMASTER_NAME} Profile from account.`
+          ? `Saved the ${AI_PITMASTER_NAME} link preference locally. Account sync is reported separately.`
+          : `Saved the ${AI_PITMASTER_NAME} unlink preference locally. Account sync is reported separately.`
       );
       if (onSyncServer) onSyncServer();
       setTimeout(() => setFeedbackMsg(null), 3500);
@@ -161,8 +161,8 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
     onUpdateUserAccount(updated);
     setFeedbackMsg(
       nextVal
-        ? `🔄 ${AI_PITMASTER_NAME} Memory Vault auto-sync enabled for account`
-        : `⏸️ ${AI_PITMASTER_NAME} Memory Vault auto-sync paused`
+        ? `${AI_PITMASTER_NAME} memory sync preference enabled; verified sync status is shown separately.`
+        : `${AI_PITMASTER_NAME} memory sync preference paused.`
     );
     if (onSyncServer) onSyncServer();
     setTimeout(() => setFeedbackMsg(null), 3000);
@@ -185,7 +185,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
 
     setTimeout(() => {
       setIsLinking(false);
-      setFeedbackMsg(`🧠 Synchronized ${freshMemory.learnedRules?.length || 0} learned thermal rules with account!`);
+      setFeedbackMsg(`Requested account synchronization for ${freshMemory.learnedRules?.length || 0} approved memory rule(s). Check the app sync status for confirmation.`);
       setTimeout(() => setFeedbackMsg(null), 3500);
     }, 500);
   };
@@ -206,7 +206,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
               {isLinked ? (
                 <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[9px] font-mono font-bold rounded-full flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  <span>Linked</span>
+                  <span>Link Preference On</span>
                 </span>
               ) : (
                 <span className="px-2 py-0.5 bg-zinc-800 text-zinc-400 border border-zinc-700 text-[9px] font-mono font-bold rounded-full flex items-center gap-1">
@@ -216,7 +216,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
               )}
             </div>
             <p className="text-[10px] text-zinc-400 font-sans mt-0.5">
-              Bind your {AI_PITMASTER_NAME} AI profile, learned thermal memory vault, and persona preferences directly to your pitmaster account.
+              Configure whether approved {AI_PITMASTER_NAME} memories and persona preferences should be included in account synchronization.
             </p>
           </div>
         </div>
@@ -266,7 +266,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
             <div>
               <span className="text-[9px] text-zinc-500 uppercase block font-bold">Linked Date</span>
               <span className="text-[11px] font-bold text-zinc-300 block">
-                {userAccount.charGPTLinkedAt || new Date().toISOString().slice(0, 10)}
+                {userAccount.charGPTLinkedAt || 'Not verified'}
               </span>
             </div>
             <div>
@@ -350,7 +350,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
                   Auto-Sync {AI_PITMASTER_NAME} Memory Vault
                 </span>
                 <span className="text-[10px] text-zinc-400 block">
-                  Keep learned thermal rules and wood pairings synced across devices & cloud backups.
+                  Request cross-device synchronization for approved memories. The app-wide sync state confirms the authoritative result.
                 </span>
               </div>
             </div>
@@ -362,7 +362,7 @@ export const CharGPTProfileLinkCard: React.FC<CharGPTProfileLinkCardProps> = ({
               className="px-2.5 py-1.5 bg-[#22222e] hover:bg-[#2c2c3c] border border-[#38384d] text-zinc-200 hover:text-white text-[11px] font-mono font-bold rounded-lg flex items-center space-x-1.5 shrink-0 cursor-pointer"
             >
               <RefreshCw className={`w-3 h-3 text-orange-400 ${isLinking ? 'animate-spin' : ''}`} />
-              <span>Sync Memory Vault</span>
+              <span>Request Memory Sync</span>
             </button>
           </div>
 

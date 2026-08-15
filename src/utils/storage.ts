@@ -893,6 +893,9 @@ export interface StoredChatMessage {
   text: string;
   timestamp: string;
   imageData?: string;
+  availability?: 'available' | 'limited' | 'unavailable' | 'error' | 'grounding_rejected' | 'context_unavailable';
+  groundingStatus?: string;
+  contextSummary?: string;
 }
 
 export function loadCharGPTChatHistory(): StoredChatMessage[] {
@@ -906,8 +909,13 @@ export function loadCharGPTChatHistory(): StoredChatMessage[] {
 }
 
 export function saveCharGPTChatHistory(messages: StoredChatMessage[]): void {
-  // Keep last 40 messages to optimize storage
-  const trimmed = (messages || []).slice(-40);
+  // Keep compact text history only. Uploaded image bytes are temporary UI data
+  // and must not be duplicated into localStorage.
+  const trimmed = (messages || []).slice(-40).map((message) => ({
+    ...message,
+    text: String(message.text || '').slice(0, 8_000),
+    imageData: undefined,
+  }));
   safeSetItem(KEYS.CHARGPT_CHAT_HISTORY, JSON.stringify(trimmed));
 }
 
@@ -1267,6 +1275,5 @@ export function save10kHoursSimulated(simulated: boolean): void {
     localStorage.setItem(SIMULATED_10K_HOURS_KEY, simulated ? 'true' : 'false');
   } catch (e) {}
 }
-
 
 

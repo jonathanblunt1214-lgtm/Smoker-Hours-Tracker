@@ -43,6 +43,22 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   }
 }
 
+export async function optionalAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return next();
+  if (!authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Invalid authentication header.' });
+  const idToken = authHeader.slice('Bearer '.length).trim();
+  if (!idToken) return res.status(401).json({ error: 'Authentication required.' });
+  try {
+    const token = await adminAuth.verifyIdToken(idToken, true);
+    req.user = { uid: token.uid, email: token.email, role: normalizedRole(token), claims: token };
+    return next();
+  } catch (error) {
+    console.warn('[Auth] Optional Firebase ID token rejected', error);
+    return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+  }
+}
+
 export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
   if (req.user.role !== 'owner' && req.user.role !== 'admin') {

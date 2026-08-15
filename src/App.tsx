@@ -1119,6 +1119,25 @@ export default function App() {
             initialCookId={aiInitialCookId}
             initialPrompt={aiInitialPrompt}
             currentUserEmail={currentUser?.email || userSession?.email || ''}
+            onMemoryUpdate={(memory) => {
+              saveCharGPTMemory(memory);
+              if (!currentUser?.uid) {
+                showToast('CharGPT memory saved on this device. Sign in to synchronize it with an account.');
+                return;
+              }
+              setSyncStatus('syncing');
+              saveUserBundleToFirestore(currentUser.uid, { charGPTMemory: memory })
+                .then((success) => {
+                  setSyncStatus(success ? 'synced' : 'error');
+                  showToast(success
+                    ? 'CharGPT memory saved and synchronized to your account.'
+                    : 'CharGPT memory saved locally; account synchronization failed and can be retried.');
+                })
+                .catch(() => {
+                  setSyncStatus('error');
+                  showToast('CharGPT memory saved locally; account synchronization failed and can be retried.');
+                });
+            }}
             onNavigateToPlanner={() => setActiveTab('planner')}
             onNavigateToNewCook={() => setActiveTab('new-cook')}
             onOpenMasterAdmin={() => setIsMasterAdminModalOpen(true)}
