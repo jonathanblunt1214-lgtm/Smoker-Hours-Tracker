@@ -24,7 +24,8 @@
     "test:chargpt-contract": "npm run generate:trusted-runtime && node --import tsx --test scripts/test-chargpt-contract.mts",
     "verify:owner-security": "npm run generate:trusted-runtime",
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs",
-    "test:database-harvesters": "node --import tsx --test scripts/test-database-harvesters.mts"
+    "test:database-harvesters": "node --import tsx --test scripts/test-database-harvesters.mts",
+    "test:operations-dashboard": "node --import tsx --test scripts/test-operations-dashboard.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
