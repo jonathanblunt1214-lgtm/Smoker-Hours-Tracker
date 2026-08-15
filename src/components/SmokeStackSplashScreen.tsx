@@ -76,8 +76,8 @@ export const SmokeStackSplashScreen: React.FC<SmokeStackSplashScreenProps> = ({
       }
       // Phase 4 (95% - 100%): Complete
       else {
-        setStatusText('Pit Operating at Peak Precision!');
-        setOptDetails('All systems optimized • 100% Ready');
+        setStatusText('SmokeStack interface ready');
+        setOptDetails('Loading checks completed');
       }
 
       if (pct >= 100) {

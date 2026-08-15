@@ -273,13 +273,13 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
   const [fuelTab, setFuelTab] = useState<'database' | 'inventory'>('database');
 
   // Collapsible Section & Sub-Tab Navigation State
-  const [activeSubTab, setActiveSubTab] = useState<'all' | 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend'>('all');
+  const [activeSubTab, setActiveSubTab] = useState<'all' | 'hardware' | 'maintenance' | 'fuel' | 'mods' | 'blend'>('maintenance');
   const [expandedSections, setExpandedSections] = useState({
-    hardware: true,
+    hardware: false,
     maintenance: true,
-    fuel: true,
-    mods: true,
-    blend: true,
+    fuel: false,
+    mods: false,
+    blend: false,
   });
 
   // Inner Sub-Section Collapsible States
@@ -649,9 +649,10 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
     }
   };
 
-  const dueTasksCount = profile.maintenanceTasks.filter(
+  const hasSmoker = Boolean(profile.name || profile.model || profile.smokerType);
+  const dueTasksCount = hasSmoker ? profile.maintenanceTasks.filter(
     (t) => profile.currentHours - t.lastPerformedHours >= t.intervalHours
-  ).length;
+  ).length : 0;
 
   return (
     <div className="space-y-6 pb-12">
@@ -679,7 +680,6 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               <option value="fuel">🪵 Fuel, Pellets & Consumption Logs</option>
               <option value="blend">🧪 Custom Fuel Blend Lab (Pellet & Charcoal Physics)</option>
               <option value="hardware">🔧 Hardware Diagnostics & Burner Sync</option>
-              <option value="all">✨ All Fuel & Care Views</option>
             </select>
             <ChevronDown className="w-4 h-4 text-orange-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
@@ -781,20 +781,6 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveSubTab('all');
-              setAllSections(true);
-            }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap min-h-[38px] flex items-center space-x-1.5 border ${
-              activeSubTab === 'all'
-                ? 'bg-orange-500 text-zinc-950 border-orange-400 shadow-lg shadow-orange-500/20 font-black'
-                : 'bg-[#222222] hover:bg-[#2c2c2c] text-zinc-400 border-[#2a2a2a]'
-            }`}
-          >
-            <span>✨ All Views</span>
-          </button>
         </div>
 
         <div className="flex items-center space-x-2 shrink-0 self-end sm:self-auto text-xs">
@@ -1283,7 +1269,9 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
               <div>
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                   <h2 className="text-base font-extrabold text-white">Maintenance Schedule</h2>
-                  {dueTasksCount > 0 ? (
+                  {!hasSmoker ? (
+                    <span className="text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md">Select a smoker</span>
+                  ) : dueTasksCount > 0 ? (
                     <span className="text-[10px] font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/30 px-2 py-0.5 rounded-md flex items-center space-x-1">
                       <AlertTriangle className="w-3 h-3 text-red-400" />
                       <span>{dueTasksCount} Service Due</span>
@@ -1303,7 +1291,7 @@ export const FuelAndMaintenance: React.FC<FuelAndMaintenanceProps> = ({
             <div className="flex items-center space-x-3 shrink-0">
               <div className="text-right">
                 <span className="text-[10px] uppercase text-zinc-400 font-bold block">Current Runtime</span>
-                <span className="font-mono text-base font-bold text-orange-400">{profile.currentHours.toFixed(2)} hrs</span>
+                <span className="font-mono text-base font-bold text-orange-400">{hasSmoker ? `${profile.currentHours.toFixed(2)} hrs` : 'Not available'}</span>
               </div>
 
               <div className="p-1.5 bg-[#181818] rounded-lg text-zinc-400 border border-[#2a2a2a]">

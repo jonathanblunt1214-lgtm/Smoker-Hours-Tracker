@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Database,
+  Download,
   GitBranch,
   History,
   RefreshCw,
@@ -19,6 +20,9 @@ import {
 } from 'lucide-react';
 import { auth } from '../lib/driveSync';
 import { CookLog, FuelLog, SmokerProfile } from '../types';
+
+const KnowledgeAdminPanel = React.lazy(() => import('./KnowledgeAdminPanel').then((module) => ({ default: module.KnowledgeAdminPanel })));
+const MeatSourceHarvesterPanel = React.lazy(() => import('./MeatSourceHarvesterPanel').then((module) => ({ default: module.MeatSourceHarvesterPanel })));
 
 interface MasterAdminDashboardModalProps {
   isOpen: boolean;
@@ -289,6 +293,28 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
     } finally { setBusy(null); }
   };
 
+  const downloadGovernanceDocument = async (document: 'constitution' | 'chargpt', filename: string) => {
+    setBusy(`download:${document}`);
+    try {
+      const response = await authorizedFetch(`/api/admin/governance/${document}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || 'Document download failed.');
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = window.document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+      showToast(`${filename} downloaded.`);
+    } catch (err: any) {
+      showToast(err?.message || 'Document download failed.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const service = (key: string) => health?.services?.[key] || { status: 'unknown', detail: 'Status has not been checked.' };
   const attention = health?.summary?.attention || [];
 
@@ -335,6 +361,19 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
           <StatusCard label="Verified knowledge" state={service('knowledgePipelines')} />
         </div>
       </Panel>
+
+      {me.permissions.owner && <Panel title="Owner governance downloads" subtitle="OWNER-only files served after Firebase role verification. Downloads are recorded in the audit log." icon={<ShieldCheck className="h-4 w-4" />}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button disabled={busy !== null} onClick={() => void downloadGovernanceDocument('constitution', 'SMOKESTACK-APP-CONSTITUTION.txt')} className="flex min-h-12 items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-left text-sm text-zinc-200 transition hover:border-orange-500/50 disabled:opacity-50">
+            <span><span className="block font-semibold">App Constitution</span><span className="mt-1 block text-xs text-zinc-500">Universal governing contract · Revision 3</span></span>
+            <Download className="h-4 w-4 text-orange-400" />
+          </button>
+          <button disabled={busy !== null} onClick={() => void downloadGovernanceDocument('chargpt', 'CHARGPT-CAPABILITIES.txt')} className="flex min-h-12 items-center justify-between rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 text-left text-sm text-zinc-200 transition hover:border-orange-500/50 disabled:opacity-50">
+            <span><span className="block font-semibold">CharGPT Capabilities</span><span className="mt-1 block text-xs text-zinc-500">Allowed behavior and hard limitations</span></span>
+            <Download className="h-4 w-4 text-orange-400" />
+          </button>
+        </div>
+      </Panel>}
     </div>;
 
     if (activeTab === 'chargpt') return <div className="space-y-5">
@@ -379,6 +418,12 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
       <Panel title="Publishing gate" subtitle="No automated ingestion becomes trusted knowledge without provenance and review." icon={<ShieldCheck className="h-4 w-4" />}>
         <div className="grid gap-3 md:grid-cols-4">{['Acquire source','Normalize record','Verify provenance','Approve & publish'].map((step, i) => <div key={step} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3"><div className="text-xs text-orange-400">{i + 1}</div><div className="mt-1 text-sm font-medium text-zinc-200">{step}</div></div>)}</div>
       </Panel>
+      <React.Suspense fallback={<div className="rounded-2xl border border-zinc-800 bg-[#141414] p-5 text-sm text-zinc-500">Loading verified knowledge workbench…</div>}>
+        <div className="space-y-5">
+          <MeatSourceHarvesterPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />
+          <KnowledgeAdminPanel request={authorizedFetch} showToast={showToast} onChanged={() => loadHealth()} />
+        </div>
+      </React.Suspense>
     </div>;
 
     if (activeTab === 'access') return <div className="space-y-5">

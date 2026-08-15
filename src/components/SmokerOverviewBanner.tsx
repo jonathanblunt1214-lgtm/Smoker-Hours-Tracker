@@ -4,6 +4,7 @@ import { Clock, Flame, ShieldCheck, Scale, AlertTriangle, Wrench, ChevronDown, C
 import { calculateFuelTelemetryBySmokerType, calculateSmokerHealthScore } from '../utils/smokerCalculations';
 import { useSmokerHours, SmokerHours } from '../services/smokerSyncService';
 import { formatFuelOnHandWeight, TempUnit } from '../utils/tempUtils';
+import { maintenanceStatusLabel } from '../lib/constitution';
 
 interface SmokerOverviewBannerProps {
   profile: SmokerProfile;
@@ -135,9 +136,11 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
     const val = e.target.value;
     try {
       const rawAccount = localStorage.getItem('pitmaster_local_user_account');
-      const account = rawAccount ? JSON.parse(rawAccount) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
-      account.fuelOnHand = val;
-      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(account));
+      if (rawAccount) {
+        const account = JSON.parse(rawAccount);
+        account.fuelOnHand = val;
+        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(account));
+      }
     } catch (e) {}
 
     if (onUpdateProfile) {
@@ -158,9 +161,11 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
 
     try {
       const rawAccount = localStorage.getItem('pitmaster_local_user_account');
-      const account = rawAccount ? JSON.parse(rawAccount) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
-      account.fuelOnHand = val;
-      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(account));
+      if (rawAccount) {
+        const account = JSON.parse(rawAccount);
+        account.fuelOnHand = val;
+        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(account));
+      }
     } catch (e) {}
 
     if (onUpdateProfile) {
@@ -238,10 +243,10 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
               type="button"
               onClick={handleTriggerProfileUpload}
               className="inline-flex items-center justify-center px-3 py-2.5 rounded-xl font-bold text-xs bg-[#242429] hover:bg-[#2e2e36] text-orange-400 border border-orange-500/30 hover:border-orange-500/60 transition-all cursor-pointer active:scale-98 min-h-[42px]"
-              title="Upload current hours and cook logs to profile"
+              title="Synchronize this device with the signed-in SmokeStack account"
             >
               <CloudUpload className="w-4 h-4 mr-1.5 text-orange-400" />
-              Upload to Profile
+              Sync Account
             </button>
 
             <button
@@ -386,7 +391,7 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
                 </div>
                 <div className="mt-1 sm:mt-2 text-[10px] sm:text-[11px] font-mono truncate flex items-center justify-between">
                   <span className={dueMaintenanceCount > 0 ? 'text-amber-400 font-bold' : 'text-emerald-400'}>
-                    {dueMaintenanceCount > 0 ? `${dueMaintenanceCount} Service Due` : '100% Care Sync'}
+                    {maintenanceStatusLabel({ hasSmoker: !isNoSmokerSelected, dueCount: dueMaintenanceCount })}
                   </span>
                 </div>
               </div>
@@ -398,4 +403,3 @@ export const SmokerOverviewBanner: React.FC<SmokerOverviewBannerProps> = ({
     </div>
   );
 };
-

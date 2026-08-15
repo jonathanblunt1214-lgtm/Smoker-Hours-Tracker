@@ -1,0 +1,114 @@
+name: Build and Publish Android
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: smokestack-android
+  cancel-in-progress: false
+
+env:
+  ANDROID_PACKAGE_NAME: com.smokestack.pitmaster
+  CAPACITOR_VERSION: 8.5.0
+  CAPACITOR_ASSETS_VERSION: 3.0.5
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
+  PLAY_PUBLISHER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    environment: android-production
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install web dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install pinned Android build tooling
+        run: npm install --no-save --no-package-lock "@capacitor/core@${CAPACITOR_VERSION}" "@capacitor/android@${CAPACITOR_VERSION}" "@capacitor/cli@${CAPACITOR_VERSION}" "@capacitor/assets@${CAPACITOR_ASSETS_VERSION}"
+
+      - name: Run constitutional tests and build web app
+        run: npm run lint && npm test && npm run build
+
+      - name: Generate native project from canonical web release
+        env:
+          SMOKESTACK_ANDROID_VERSION_CODE: ${{ github.run_number }}
+          SMOKESTACK_ANDROID_VERSION_NAME: ${{ github.run_number }}-${{ github.sha }}
+        run: |
+          npx cap add android
+          npx capacitor-assets generate --android --assetPath assets
+          npx cap sync android
+          node scripts/configure-android-build.mjs
+
+      - name: Decode Play upload signing key
+        if: ${{ vars.PLAY_PUBLISH_ENABLED == 'true' }}
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          test -n "${ANDROID_UPLOAD_KEYSTORE_BASE64}"
+          printf '%s' "${ANDROID_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/smokestack-upload.jks"
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build signed release AAB
+        if: ${{ vars.PLAY_PUBLISH_ENABLED == 'true' }}
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/smokestack-upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Upload installable debug artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smokestack-android-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload signed Play artifact
+        if: ${{ vars.PLAY_PUBLISH_ENABLED == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smokestack-android-release-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - id: play_auth
+        name: Authenticate to Google Play without a stored service-account key
+        if: ${{ vars.PLAY_PUBLISH_ENABLED == 'true' }}
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.PLAY_PUBLISHER_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Publish to Google Play internal track
+        if: ${{ vars.PLAY_PUBLISH_ENABLED == 'true' }}
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.play_auth.outputs.access_token }}
+          ANDROID_BUNDLE_PATH: android/app/build/outputs/bundle/release/app-release.aab
+          GOOGLE_PLAY_TRACK: internal
+        run: node scripts/publish-google-play.mjs

@@ -32,7 +32,7 @@ Firestore configuration deployment and backups use the same keyless identity. Se
 
 1. ChatGPT/Codex prepares repository changes.
 2. A reviewed pull request is merged to `main`.
-3. GitHub Actions runs the trusted-runtime checks and production build.
+3. GitHub Actions runs the constitutional, security, test, and production-build gates.
 4. GitHub exchanges its repository/ref-scoped OIDC token for short-lived Google credentials.
 5. The immutable commit-tagged container is pushed to Artifact Registry and deployed to Cloud Run.
 6. The workflow verifies `/api/health` before reporting success.

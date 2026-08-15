@@ -9,6 +9,7 @@ import { HourlyCheckReminderBanner } from './HourlyCheckReminderBanner';
 import { ThermalCurveAnalyticsCard } from './ThermalCurveAnalyticsCard';
 import { PhysicalLogSheetModal } from './PhysicalLogSheetModal';
 import { calculateThermalCurveAnalytics } from '../utils/thermalCurveCalculator';
+import { authorizedApiFetch } from '../lib/authorizedApi';
 import { Flame, Plus, Trash2, Clock, Scale, Thermometer, Save, X, AlertCircle, Cloud, CloudSun, MapPin, RefreshCw, Search, Loader2, CheckCircle2, Zap, Play, Pause, RotateCcw, Timer, Sparkles, Camera, Upload, Image as ImageIcon, SwitchCamera, Check, Navigation, Wind, Droplets, Compass, Bot, Lock, Unlock, Award, Printer, Download } from 'lucide-react';
 
 // Helper to adjust time strings (e.g. "8:22 AM", "14:22", "8:22") by adding offset minutes
@@ -55,27 +56,12 @@ function addMinutesToTimeStr(baseTime: string, offsetMins: number): string {
 }
 
 function generateInitialReadingsWithCurrentTime(): TemperatureReading[] {
-  const now = new Date();
-  const startTimeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const offsets = [0, 60, 120, 180, 240, 300]; // Hourly 1-hr intervals
-  const defaultMeatTemps = [40, 110, 152, 165, 192, 203];
-  const defaultCookTemps = [225, 225, 228, 250, 252, 250];
-  const defaultTargetTemps = [225, 225, 225, 250, 250, 250];
-
-  return offsets.map((offset, idx) => ({
-    id: `r-init-${idx + 1}-${Date.now()}`,
-    time: offset === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, offset),
-    timestampMinutes: offset,
-    targetTemp: defaultTargetTemps[idx],
-    cookingTemp: defaultCookTemps[idx],
-    meatTemp: defaultMeatTemps[idx],
-    ambientTemp: undefined, // Blank until weather system data is pulled
-    actionsTaken: idx === 0 ? 'Start' : (idx === offsets.length - 1 ? 'Finish' : ''),
-  }));
+  return [];
 }
 
 interface CookLogFormProps {
   profile: SmokerProfile;
+  isAuthenticated?: boolean;
   nextPageNumber: number;
   initialRecipe?: RecipeSuggestion | null;
   initialCook?: CookLog | null;
@@ -88,6 +74,7 @@ interface CookLogFormProps {
 
 export const CookLogForm: React.FC<CookLogFormProps> = ({
   profile,
+  isAuthenticated = false,
   nextPageNumber,
   initialCook,
   initialRecipe,
@@ -105,11 +92,13 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   const [showPhysicalSheetModal, setShowPhysicalSheetModal] = useState<boolean>(false);
 
   const [autoSyncOnSave, setAutoSyncOnSave] = useState<boolean>(() => {
+    if (!isAuthenticated) return false;
     const saved = localStorage.getItem('smoker_auto_sync_new_cooks');
     return saved !== null ? saved === 'true' : true;
   });
 
   const toggleAutoSyncOnSave = () => {
+    if (!isAuthenticated) return;
     const next = !autoSyncOnSave;
     setAutoSyncOnSave(next);
     localStorage.setItem('smoker_auto_sync_new_cooks', String(next));
@@ -202,62 +191,26 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Helper to generate hourly schedule readings matching cook duration
+  // Create blank hourly rows. Planned rows are not observed temperatures.
   const generateHourlyReadings = (
     totalHrsInput: number,
-    currentAmbient: number,
-    pType: string,
-    pCut: string
+    currentAmbient?: number
   ): TemperatureReading[] => {
-    const totalHrs = Math.max(1, Math.min(24, Math.round(Number(totalHrsInput) || 8)));
-    let finishMeatTemp = 203;
-    const pTypeLower = (pType || '').toLowerCase();
-    const pCutLower = (pCut || '').toLowerCase();
-
-    if (pTypeLower.includes('poultry') || pCutLower.includes('chicken') || pCutLower.includes('turkey') || pCutLower.includes('wings')) {
-      finishMeatTemp = 165;
-    } else if (pTypeLower.includes('fish') || pTypeLower.includes('seafood') || pCutLower.includes('salmon')) {
-      finishMeatTemp = 145;
-    } else if (pTypeLower.includes('beef') && (pCutLower.includes('steak') || pCutLower.includes('tri-tip') || pCutLower.includes('prime rib'))) {
-      finishMeatTemp = 135;
-    } else if (pTypeLower.includes('pork') && (pCutLower.includes('tenderloin') || pCutLower.includes('chop'))) {
-      finishMeatTemp = 145;
-    }
-
-    const startMeatTemp = 40;
-    const pitTarget = 225;
+    const parsedHours = Number(totalHrsInput);
+    const totalHrs = Number.isFinite(parsedHours) ? Math.max(1, Math.min(24, Math.round(parsedHours))) : 1;
     const newHourlyReadings: TemperatureReading[] = [];
+    const startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
     for (let hr = 0; hr <= totalHrs; hr++) {
-      let meatTemp = startMeatTemp;
-      if (hr === 0) {
-        meatTemp = startMeatTemp;
-      } else {
-        const progressRatio = hr / totalHrs;
-        if (progressRatio <= 0.4) {
-          meatTemp = Math.round(startMeatTemp + (150 - startMeatTemp) * (hr / (totalHrs * 0.4)));
-        } else if (progressRatio <= 0.65) {
-          const stallProgress = (progressRatio - 0.4) / 0.25;
-          meatTemp = Math.round(150 + 15 * stallProgress);
-        } else {
-          const finalProgress = (progressRatio - 0.65) / 0.35;
-          meatTemp = Math.round(165 + (finishMeatTemp - 165) * finalProgress);
-        }
-      }
-
-      const ambientOffset = Math.round(Math.sin((hr / totalHrs) * Math.PI) * 3);
-      const hourlyAmbient = currentAmbient + ambientOffset;
-      const startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
       newHourlyReadings.push({
         id: `r-hr-${hr}-${Date.now()}`,
         time: hr === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, hr * 60),
         timestampMinutes: hr * 60,
-        targetTemp: pitTarget,
-        cookingTemp: pitTarget + (hr % 2 === 1 ? 2 : 0),
-        meatTemp,
-        ambientTemp: hourlyAmbient,
-        actionsTaken: hr === 0 ? 'Start' : (hr === totalHrs ? 'Finish' : ''),
+        targetTemp: 0,
+        cookingTemp: 0,
+        meatTemp: 0,
+        ambientTemp: currentAmbient,
+        actionsTaken: '',
       });
     }
 
@@ -270,11 +223,10 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     setTimerSeconds(Math.round(safeVal * 3600));
 
     if (autoSyncEntries) {
-      const currentAmbient = weatherData?.tempF || 72;
-      const newReadings = generateHourlyReadings(safeVal, currentAmbient, proteinType, proteinCut);
+      const newReadings = generateHourlyReadings(safeVal, weatherData?.tempF);
       setReadings(newReadings);
       const numHrs = Math.max(1, Math.round(safeVal));
-      setHourlyPullNotice(`Automatically adjusted log table to ${numHrs + 1} hourly entries (0:00 to ${numHrs}:00) for ${safeVal} hrs duration.`);
+      setHourlyPullNotice(`Added ${numHrs + 1} blank hourly rows. Enter only observed temperatures.`);
       setTimeout(() => setHourlyPullNotice(null), 4000);
     }
   };
@@ -301,7 +253,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     setSearchedCutQuery(cutToQuery);
 
     try {
-      const res = await fetch('/api/chargpt', {
+      const res = await authorizedApiFetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -541,8 +493,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
       setFinishedNotes(initialRecipe.description);
       setNextTimeNotes(initialRecipe.proTip);
 
-      const generatedReadings = generateHourlyReadings(initialRecipe.estHours, 72, initialRecipe.proteinType, initialRecipe.proteinCut);
-      setReadings(generatedReadings);
+      setReadings(generateHourlyReadings(initialRecipe.estHours));
     }
   }, [initialRecipe]);
 
@@ -773,22 +724,21 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const last = readings[readings.length - 1];
     const nextIndex = readings.length;
-    const currentAmbient = weatherData?.tempF || 72;
 
     const newReading: TemperatureReading = {
       id: `reading-hourly-${Date.now()}`,
       time: timeStr,
       timestampMinutes: Math.round(timerSeconds / 60) || nextIndex * 60,
-      targetTemp: last ? last.targetTemp : 225,
-      cookingTemp: last ? last.cookingTemp : 225,
-      meatTemp: last ? Math.min(203, last.meatTemp + 8) : 45,
-      ambientTemp: currentAmbient,
-      actionsTaken: `Hourly Probe Check at ${timeStr}. Meat: ${last ? Math.min(203, last.meatTemp + 8) : 45}°F`,
+      targetTemp: last?.targetTemp || 0,
+      cookingTemp: last?.cookingTemp || 0,
+      meatTemp: 0,
+      ambientTemp: weatherData?.tempF,
+      actionsTaken: '',
     };
 
     setReadings((prev) => [...prev, newReading]);
     setFormTab('temps');
-    setHourlyPullNotice(`Logged hourly thermometer check entry at ${timeStr}`);
+    setHourlyPullNotice(`Added a blank check row at ${timeStr}. Enter the probe reading you observed.`);
     setTimeout(() => setHourlyPullNotice(null), 4000);
   };
 
@@ -836,8 +786,8 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
       if (result.success && result.data && Array.isArray(result.data.readings) && result.data.readings.length > 0) {
         // Pull ONLY meat temp from uploaded temperature graph.
         // Target temp is manual, cooking temp stays manual, and pull ambient temp from weather system automatically if pulled, else leave blank.
-        const defaultTarget = readings[0]?.targetTemp || 225;
-        const defaultCooking = readings[0]?.cookingTemp || 225;
+        const defaultTarget = readings[0]?.targetTemp || 0;
+        const defaultCooking = readings[0]?.cookingTemp || 0;
         const ambientFromWeather = weatherData ? weatherData.tempF : undefined;
 
         const extractedReadings: TemperatureReading[] = result.data.readings.map((r: any, idx: number) => {
@@ -851,7 +801,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
             timestampMinutes: typeof r.timestampMinutes === 'number' ? r.timestampMinutes : idx * 120,
             targetTemp: manualTarget,
             cookingTemp: manualCooking,
-            meatTemp: typeof r.meatTemp === 'number' ? r.meatTemp : 165,
+            meatTemp: typeof r.meatTemp === 'number' ? r.meatTemp : 0,
             ambientTemp: ambientFromWeather,
             actionsTaken: r.actionsTaken || 'Extracted meat temperature from graph image',
           };
@@ -860,7 +810,9 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
         setReadings(extractedReadings);
 
         const summaryText = result.data.summary || `Extracted ${extractedReadings.length} meat temperature data points from graph!`;
-        const metricsText = ` (Peak Meat: ${result.data.peakMeatTempF || 203}°F)`;
+        const metricsText = typeof result.data.peakMeatTempF === 'number'
+          ? ` (Peak parsed meat temperature: ${result.data.peakMeatTempF}°F)`
+          : '';
         setGraphExtractionNotice(`📈 ${summaryText}${metricsText}`);
       } else {
         setGraphExtractionNotice('⚠️ Graph analysis complete. Log updated with parsed meat temperature points.');
@@ -876,49 +828,13 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
   const [hourlyPullNotice, setHourlyPullNotice] = useState<string | null>(null);
   const [isAiAnalyzingNotes, setIsAiAnalyzingNotes] = useState(false);
 
-  // Smart local fallback for CharGPT Next Time Notes recommendation
-  const generateLocalFallbackNotes = (pType: string, pCut: string, notes: string, lastReading?: TemperatureReading) => {
-    const text = (notes || '').toLowerCase();
-    const proteinStr = `${pType} ${pCut}`.toLowerCase();
-    const finalMeatTemp = lastReading?.meatTemp || 0;
-
-    if (text.includes('dry') || text.includes('tough') || text.includes('chewy')) {
-      if (proteinStr.includes('brisket') || proteinStr.includes('pork') || proteinStr.includes('shoulder')) {
-        return 'Wrap tightly in butcher paper with beef tallow/butter around 165°F stall and rest in an insulated cooler for at least 2 hours before slicing.';
-      }
-      return 'Spritz every 45 mins with apple cider vinegar/juice, pull 5°F earlier, and allow a longer rest before serving.';
-    }
-
-    if (text.includes('bark') || text.includes('soft') || text.includes('mushy')) {
-      return 'Delay foil wrap until internal temp reaches 175°F to allow bark to fully set, and trim surface fat down to 1/4 inch.';
-    }
-
-    if (text.includes('salty') || text.includes('rub') || text.includes('seasoning')) {
-      return 'Reduce coarse kosher salt in rub by 25% or switch to a lower-sodium binder base like yellow mustard.';
-    }
-
-    if (text.includes('smoke') || text.includes('bitter') || text.includes('dirty')) {
-      return 'Ensure exhaust damper is fully open for clean blue smoke airflow; avoid burning damp wood pellets or over-choking intake.';
-    }
-
-    if (text.includes('stall') || text.includes('long') || text.includes('slow')) {
-      return 'Increase pit temp by 15°F during stall phase (up to 250°F-275°F) or wrap tightly in double-layer heavy duty foil.';
-    }
-
-    if (finalMeatTemp > 0 && finalMeatTemp < 195 && (proteinStr.includes('brisket') || proteinStr.includes('pork'))) {
-      return `Target higher internal finish temp (~203°F) until probe glides like warm butter; pulled at ${finalMeatTemp}°F which was slightly under-rendered.`;
-    }
-
-    return `For the next ${pCut || pType || 'cook'}: Maintain steady pit temp, spritz hourly after bark sets, and rest minimum 90 mins before carving.`;
-  };
-
   // CharGPT Analysis Handler for Next Time Notes
   const handleAnalyzeAndSuggestNextTimeNotes = async () => {
     setIsAiAnalyzingNotes(true);
     const lastReading = readings[readings.length - 1];
 
     try {
-      const res = await fetch('/api/chargpt', {
+      const res = await authorizedApiFetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -946,20 +862,17 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         if (data.text) {
           const cleanedText = data.text.replace(/^[*\-\s]+/, '').trim();
           setNextTimeNotes(cleanedText);
-          setHourlyPullNotice(`✨ ${AI_NAME} analyzed your cook log & generated Next Time Notes!`);
+          setHourlyPullNotice(`${AI_NAME} returned an AI suggestion. Review it before saving.`);
           setTimeout(() => setHourlyPullNotice(null), 5000);
           setIsAiAnalyzingNotes(false);
           return;
         }
       }
     } catch (err) {
-      console.warn('API call to Gemini failed, using smart local fallback advice', err);
+      console.warn('CharGPT next-time suggestion is unavailable', err);
     }
 
-    // Fallback if API offline or missing key
-    const fallback = generateLocalFallbackNotes(proteinType, proteinCut, finishedNotes, lastReading);
-    setNextTimeNotes(fallback);
-    setHourlyPullNotice(`✨ ${AI_NAME} analyzed your cook log & generated Next Time Notes!`);
+    setHourlyPullNotice(`${AI_NAME} is unavailable. No fallback advice was inserted.`);
     setTimeout(() => setHourlyPullNotice(null), 5000);
     setIsAiAnalyzingNotes(false);
   };
@@ -971,17 +884,15 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
   // Auto-Generate Hourly Schedule Starting at 0:00 for every hour up to hoursLogged
   const handleGenerateHourlyReadings = () => {
-    const totalHrs = Math.max(1, Math.min(24, Math.round(Number(hoursLogged) || 8)));
-    const currentAmbient = weatherData?.tempF || 72;
-    const newHourlyReadings = generateHourlyReadings(totalHrs, currentAmbient, proteinType, proteinCut);
+    const enteredHours = Number(hoursLogged);
+    const totalHrs = Number.isFinite(enteredHours) && enteredHours > 0
+      ? Math.max(1, Math.min(24, Math.round(enteredHours)))
+      : 1;
+    const newHourlyReadings = generateHourlyReadings(totalHrs, weatherData?.tempF);
 
     setReadings(newHourlyReadings);
-    setHourlyPullNotice(`Automatically generated ${totalHrs + 1} hourly log entries (0:00 to ${totalHrs}:00) for cook duration.`);
+    setHourlyPullNotice(`Added ${totalHrs + 1} blank hourly rows. No temperatures were inferred.`);
     setTimeout(() => setHourlyPullNotice(null), 5000);
-  };
-
-  const handleSetSixStandardLines = () => {
-    setReadings(generateInitialReadingsWithCurrentTime());
   };
 
   const startingHours = initialCook?.startingSmokerHours !== undefined
@@ -991,12 +902,11 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
   // Automated Smoker Burn Rate Metric Calculation via Centralized Physics Utility
   const effectiveSpecs = getEffectiveSmokerSpecs(profile);
-  const ambientTempF = weatherData ? weatherData.tempF : 72;
-  const autoCalculatedFuelLbs = calculateFuelConsumptionLbs(
-    hoursLogged || 0,
-    225,
-    profile
-  );
+  const ambientTempF = weatherData?.tempF;
+  const observedPitTarget = readings.find((reading) => reading.targetTemp > 0)?.targetTemp || 0;
+  const autoCalculatedFuelLbs = ambientTempF !== undefined && observedPitTarget > 0 && hoursLogged > 0
+    ? calculateFuelConsumptionLbs(hoursLogged, observedPitTarget, profile)
+    : 0;
   const effectiveBurnRateLbsHr = hoursLogged && hoursLogged > 0
     ? Number((autoCalculatedFuelLbs / hoursLogged).toFixed(2))
     : effectiveSpecs.baselineBurnRateLbsHr;
@@ -1020,24 +930,14 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
         id: `r-new-${Date.now()}`,
         time: timeStr,
         timestampMinutes: nextMins,
-        targetTemp: lastReading ? lastReading.targetTemp : 225,
-        cookingTemp: lastReading ? lastReading.cookingTemp : 225,
-        meatTemp: lastReading ? Math.min(203, lastReading.meatTemp + 15) : 180,
+        targetTemp: lastReading?.targetTemp || 0,
+        cookingTemp: lastReading?.cookingTemp || 0,
+        meatTemp: 0,
         ambientTemp: weatherData ? weatherData.tempF : (lastReading ? lastReading.ambientTemp : undefined),
-        actionsTaken: 'Finish',
+        actionsTaken: '',
       };
 
-      const updated = prev.map((r, idx) => {
-        if (idx === 0) {
-          return { ...r, actionsTaken: r.actionsTaken || 'Start' };
-        }
-        return {
-          ...r,
-          actionsTaken: r.actionsTaken === 'Finish' ? '' : r.actionsTaken,
-        };
-      });
-
-      return [...updated, newRead];
+      return [...prev, newRead];
     });
   };
 
@@ -2131,21 +2031,20 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                 )}
               </div>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Review, edit, or append lines extracted from your graph curve or generated schedule.
+                Enter observed values. Schedule rows are blank until you record a reading.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Auto-Generate 1-Hr Interval Schedule Button */}
               <button
                 type="button"
                 onClick={handleGenerateHourlyReadings}
                 disabled={isPublishedToTotalHours}
                 className="px-3.5 py-1.5 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 text-orange-400 text-xs font-black rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-40"
-                title="Automatically generate hourly log lines starting at 0:00 for total cook duration"
+                title="Add blank hourly rows for the entered cook duration"
               >
                 <Clock className="w-4 h-4 text-orange-400" />
-                <span>Generate Hourly Schedule</span>
+                <span>Add Blank Hourly Rows</span>
               </button>
 
               <button
@@ -2187,6 +2086,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="text"
+                        aria-label="Reading time"
                         disabled={isPublishedToTotalHours}
                         value={r.time}
                         onChange={(e) => handleReadingChange(r.id, 'time', e.target.value)}
@@ -2196,8 +2096,9 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="number"
+                        aria-label={`Target temperature at ${r.time}`}
                         disabled={isPublishedToTotalHours}
-                        value={r.targetTemp}
+                        value={r.targetTemp || ''}
                         onChange={(e) => handleReadingChange(r.id, 'targetTemp', parseInt(e.target.value) || 0)}
                         className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-zinc-300 text-xs disabled:opacity-60"
                       />
@@ -2205,8 +2106,9 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="number"
+                        aria-label={`Cooking temperature at ${r.time}`}
                         disabled={isPublishedToTotalHours}
-                        value={r.cookingTemp}
+                        value={r.cookingTemp || ''}
                         onChange={(e) => handleReadingChange(r.id, 'cookingTemp', parseInt(e.target.value) || 0)}
                         className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-orange-400 font-bold text-xs disabled:opacity-60"
                       />
@@ -2214,8 +2116,9 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="number"
+                        aria-label={`Meat temperature at ${r.time}`}
                         disabled={isPublishedToTotalHours}
-                        value={r.meatTemp}
+                        value={r.meatTemp || ''}
                         onChange={(e) => handleReadingChange(r.id, 'meatTemp', parseInt(e.target.value) || 0)}
                         className="w-16 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-red-400 font-bold text-xs disabled:opacity-60"
                       />
@@ -2223,6 +2126,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="number"
+                        aria-label={`Ambient temperature at ${r.time}`}
                         disabled={isPublishedToTotalHours}
                         value={r.ambientTemp ?? ''}
                         placeholder="--"
@@ -2233,6 +2137,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2">
                       <input
                         type="text"
+                        aria-label={`Actions taken at ${r.time}`}
                         disabled={isPublishedToTotalHours}
                         value={r.actionsTaken}
                         onChange={(e) => handleReadingChange(r.id, 'actionsTaken', e.target.value)}
@@ -2242,6 +2147,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     <td className="p-2 text-right">
                       <button
                         type="button"
+                        aria-label={`Remove reading at ${r.time}`}
                         disabled={isPublishedToTotalHours}
                         onClick={() => handleRemoveReading(r.id)}
                         className="p-1 text-zinc-500 hover:text-red-400 rounded disabled:opacity-30"
@@ -2455,15 +2361,16 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             <button
               type="button"
               onClick={toggleAutoSyncOnSave}
+              disabled={!isAuthenticated}
               className={`px-3 py-2 rounded-xl border text-[11px] font-mono font-bold flex items-center space-x-1.5 transition-all cursor-pointer ${
                 autoSyncOnSave
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
                   : 'bg-[#1a1a1a] text-zinc-400 border-[#2a2a2a] hover:text-zinc-200'
               }`}
-              title="Toggle automatic cloud synchronization when saving cook log"
+              title={isAuthenticated ? 'Toggle account synchronization when saving' : 'Sign in to synchronize account data'}
             >
               <Cloud className="w-3.5 h-3.5" />
-              <span>Auto-Sync Cloud: {autoSyncOnSave ? 'ON ⚡' : 'OFF (Local Only)'}</span>
+              <span>{isAuthenticated ? (autoSyncOnSave ? 'Account sync on' : 'Account sync off') : 'Sign in to sync'}</span>
             </button>
 
             <button
@@ -2478,13 +2385,13 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
               type="submit"
               className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-zinc-950 font-bold text-xs rounded-xl shadow-lg flex items-center space-x-2 transition-all cursor-pointer"
               title={
-                autoSyncOnSave
-                  ? "Saves cook log locally and automatically syncs to cloud server"
-                  : "Saves cook log locally to your user account until uploaded for analysis"
+                isAuthenticated && autoSyncOnSave
+                  ? 'Save this cook and synchronize it with your account'
+                  : 'Save this cook on this device'
               }
             >
               <Save className="w-4 h-4" />
-              <span>{autoSyncOnSave ? "Save & Sync to Cloud" : "Save Locally to Account"}</span>
+              <span>{isAuthenticated && autoSyncOnSave ? 'Save & Sync Account' : 'Save on This Device'}</span>
             </button>
           </div>
         </div>
@@ -2498,18 +2405,18 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             id: `temp-${Date.now()}`,
             date: date || new Date().toISOString().split('T')[0],
             smokerType: smokerType || profile.smokerName || profile.smokerType,
-            title: title || 'Custom Smoke Session',
+            title: title || 'Untitled draft',
             proteinType,
-            proteinCut: proteinCut || 'Custom Cut',
-            hoursLogged: Number(hoursLogged) || 6,
+            proteinCut,
+            hoursLogged: Number(hoursLogged) || 0,
             startingSmokerHours: startingHours,
             endingSmokerHours: endingHours,
             temperatureReadings: readings,
             finishedNotes,
             nextTimeNotes,
-            seasoningRubs: seasoningRubs || 'Standard Rub',
-            saucesGlazes: saucesGlazes || 'None',
-            fuelType: fuelType || 'Pellets',
+            seasoningRubs,
+            saucesGlazes,
+            fuelType,
             pageNumber: nextPageNumber,
           } as any}
           onClose={() => setShowPhysicalSheetModal(false)}

@@ -1,44 +1,8 @@
-import React, { useState } from 'react';
-import {
-  X,
-  RefreshCw,
-  Cloud,
-  CheckCircle2,
-  AlertCircle,
-  Activity,
-  Trash2,
-  HardDrive,
-  Download,
-  Upload,
-  UserCheck,
-  ShieldCheck,
-  Smartphone,
-} from 'lucide-react';
-import {
-  saveCookLogs,
-  saveFuelLogs,
-  saveSmokerProfile,
-} from '../utils/storage';
-import {
-  useSyncLogs,
-  clearSyncLogs,
-  SmokerSyncEngine,
-  SmokerHoursSyncService,
-  addSyncLog,
-} from '../services/smokerSyncService';
-import {
-  googleSignIn,
-  saveToGoogleDrive,
-  loadFromGoogleDrive,
-  logout,
-  getAccessToken,
-} from '../lib/driveSync';
-import {
-  loadSmokerProfile,
-  loadCookLogs,
-  loadFuelLogs,
-  loadLocalUserProfile,
-} from '../utils/storage';
+import React, { useEffect, useState } from 'react';
+import { AlertCircle, CheckCircle2, Download, HardDrive, RefreshCw, ShieldCheck, Upload, UserCheck, X } from 'lucide-react';
+import { googleSignIn, getAccessToken, loadFromGoogleDrive, logout, saveToGoogleDrive } from '../lib/driveSync';
+import { loadCookLogs, loadFuelLogs, loadSmokerProfile, saveCookLogs, saveFuelLogs, saveSmokerProfile } from '../utils/storage';
+import { addSyncLog } from '../services/smokerSyncService';
 
 interface UniversalSyncDashboardModalProps {
   isOpen: boolean;
@@ -51,65 +15,40 @@ interface UniversalSyncDashboardModalProps {
 }
 
 export const UniversalSyncDashboardModal: React.FC<UniversalSyncDashboardModalProps> = ({
-  isOpen,
-  onClose,
-  currentUserEmail,
-  accessToken: initialAccessToken,
-  onAuthSuccess,
-  onRefreshData,
-  showToast,
+  isOpen, onClose, currentUserEmail, accessToken: initialAccessToken,
+  onAuthSuccess, onRefreshData, showToast,
 }) => {
-  const syncLogs = useSyncLogs();
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isDriveBusy, setIsDriveBusy] = useState(false);
   const [localToken, setLocalToken] = useState<string | null>(initialAccessToken || null);
   const [localEmail, setLocalEmail] = useState<string | null>(currentUserEmail || null);
 
+  useEffect(() => setLocalToken(initialAccessToken || null), [initialAccessToken]);
+  useEffect(() => setLocalEmail(currentUserEmail || null), [currentUserEmail]);
+
   if (!isOpen) return null;
+  const isAccountSignedIn = Boolean(currentUserEmail);
+  const isDriveAuthorized = Boolean(localToken || initialAccessToken);
 
-  const deviceId =
-    typeof window !== 'undefined'
-      ? localStorage.getItem('smoker_app_device_id') || `device_${Math.random().toString(36).substring(2, 9)}`
-      : 'device_unknown';
-
-  const isConnectedToDrive = !!(localToken || initialAccessToken || localEmail);
-
-  const handleManualSync = async () => {
-    setIsSyncing(true);
+  const loadExplicitLocalAccount = () => {
     try {
-      const baseUrl = window.location.origin;
-      const engine = new SmokerSyncEngine(deviceId, baseUrl, 'auth_token_default', 1800000);
-      const hoursService = new SmokerHoursSyncService(baseUrl, deviceId);
-
-      await engine.performSync('manual_sync');
-      await hoursService.sync([], Date.now() - 86400000);
-
-      showToast('🔄 30-Minute Sync & Cloud Backup complete!');
-      if (onRefreshData) onRefreshData();
-    } catch (err: any) {
-      showToast(`❌ Sync failed: ${err.message || 'Error executing sync'}`);
-    } finally {
-      setIsSyncing(false);
+      const raw = localStorage.getItem('pitmaster_local_user_account');
+      return raw ? JSON.parse(raw) : undefined;
+    } catch {
+      return undefined;
     }
   };
 
   const handleConnectDrive = async () => {
     setIsDriveBusy(true);
     try {
-      const res = await googleSignIn();
-      if (res) {
-        setLocalToken(res.accessToken);
-        setLocalEmail(res.user.email);
-        if (onAuthSuccess) onAuthSuccess(res.user, res.accessToken);
-        showToast(`☁️ Connected to Google Drive as ${res.user.email}!`);
-        addSyncLog({
-          type: 'manual_sync',
-          status: 'success',
-          summary: `Connected Google Drive account (${res.user.email})`,
-        });
-      }
-    } catch (err: any) {
-      showToast(`❌ Google Drive connection error: ${err.message || 'Failed'}`);
+      const result = await googleSignIn();
+      if (!result?.accessToken) throw new Error('Google Drive authorization was not completed.');
+      setLocalToken(result.accessToken);
+      setLocalEmail(result.user.email || null);
+      onAuthSuccess?.(result.user, result.accessToken);
+      showToast('Google Drive authorization completed. No backup has been written yet.');
+    } catch (error: any) {
+      showToast(error?.message || 'Google Drive authorization failed.');
     } finally {
       setIsDriveBusy(false);
     }
@@ -118,345 +57,76 @@ export const UniversalSyncDashboardModal: React.FC<UniversalSyncDashboardModalPr
   const handleBackupToDriveNow = async () => {
     setIsDriveBusy(true);
     try {
-      let token = localToken || initialAccessToken;
-      if (!token) {
-        token = await getAccessToken();
-      }
-      if (!token) {
-        throw new Error('Google Drive token not found. Please sign in to Google Drive first.');
-      }
-
-      const profile = loadSmokerProfile();
-      const cookLogs = loadCookLogs();
-      const fuelLogs = loadFuelLogs();
-      const userAccount = loadLocalUserProfile();
-
-      const res = await saveToGoogleDrive(token, { profile, cookLogs, fuelLogs, userAccount });
-      showToast(
-        res.createdNew
-          ? '☁️ Created new pitmaster_smoker_data.json backup in Google Drive!'
-          : '☁️ Updated pitmaster_smoker_data.json backup in Google Drive!'
-      );
-      addSyncLog({
-        type: 'manual_sync',
-        status: 'success',
-        summary: `Manual Google Drive Cloud Backup: ${res.createdNew ? 'Created new file' : 'Updated file'}`,
+      const token = localToken || initialAccessToken || await getAccessToken();
+      if (!token) throw new Error('Authorize Google Drive before creating a backup.');
+      const result = await saveToGoogleDrive(token, {
+        profile: loadSmokerProfile(), cookLogs: loadCookLogs(), fuelLogs: loadFuelLogs(),
+        userAccount: loadExplicitLocalAccount(),
       });
-    } catch (err: any) {
-      showToast(`❌ Drive backup failed: ${err.message || 'Upload error'}`);
-      addSyncLog({
-        type: 'manual_sync',
-        status: 'error',
-        summary: `Manual Google Drive Backup Failed: ${err.message || 'Error'}`,
-      });
+      addSyncLog({ type: 'manual_sync', status: 'success', summary: `Verified Google Drive backup ${result.createdNew ? 'created' : 'updated'}` });
+      showToast(`Google Drive backup ${result.createdNew ? 'created' : 'updated'} successfully.`);
+    } catch (error: any) {
+      addSyncLog({ type: 'manual_sync', status: 'error', summary: `Google Drive backup failed: ${error?.message || 'Unknown error'}` });
+      showToast(error?.message || 'Google Drive backup failed.');
     } finally {
       setIsDriveBusy(false);
     }
   };
 
   const handleRestoreFromDrive = async () => {
+    if (!window.confirm('Restore the Google Drive backup onto this device? Existing local data will be replaced.')) return;
     setIsDriveBusy(true);
     try {
-      let token = localToken || initialAccessToken;
-      if (!token) {
-        token = await getAccessToken();
-      }
-      if (!token) {
-        throw new Error('Google Drive token not found. Please sign in to Google Drive first.');
-      }
-
+      const token = localToken || initialAccessToken || await getAccessToken();
+      if (!token) throw new Error('Authorize Google Drive before restoring a backup.');
       const data = await loadFromGoogleDrive(token);
-      if (!data) {
-        showToast('⚠️ No backup file (pitmaster_smoker_data.json) found in your Google Drive.');
-        return;
-      }
-
-      if (data.profile) {
-        saveSmokerProfile(data.profile);
-        localStorage.setItem('pitmaster_smoker_profile', JSON.stringify(data.profile));
-      }
-      if (data.cookLogs) {
-        saveCookLogs(data.cookLogs);
-        localStorage.setItem('pitmaster_cook_logs', JSON.stringify(data.cookLogs));
-      }
-      if (data.fuelLogs) {
-        saveFuelLogs(data.fuelLogs);
-        localStorage.setItem('pitmaster_fuel_logs', JSON.stringify(data.fuelLogs));
-      }
-      if (data.userAccount || data.userProfile) {
-        localStorage.setItem(
-          'pitmaster_local_user_account',
-          JSON.stringify(data.userAccount || data.userProfile)
-        );
-      }
-
-      showToast(`✅ Restored ${data.cookLogs?.length || 0} smoke log(s) & profile from Google Drive!`);
-      addSyncLog({
-        type: 'manual_sync',
-        status: 'success',
-        summary: `Restored data from Google Drive backup (${new Date(data.savedAt).toLocaleDateString()})`,
-      });
-      if (onRefreshData) onRefreshData();
-    } catch (err: any) {
-      showToast(`❌ Drive restore failed: ${err.message || 'Download error'}`);
+      if (!data) throw new Error('No SmokeStack backup was found in Google Drive.');
+      if (data.profile) saveSmokerProfile(data.profile);
+      if (Array.isArray(data.cookLogs)) saveCookLogs(data.cookLogs);
+      if (Array.isArray(data.fuelLogs)) saveFuelLogs(data.fuelLogs);
+      if (data.userAccount || data.userProfile) localStorage.setItem('pitmaster_local_user_account', JSON.stringify(data.userAccount || data.userProfile));
+      addSyncLog({ type: 'manual_sync', status: 'success', summary: `Google Drive backup restored (${data.savedAt || 'timestamp unavailable'})` });
+      onRefreshData?.();
+      showToast('Google Drive backup restored on this device.');
+    } catch (error: any) {
+      showToast(error?.message || 'Google Drive restore failed.');
     } finally {
       setIsDriveBusy(false);
     }
   };
 
   const handleDisconnectDrive = async () => {
-    try {
-      await logout();
-      setLocalToken(null);
-      setLocalEmail(null);
-      showToast('Google Drive account disconnected.');
-      addSyncLog({
-        type: 'manual_sync',
-        status: 'success',
-        summary: 'Disconnected Google Drive account',
-      });
-    } catch (e) {
-      console.warn('Logout error:', e);
-    }
+    await logout().catch(() => undefined);
+    setLocalToken(null);
+    setLocalEmail(null);
+    showToast('Google Drive authorization removed from this device.');
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-      <div className="bg-[#141418] border border-[#2a2a34] rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden text-zinc-100">
-        
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-[#262630] flex items-center justify-between bg-[#1a1a20]">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 rounded-xl bg-orange-500/15 border border-orange-500/30 text-orange-400">
-              <Cloud className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center space-x-2">
-                <span>30-Minute Sync & Google Drive Cloud Backup</span>
-              </h2>
-              <p className="text-xs text-zinc-400">
-                Universal automated data synchronization & cloud backups for all pitmasters
-              </p>
-            </div>
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="sync-title">
+    <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#2a2a34] bg-[#141418] text-zinc-100 shadow-2xl">
+      <header className="flex items-center justify-between border-b border-[#262630] bg-[#1a1a20] p-4 sm:p-5">
+        <div><h2 id="sync-title" className="text-lg font-bold text-white">Account Sync & Backups</h2><p className="mt-1 text-xs text-zinc-400">Firestore account synchronization and Google Drive backup are separate.</p></div>
+        <button type="button" onClick={onClose} aria-label="Close account sync and backups" className="min-h-11 min-w-11 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white"><X className="mx-auto h-5 w-5" /></button>
+      </header>
+
+      <div className="space-y-4 overflow-y-auto p-4 sm:p-6">
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-orange-400" /><div><h3 className="font-semibold text-white">SmokeStack account</h3><p className="mt-1 text-sm leading-6 text-zinc-400">{isAccountSignedIn ? `Signed in as ${currentUserEmail}. Firestore is the authoritative account data service; pending and failed writes remain visible in the app.` : 'Not signed in. Data remains on this device and is not described as synchronized.'}</p></div></div>
+          <div className={`mt-4 flex items-center gap-2 rounded-xl border p-3 text-sm ${isAccountSignedIn ? 'border-emerald-900/60 bg-emerald-500/5 text-emerald-300' : 'border-amber-900/60 bg-amber-500/5 text-amber-300'}`}>
+            {isAccountSignedIn ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+            {isAccountSignedIn ? 'Account synchronization available' : 'Sign in required for account synchronization'}
           </div>
+        </section>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-[#282834] transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Content Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 web-carousel-scrollbar">
-          
-          {/* Universal Sync System Status Banner */}
-          <div className="bg-[#1b1b22] border border-[#2e2e3a] rounded-xl p-4 sm:p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#2a2a34] pb-3">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span className="text-xs sm:text-sm font-bold text-emerald-400 font-mono">
-                    30-MINUTE AUTOMATED SYNC ENGINE ACTIVE
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Runs continuously every 30 minutes for all users. Synchronizes cook logs, smoker operating hours, and Google Drive cloud copies automatically.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleManualSync}
-                disabled={isSyncing}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-zinc-950 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50 shadow-md shadow-orange-950/30 shrink-0"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                <span>{isSyncing ? 'Syncing Engine...' : 'Sync & Backup Now'}</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
-              <div className="p-3 rounded-lg bg-[#141418] border border-[#262630] flex items-center justify-between">
-                <span className="text-zinc-400 flex items-center space-x-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-orange-400" />
-                  <span>Device ID:</span>
-                </span>
-                <span className="text-amber-300 font-bold truncate max-w-[150px]">{deviceId}</span>
-              </div>
-
-              <div className="p-3 rounded-lg bg-[#141418] border border-[#262630] flex items-center justify-between">
-                <span className="text-zinc-400 flex items-center space-x-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>User Scope:</span>
-                </span>
-                <span className="text-blue-300 font-bold">All Pitmaster Accounts</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Google Drive Integration Section */}
-          <div className="bg-[#1b1b22] border border-[#2e2e3a] rounded-xl p-4 sm:p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[#2a2a34] pb-3">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400">
-                  <HardDrive className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xs sm:text-sm font-bold text-white">Google Drive Cloud Storage</h3>
-                  <p className="text-[11px] sm:text-xs text-zinc-400">
-                    Saves a secure <code className="text-orange-300 font-mono">pitmaster_smoker_data.json</code> file in your Google Drive 'Smoke Stack' folder.
-                  </p>
-                </div>
-              </div>
-
-              {isConnectedToDrive ? (
-                <div className="flex items-center space-x-2">
-                  <span className="text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-1 rounded-lg font-mono font-bold flex items-center space-x-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Connected ({localEmail || currentUserEmail || 'Google User'})</span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleDisconnectDrive}
-                    className="text-[11px] text-zinc-400 hover:text-red-400 underline transition-colors cursor-pointer"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleConnectDrive}
-                  disabled={isDriveBusy}
-                  className="w-full sm:w-auto px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md shadow-blue-950/40 disabled:opacity-50 shrink-0"
-                >
-                  <UserCheck className="w-4 h-4" />
-                  <span>Connect Google Drive</span>
-                </button>
-              )}
-            </div>
-
-            {/* Google Drive Actions */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={handleBackupToDriveNow}
-                disabled={isDriveBusy}
-                className="p-3 rounded-xl bg-[#141418] hover:bg-[#202028] border border-[#2a2a34] hover:border-orange-500/40 text-left transition-all cursor-pointer flex items-center space-x-3 disabled:opacity-50"
-              >
-                <div className="p-2 rounded-lg bg-orange-500/20 text-orange-400">
-                  <Upload className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-white">Backup to Google Drive</div>
-                  <div className="text-[10px] text-zinc-400">Upload current smoke logs & smoker profile</div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRestoreFromDrive}
-                disabled={isDriveBusy}
-                className="p-3 rounded-xl bg-[#141418] hover:bg-[#202028] border border-[#2a2a34] hover:border-blue-500/40 text-left transition-all cursor-pointer flex items-center space-x-3 disabled:opacity-50"
-              >
-                <div className="p-2 rounded-lg bg-blue-500/20 text-blue-400">
-                  <Download className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-white">Restore from Google Drive</div>
-                  <div className="text-[10px] text-zinc-400">Download and apply saved pitmaster data</div>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Real-time Sync Audit Log System */}
-          <div className="bg-[#1b1b22] border border-[#2e2e3a] rounded-xl p-4 sm:p-5 space-y-3">
-            <div className="flex items-center justify-between border-b border-[#2a2a34] pb-2.5">
-              <h3 className="text-xs sm:text-sm font-bold text-white flex items-center space-x-2">
-                <Activity className="w-4 h-4 text-amber-400" />
-                <span>Sync System Audit Log ({syncLogs.length})</span>
-              </h3>
-
-              {syncLogs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearSyncLogs();
-                    showToast('Sync audit logs cleared.');
-                  }}
-                  className="text-xs text-zinc-400 hover:text-red-400 transition-colors flex items-center space-x-1 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Clear Logs</span>
-                </button>
-              )}
-            </div>
-
-            {syncLogs.length === 0 ? (
-              <div className="p-4 rounded-xl bg-[#141418] border border-[#262630] text-center text-xs text-zinc-500 font-mono">
-                No sync logs recorded yet. Automated 30-minute sync will log events here.
-              </div>
-            ) : (
-              <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 web-carousel-scrollbar">
-                {syncLogs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="p-2.5 rounded-lg bg-[#141418] border border-[#262630] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono"
-                  >
-                    <div className="flex items-start sm:items-center space-x-2 min-w-0">
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 uppercase ${
-                          log.status === 'success'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-red-500/20 text-red-300 border border-red-500/30'
-                        }`}
-                      >
-                        {log.status}
-                      </span>
-
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 ${
-                          log.type === 'auto_sync'
-                            ? 'bg-amber-500/20 text-amber-300'
-                            : log.type === 'manual_sync'
-                            ? 'bg-blue-500/20 text-blue-300'
-                            : 'bg-purple-500/20 text-purple-300'
-                        }`}
-                      >
-                        {log.type === 'auto_sync' ? '30m Auto' : log.type === 'manual_sync' ? 'Manual' : 'Hours'}
-                      </span>
-
-                      <span className="text-zinc-200 truncate">{log.summary}</span>
-                    </div>
-
-                    <div className="text-[10px] text-zinc-500 shrink-0 font-mono self-end sm:self-center">
-                      {log.formattedTime}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-[#262630] bg-[#1a1a20] flex items-center justify-between text-xs text-zinc-400">
-          <span className="font-mono text-[11px]">Interval: 30 Minutes • All Users Active</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-[#282834] hover:bg-[#323242] text-white font-bold transition-all cursor-pointer"
-          >
-            Close Dashboard
-          </button>
-        </div>
-
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="flex items-start justify-between gap-3"><div className="flex gap-3"><HardDrive className="mt-0.5 h-5 w-5 shrink-0 text-blue-400" /><div><h3 className="font-semibold text-white">Google Drive backup</h3><p className="mt-1 text-sm leading-6 text-zinc-400">Optional export and restore. Authorization is not reported as a completed backup.</p></div></div>{isDriveAuthorized && <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-[11px] font-semibold text-blue-300">Authorized{localEmail ? ` · ${localEmail}` : ''}</span>}</div>
+          {!isDriveAuthorized ? <button type="button" disabled={isDriveBusy} onClick={() => void handleConnectDrive()} className="mt-4 flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50"><UserCheck className="h-4 w-4" />Authorize Google Drive</button> : <div className="mt-4 flex flex-wrap gap-2">
+            <button type="button" disabled={isDriveBusy} onClick={() => void handleBackupToDriveNow()} className="flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-50">{isDriveBusy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}Back Up Now</button>
+            <button type="button" disabled={isDriveBusy} onClick={() => void handleRestoreFromDrive()} className="flex min-h-11 items-center gap-2 rounded-xl border border-zinc-700 px-4 text-sm font-semibold text-zinc-200 disabled:opacity-50"><Download className="h-4 w-4" />Restore</button>
+            <button type="button" disabled={isDriveBusy} onClick={() => void handleDisconnectDrive()} className="min-h-11 rounded-xl px-4 text-sm text-zinc-400 disabled:opacity-50">Disconnect</button>
+          </div>}
+        </section>
       </div>
     </div>
-  );
+  </div>;
 };

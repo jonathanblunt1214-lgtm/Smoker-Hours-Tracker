@@ -58,9 +58,9 @@ export interface GoogleHomeNotificationConfig {
 }
 
 export const INITIAL_GOOGLE_HOME_CONFIG: GoogleHomeNotificationConfig = {
-  enabled: true,
-  deviceName: 'Living Room Nest Hub',
-  broadcastVoiceEnabled: true,
+  enabled: false,
+  deviceName: 'Not connected',
+  broadcastVoiceEnabled: false,
   notifyOnTempGoal: true,
   notifyOnStall: true,
   notifyOnPitDrift: true,
@@ -69,8 +69,8 @@ export const INITIAL_GOOGLE_HOME_CONFIG: GoogleHomeNotificationConfig = {
 };
 
 export const INITIAL_FIRE_TV_CONFIG: FireTVNotificationConfig = {
-  enabled: true,
-  deviceName: 'Living Room Fire TV Stick 4K',
+  enabled: false,
+  deviceName: 'Not connected',
   overlayStyle: 'toast',
   notifyOnTempGoal: true,
   notifyOnStall: true,
@@ -113,7 +113,7 @@ export const INITIAL_PUSH_CONFIG: CharGPTPushConfig = {
 export const INITIAL_ALEXA_CONFIG: AlexaIntegrationConfig = {
   enabled: false,
   skillLinked: false,
-  linkCode: 'ALEXA-SMOKESTACK-8942',
+  linkCode: '',
   proactiveAnnouncementsEnabled: false,
   alexaDeviceName: 'Echo Device',
   spokenTemperatureUnit: 'F',
@@ -238,10 +238,10 @@ export function sendGoogleHomeBroadcastNotification(
     const event = new CustomEvent('googlehome-notification-event', { detail });
     window.dispatchEvent(event);
 
-    sendCharGPTPushNotification(`Google Home (${deviceName}): ${title}`, message, 'googlehome-broadcast');
+    sendCharGPTPushNotification(`Google Home preview (${deviceName}): ${title}`, message, 'googlehome-broadcast');
 
     if (speakOutLoud) {
-      speakGoogleHomeVoice(`Google Assistant Broadcast to ${deviceName}: ${title}. ${message}`);
+      speakGoogleHomeVoice(`Smoke Stack local voice preview for ${deviceName}: ${title}. ${message}`);
     }
 
     const cfg = loadGoogleHomeConfig();
@@ -286,7 +286,7 @@ export function sendFireTVToastNotification(
     });
     window.dispatchEvent(event);
 
-    sendCharGPTPushNotification(`Fire TV (${deviceName}): ${title}`, message, 'firetv-toast');
+    sendCharGPTPushNotification(`Fire TV preview (${deviceName}): ${title}`, message, 'firetv-toast');
 
     const cfg = loadFireTVConfig();
     cfg.lastNotificationSent = `${title}: ${message} (${new Date().toLocaleTimeString()})`;

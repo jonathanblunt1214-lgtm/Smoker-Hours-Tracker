@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { SmokerProfile, CookLog, FuelLog, LocalUserProfile, CharGPTMemory } from '../types';
 
@@ -10,6 +10,8 @@ export interface UserFirestoreBundle {
   charGPTMemory?: CharGPTMemory;
   deletedCookLogIds?: string[];
   lastSyncedAt?: string;
+  syncState?: 'writing' | 'synced' | 'error';
+  syncRevision?: string;
 }
 
 export type SyncStateStatus = 'synced' | 'syncing' | 'pending' | 'offline' | 'error';
@@ -58,6 +60,8 @@ export async function loadUserBundleFromFirestore(uid: string): Promise<UserFire
       fuelLogs: fuelLogs.length > 0 ? fuelLogs : userData.fuelLogs || [],
       deletedCookLogIds,
       lastSyncedAt: userData.lastSyncedAt || syncMeta.lastSyncedAt || undefined,
+      syncState: userData.syncState || syncMeta.syncState || undefined,
+      syncRevision: userData.syncRevision || syncMeta.syncRevision || undefined,
     };
   } catch (error) {
     console.error('[Firestore] Error loading user bundle:', error);
@@ -85,6 +89,9 @@ async function resolveExistingTombstones(uid: string): Promise<string[]> {
  */
 export async function saveUserBundleToFirestore(uid: string, bundle: UserFirestoreBundle): Promise<boolean> {
   if (!uid) return false;
+  const revision = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `sync-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   try {
     const userDocRef = doc(db, 'users', uid);
     const nowIso = new Date().toISOString();
@@ -100,51 +107,82 @@ export async function saveUserBundleToFirestore(uid: string, bundle: UserFiresto
     }
     const deletedSet = new Set(deletedCookLogIds);
 
+    await setDoc(userDocRef, {
+      schemaVersion: '0.03',
+      syncState: 'writing',
+      syncRevision: revision,
+      syncStartedAt: nowIso,
+    }, { merge: true });
+
     const rootPatch: Record<string, unknown> = {
       lastSyncedAt: nowIso,
       schemaVersion: '0.03',
+      syncState: 'synced',
+      syncRevision: revision,
+      syncCompletedAt: nowIso,
     };
     if (hasOwn('profile')) rootPatch.profile = bundle.profile ?? null;
     if (hasOwn('userAccount')) rootPatch.userAccount = bundle.userAccount ?? null;
     if (hasOwn('charGPTMemory')) rootPatch.charGPTMemory = bundle.charGPTMemory ?? null;
     if (hasOwn('deletedCookLogIds')) rootPatch.deletedCookLogIds = deletedCookLogIds;
 
-    await setDoc(userDocRef, rootPatch, { merge: true });
-
+    type WriteOperation =
+      | { kind: 'set'; reference: ReturnType<typeof doc>; value: Record<string, unknown> }
+      | { kind: 'delete'; reference: ReturnType<typeof doc> };
+    const operations: WriteOperation[] = [];
     if (Array.isArray(bundle.cookLogs)) {
       for (const cook of bundle.cookLogs) {
         if (cook?.id && !deletedSet.has(cook.id)) {
-          const cookDocRef = doc(db, 'users', uid, 'cookLogs', cook.id);
-          await setDoc(cookDocRef, cook, { merge: true });
+          operations.push({ kind: 'set', reference: doc(db, 'users', uid, 'cookLogs', cook.id), value: cook as unknown as Record<string, unknown> });
         }
       }
     }
 
     for (const deletedId of deletedCookLogIds) {
-      await deleteDoc(doc(db, 'users', uid, 'cookLogs', deletedId));
+      operations.push({ kind: 'delete', reference: doc(db, 'users', uid, 'cookLogs', deletedId) });
     }
 
     if (Array.isArray(bundle.fuelLogs)) {
       for (const fuel of bundle.fuelLogs) {
         if (fuel?.id) {
-          const fuelDocRef = doc(db, 'users', uid, 'fuelLogs', fuel.id);
-          await setDoc(fuelDocRef, fuel, { merge: true });
+          operations.push({ kind: 'set', reference: doc(db, 'users', uid, 'fuelLogs', fuel.id), value: fuel as unknown as Record<string, unknown> });
         }
       }
+    }
+
+    for (let index = 0; index < operations.length; index += 400) {
+      const batch = writeBatch(db);
+      for (const operation of operations.slice(index, index + 400)) {
+        if (operation.kind === 'set') batch.set(operation.reference, operation.value, { merge: true });
+        else batch.delete(operation.reference);
+      }
+      await batch.commit();
     }
 
     const syncMetaPatch: Record<string, unknown> = {
       lastSyncedAt: nowIso,
       schemaVersion: '0.03',
+      syncState: 'synced',
+      syncRevision: revision,
+      syncCompletedAt: nowIso,
     };
     if (hasOwn('deletedCookLogIds') || Array.isArray(bundle.cookLogs)) {
       syncMetaPatch.deletedCookLogIds = deletedCookLogIds;
     }
-    await setDoc(doc(db, 'users', uid, 'meta', 'sync'), syncMetaPatch, { merge: true });
+    const completionBatch = writeBatch(db);
+    completionBatch.set(userDocRef, rootPatch, { merge: true });
+    completionBatch.set(doc(db, 'users', uid, 'meta', 'sync'), syncMetaPatch, { merge: true });
+    await completionBatch.commit();
 
     return true;
   } catch (error) {
     console.error('[Firestore] Error saving user bundle:', error);
+    await setDoc(doc(db, 'users', uid), {
+      schemaVersion: '0.03',
+      syncState: 'error',
+      syncRevision: revision,
+      syncErrorAt: new Date().toISOString(),
+    }, { merge: true }).catch(() => undefined);
     return false;
   }
 }

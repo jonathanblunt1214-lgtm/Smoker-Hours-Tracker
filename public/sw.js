@@ -1,5 +1,6 @@
 // Smoke Stack Pitmaster - Progressive Web App & Cross-Format Service Worker
-const CACHE_NAME = 'smokestack-shell-v3';
+const CACHE_NAME = 'smokestack-shell-v4';
+const SMOKESTACK_RUNTIME_CACHE = 'smokestack-runtime-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -19,7 +20,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
+          if (![CACHE_NAME, SMOKESTACK_RUNTIME_CACHE].includes(cache)) {
             return caches.delete(cache);
           }
         })
@@ -33,6 +34,8 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  const requestUrl = new URL(event.request.url);
+
   // Navigation strategy: Network first with cache fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
@@ -45,23 +48,36 @@ self.addEventListener('fetch', (event) => {
 
   // Never cache release metadata; installed clients must see the deployment's
   // current build before deciding whether to refresh.
-  if (new URL(event.request.url).pathname === '/version.json') {
+  if (requestUrl.pathname === '/version.json') {
     event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 
-  // Stale-while-revalidate for immutable, content-hashed static assets.
+  if (event.request.method !== 'GET' || requestUrl.origin !== self.location.origin || requestUrl.pathname.startsWith('/api/')) {
+    return;
+  }
+
+  // Stale-while-revalidate for same-origin static assets. The first successful
+  // request is cached, so an installed app can restart without a network.
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+        const refresh = fetch(event.request).then(async (networkResponse) => {
+          if (networkResponse?.ok) {
+            const cache = await caches.open(SMOKESTACK_RUNTIME_CACHE);
+            await cache.put(event.request, networkResponse.clone());
           }
-        }).catch(() => {/* Silent offline fallback */});
+        }).catch(() => undefined);
+        event.waitUntil(refresh);
         return cachedResponse;
       }
-      return fetch(event.request);
+      return fetch(event.request).then(async (networkResponse) => {
+        if (networkResponse?.ok) {
+          const cache = await caches.open(SMOKESTACK_RUNTIME_CACHE);
+          await cache.put(event.request, networkResponse.clone());
+        }
+        return networkResponse;
+      });
     })
   );
 });
@@ -87,10 +103,7 @@ self.addEventListener('push', (event) => {
     badge: '/icon-192.png',
     vibrate: [200, 100, 200, 100, 400],
     data: data.url || '/',
-    actions: [
-      { action: 'open_app', title: 'Open Smoke Log' },
-      { action: 'snooze', title: 'Snooze 10m' }
-    ],
+    actions: [{ action: 'open_app', title: 'Open Smoke Log' }],
     requireInteraction: true,
   };
 
@@ -104,14 +117,14 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   if (event.action === 'open_app' || !event.action) {
     event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
         for (const client of clientList) {
           if (client.url && 'focus' in client) {
             return client.focus();
           }
         }
-        if (clients.openWindow) {
-          return clients.openWindow(event.notification.data || '/');
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(event.notification.data || '/');
         }
       })
     );

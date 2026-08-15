@@ -12,9 +12,10 @@ import {
   loadLowPowerMode,
   saveLowPowerMode,
   checkAndRunAutoCacheClear,
-  autoEvolveCharGPTMemory,
   loadDeletedCookLogIds,
+  saveDeletedCookLogIds,
   addDeletedCookLogId,
+  INITIAL_CHARGPT_MEMORY,
   loadCharGPTMemory,
   saveCharGPTMemory,
 } from './utils/storage';
@@ -24,7 +25,6 @@ import { INITIAL_SMOKER_PROFILE } from './data/mockData';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from './constants/appName';
 import { initAuth, saveToGoogleDrive, getAccessToken, logout } from './lib/driveSync';
 import { loadUserBundleFromFirestore, saveUserBundleToFirestore, SyncStateStatus } from './lib/firestoreData';
-import { MASTER_ADMIN_EMAIL } from './utils/adminAuth';
 import { Navbar, AppTab, SettingsDestination } from './components/Navbar';
 import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';
 import { HomeCommandCenter } from './components/HomeCommandCenter';
@@ -32,23 +32,7 @@ import { BrowserInstallShareWidget } from './components/BrowserInstallShareWidge
 import { ReleaseUpdateBanner } from './components/ReleaseUpdateBanner';
 import { startAuthoritativePlatformSync } from './lib/platformSync';
 import { startAutomaticReleaseUpdates } from './services/releaseUpdateService';
-import { AnalyticsDashboard } from './components/AnalyticsDashboard';
-import { CookLogList } from './components/CookLogList';
-import { CookLogSheetModal } from './components/CookLogSheetModal';
-import { CookCertificateModal } from './components/CookCertificateModal';
-import { CookLogForm } from './components/CookLogForm';
-import { CookPlanner } from './components/CookPlanner';
-import { FuelAndMaintenance } from './components/FuelAndMaintenance';
-import { AIPitmasterModal } from './components/AIPitmasterModal';
-import { GoogleDriveSyncModal } from './components/GoogleDriveSyncModal';
-import { UniversalSyncDashboardModal } from './components/UniversalSyncDashboardModal';
-import { SettingsModal } from './components/SettingsModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { CustomSmokerModal } from './components/CustomSmokerModal';
-import { MasterAdminDashboardModal } from './components/MasterAdminDashboardModal';
-import { AppDownloadStoreModal } from './components/AppDownloadStoreModal';
-import { UserLoginGateModal } from './components/UserLoginGateModal';
-import { TermsOfServiceModal } from './components/TermsOfServiceModal';
 import { SmokeStackSplashScreen } from './components/SmokeStackSplashScreen';
 import { FireTVToastOverlay } from './components/FireTVToastOverlay';
 import { GoogleHomeToastOverlay } from './components/GoogleHomeToastOverlay';
@@ -57,16 +41,31 @@ import {
   getActiveUserSession,
   saveActiveUserSession,
   clearActiveUserSession,
-  isMasterAdminVerifiedDevice,
 } from './utils/userAuthSession';
 
 import {
   autoOptimizeScreenOnLoadAndResize,
 } from './utils/screenOptimizer';
 
-import { SmokerHours, SmokerSyncEngine, SmokerHoursSyncService } from './services/smokerSyncService';
-import { initMasterLiveUpdateRunner } from './services/masterLiveUpdateService';
-import { MASTER_SYNC_DATA_MERGED_EVENT, triggerMasterVersionSync, masterVersionSyncService } from './services/masterVersionSyncService';
+import { SmokerHours } from './services/smokerSyncService';
+
+const AnalyticsDashboard = React.lazy(() => import('./components/AnalyticsDashboard').then((module) => ({ default: module.AnalyticsDashboard })));
+const CookLogList = React.lazy(() => import('./components/CookLogList').then((module) => ({ default: module.CookLogList })));
+const CookLogForm = React.lazy(() => import('./components/CookLogForm').then((module) => ({ default: module.CookLogForm })));
+const CookPlanner = React.lazy(() => import('./components/CookPlanner').then((module) => ({ default: module.CookPlanner })));
+const FuelAndMaintenance = React.lazy(() => import('./components/FuelAndMaintenance').then((module) => ({ default: module.FuelAndMaintenance })));
+const FuelMarketTracker = React.lazy(() => import('./components/FuelMarketTracker').then((module) => ({ default: module.FuelMarketTracker })));
+const AIPitmasterModal = React.lazy(() => import('./components/AIPitmasterModal').then((module) => ({ default: module.AIPitmasterModal })));
+const CookLogSheetModal = React.lazy(() => import('./components/CookLogSheetModal').then((module) => ({ default: module.CookLogSheetModal })));
+const CookCertificateModal = React.lazy(() => import('./components/CookCertificateModal').then((module) => ({ default: module.CookCertificateModal })));
+const GoogleDriveSyncModal = React.lazy(() => import('./components/GoogleDriveSyncModal').then((module) => ({ default: module.GoogleDriveSyncModal })));
+const UniversalSyncDashboardModal = React.lazy(() => import('./components/UniversalSyncDashboardModal').then((module) => ({ default: module.UniversalSyncDashboardModal })));
+const SettingsModal = React.lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })));
+const CustomSmokerModal = React.lazy(() => import('./components/CustomSmokerModal').then((module) => ({ default: module.CustomSmokerModal })));
+const MasterAdminDashboardModal = React.lazy(() => import('./components/MasterAdminDashboardModal').then((module) => ({ default: module.MasterAdminDashboardModal })));
+const AppDownloadStoreModal = React.lazy(() => import('./components/AppDownloadStoreModal').then((module) => ({ default: module.AppDownloadStoreModal })));
+const UserLoginGateModal = React.lazy(() => import('./components/UserLoginGateModal').then((module) => ({ default: module.UserLoginGateModal })));
+const TermsOfServiceModal = React.lazy(() => import('./components/TermsOfServiceModal').then((module) => ({ default: module.TermsOfServiceModal })));
 
 export default function App() {
   const [profile, setProfile] = useState<SmokerProfile>(loadSmokerProfile);
@@ -191,7 +190,7 @@ export default function App() {
 
   // Connection & Offline auto-reconnect sync state
   const [isOnline, setIsOnline] = useState<boolean>(() => navigator.onLine);
-  const [syncStatus, setSyncStatus] = useState<SyncStateStatus>('synced');
+  const [syncStatus, setSyncStatus] = useState<SyncStateStatus>('pending');
 
   useEffect(() => {
     // Automated screen optimization for all users (logged-in or guest)
@@ -211,9 +210,9 @@ export default function App() {
 
     const handleOnline = () => {
       setIsOnline(true);
-      showToast('🌐 Network connection restored. Verifying cloud synchronization...');
-      setSyncStatus('syncing');
       if (currentUser?.uid) {
+        showToast('Network restored. Verifying account synchronization…');
+        setSyncStatus('syncing');
         saveUserBundleToFirestore(currentUser.uid, {
           profile,
           cookLogs,
@@ -234,7 +233,7 @@ export default function App() {
             showToast('⚠️ Synchronization error occurred on reconnect.');
           });
       } else {
-        setSyncStatus('synced');
+        setSyncStatus('pending');
       }
       const res = checkAndUpdateRetailerPricesOnline();
       if (res.updated) {
@@ -297,9 +296,14 @@ export default function App() {
       console.warn('Logout error:', e);
     }
     clearActiveUserSession();
+    saveDeletedCookLogIds([]);
     setUserSession(null);
     setCurrentUser(null);
     setAccessToken(null);
+    setSyncStatus('pending');
+    setProfile({ ...INITIAL_SMOKER_PROFILE });
+    setCookLogs([]);
+    setFuelLogs([]);
     setIsSettingsModalOpen(false);
     setIsDriveModalOpen(false);
     setIsSyncDashboardOpen(false);
@@ -327,18 +331,15 @@ export default function App() {
         setCurrentUser(user);
         setAccessToken(token);
 
-        // Auto-login with detected Google account
-        const userEmail = user.email || 'user@smokestack.app';
-        const isMaster = userEmail.trim().toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
-
+        const userEmail = user.email || '';
         const session: UserAuthSession = {
           id: user.uid,
           email: userEmail,
-          name: user.displayName || (isMaster ? 'Jonathan Blunt' : userEmail.split('@')[0]),
-          title: isMaster ? 'Head Pitmaster & Master Developer' : 'Pitmaster',
+          name: user.displayName || userEmail.split('@')[0] || 'Pitmaster',
+          title: 'Pitmaster',
           provider: 'google',
           rememberMe: true,
-          isMasterAdmin: isMaster,
+          isMasterAdmin: false,
           loggedInAt: new Date().toISOString(),
         };
 
@@ -346,23 +347,49 @@ export default function App() {
         setUserSession(session);
         setIsLoginModalOpen(false);
 
-        // Load authoritative data bundle from Firestore
+        user.getIdToken().then((idToken) => fetch('/api/admin/me', {
+          headers: { Authorization: `Bearer ${idToken}` },
+        })).then(async (roleRes) => {
+          if (!roleRes.ok) return;
+          const roleData = await roleRes.json();
+          const verifiedSession: UserAuthSession = {
+            ...session,
+            title: roleData?.role === 'owner' ? 'Owner' : roleData?.role === 'admin' ? 'Administrator' : 'Pitmaster',
+            isMasterAdmin: roleData?.permissions?.admin === true,
+          };
+          setUserSession(verifiedSession);
+          saveActiveUserSession(verifiedSession, true);
+        }).catch(() => {});
+
+        // Account isolation: never seed a newly authenticated account from an
+        // unscoped browser cache that may belong to a previous user.
+        const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE };
+        setProfile(cleanProfile);
+        setCookLogs([]);
+        setFuelLogs([]);
+        saveDeletedCookLogIds([]);
+
         loadUserBundleFromFirestore(user.uid).then((bundle) => {
           if (bundle) {
-            if (Array.isArray(bundle.cookLogs)) setCookLogs(bundle.cookLogs);
-            if (bundle.profile) setProfile(bundle.profile);
-            if (Array.isArray(bundle.fuelLogs)) setFuelLogs(bundle.fuelLogs);
+            setProfile(bundle.profile || cleanProfile);
+            setCookLogs(Array.isArray(bundle.cookLogs) ? bundle.cookLogs : []);
+            setFuelLogs(Array.isArray(bundle.fuelLogs) ? bundle.fuelLogs : []);
+            saveDeletedCookLogIds(Array.isArray(bundle.deletedCookLogIds) ? bundle.deletedCookLogIds : []);
             if (bundle.charGPTMemory) saveCharGPTMemory(bundle.charGPTMemory);
-            setSyncStatus('synced');
-          } else {
-            // Save initial user bundle to Firestore for new user
-            saveUserBundleToFirestore(user.uid, {
-              profile,
-              cookLogs,
-              fuelLogs,
-              charGPTMemory: loadCharGPTMemory(),
-            }).then(() => setSyncStatus('synced'));
+            else saveCharGPTMemory({ ...INITIAL_CHARGPT_MEMORY, lastEvolvedAt: new Date().toISOString() });
+            setSyncStatus(bundle.syncState === 'synced' ? 'synced' : bundle.syncState === 'error' ? 'error' : 'pending');
+            return;
           }
+
+          const cleanMemory = { ...INITIAL_CHARGPT_MEMORY, lastEvolvedAt: new Date().toISOString() };
+          saveCharGPTMemory(cleanMemory);
+          saveUserBundleToFirestore(user.uid, {
+            profile: cleanProfile,
+            cookLogs: [],
+            fuelLogs: [],
+            charGPTMemory: cleanMemory,
+            deletedCookLogIds: [],
+          }).then((success) => setSyncStatus(success ? 'synced' : 'error'));
         }).catch((err) => {
           console.warn('Error loading user bundle from Firestore:', err);
           setSyncStatus('error');
@@ -371,9 +398,48 @@ export default function App() {
       () => {
         setCurrentUser(null);
         setAccessToken(null);
+        setSyncStatus('pending');
       }
     );
     return () => unsubscribe();
+  }, []);
+
+  const [platformSyncHydrated, setPlatformSyncHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setPlatformSyncHydrated(false);
+      return;
+    }
+    setPlatformSyncHydrated(false);
+    return startAuthoritativePlatformSync(currentUser.uid, {
+      onProfile: setProfile,
+      onCookLogs: setCookLogs,
+      onFuelLogs: setFuelLogs,
+      onStatus: setSyncStatus,
+      onHydrated: () => setPlatformSyncHydrated(true),
+    });
+  }, [currentUser?.uid]);
+
+  useEffect(() => {
+    if (!currentUser?.uid || !platformSyncHydrated) return;
+    const timer = window.setTimeout(() => {
+      setSyncStatus('syncing');
+      saveUserBundleToFirestore(currentUser.uid, {
+        profile, cookLogs, fuelLogs, charGPTMemory: loadCharGPTMemory(), deletedCookLogIds: loadDeletedCookLogIds(),
+      }).then((success) => setSyncStatus(success ? 'synced' : 'error')).catch(() => setSyncStatus('error'));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [profile, cookLogs, fuelLogs, currentUser?.uid, platformSyncHydrated]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get('view');
+    if (view && ['home','analytics','logs','planner','new-cook','maintenance','ai-pitmaster'].includes(view)) handleTabChange(view as any);
+    if (params.get('share') === '1') {
+      const shared = [params.get('title'), params.get('text'), params.get('url')].filter(Boolean).join('\n');
+      if (shared) { setAiInitialPrompt('Review this shared item for my BBQ workflow. Treat it as unverified unless Knowledge has provenance.\n\n' + shared); setAiInitialCookId('ALL_LOGS'); handleTabChange('ai-pitmaster'); }
+    }
   }, []);
 
   // Automatically synchronize profile hours with initial hours & published cook logs
@@ -414,106 +480,29 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  // Initialize SmokerSyncEngine and SmokerHoursSyncService for 30-minute automated auto-syncing
-  useEffect(() => {
-    const deviceId = localStorage.getItem('smoker_app_device_id') || `device_${Math.random().toString(36).substring(2, 9)}`;
-    localStorage.setItem('smoker_app_device_id', deviceId);
-
-    const baseUrl = window.location.origin;
-    const SYNC_30_MIN_MS = 30 * 60 * 1000; // 1,800,000 ms (30 minutes)
-    const engine = new SmokerSyncEngine(deviceId, baseUrl, 'auth_token_default', SYNC_30_MIN_MS);
-    const hoursService = new SmokerHoursSyncService(baseUrl, deviceId);
-
-    engine.on('syncSuccess', (res: any) => {
-      if (res?.resolvedHours && res.resolvedHours.length > 0) {
-        const maxHours = Math.max(...res.resolvedHours.map((h: any) => h.totalHours || 0));
-        if (maxHours > 0) {
-          SmokerHours.setHours(maxHours);
-        }
-      }
-    });
-
-    engine.startAutoSync();
-
-    // Initial background sync for hour entries
-    hoursService.sync([], Date.now() - 86400000).catch(() => {});
-
-    // Periodic 30-minute recurring hours sync
-    const hoursInterval = setInterval(() => {
-      hoursService.sync([], Date.now() - 86400000).catch(() => {});
-    }, SYNC_30_MIN_MS);
-
-    return () => {
-      engine.stopAutoSync();
-      clearInterval(hoursInterval);
-    };
-  }, []);
+  // Legacy 30-minute sync disabled. Firestore is authoritative for signed-in users.
 
   // Sync profile changes
   useEffect(() => {
     saveSmokerProfile(profile);
   }, [profile]);
 
-  // Initialize Master Admin Live Update Engine & Master Version Sync Event Listener
-  useEffect(() => {
-    const cleanup = initMasterLiveUpdateRunner(() => {
-      // Reload state on live updates
-      setProfile(loadSmokerProfile());
-      setCookLogs(loadCookLogs());
-      setFuelLogs(loadFuelLogs());
-    });
+  // Legacy Master Web live-update/sync disabled. GitHub/CI owns releases; Firestore owns user data.
 
-    const handleMasterSyncMerged = (evt: any) => {
-      const merged = evt?.detail;
-      if (merged) {
-        if (Array.isArray(merged.cookLogs)) {
-          const deletedSet = new Set(loadDeletedCookLogIds());
-          const cleanMerged = merged.cookLogs.filter((c: CookLog) => c && c.id && !deletedSet.has(c.id));
-          setCookLogs((prev) => {
-            const map = new Map<string, CookLog>();
-            prev.forEach((c) => c && c.id && !deletedSet.has(c.id) && map.set(c.id, c));
-            cleanMerged.forEach((c: CookLog) => {
-              if (c && c.id && !deletedSet.has(c.id)) {
-                const ex = map.get(c.id);
-                map.set(c.id, { ...ex, ...c });
-              }
-            });
-            const mergedList = Array.from(map.values());
-            if (JSON.stringify(mergedList) !== JSON.stringify(prev)) {
-              saveCookLogs(mergedList);
-              return mergedList;
-            }
-            return prev;
-          });
-        }
-        if (Array.isArray(merged.fuelLogs)) {
-          setFuelLogs(merged.fuelLogs);
-        }
-        setProfile(loadSmokerProfile());
-      }
-    };
-
-    window.addEventListener(MASTER_SYNC_DATA_MERGED_EVENT, handleMasterSyncMerged);
-
-    return () => {
-      cleanup();
-      window.removeEventListener(MASTER_SYNC_DATA_MERGED_EVENT, handleMasterSyncMerged);
-    };
-  }, []);
-
-  // Sync cook log changes & run automatic live cloud ML training & trigger Master Version sync
+  // Save local cache and the verified Firestore bundle without auto-writing AI memories.
   useEffect(() => {
     saveCookLogs(cookLogs);
-    if (cookLogs && cookLogs.length > 0) {
-      try {
-        autoEvolveCharGPTMemory(cookLogs);
-      } catch (e) {
-        console.error('Live Cloud ML auto-training error:', e);
-      }
-    }
-    // Upload newly created or modified cook logs to Master Web version repository immediately
-    triggerMasterVersionSync().catch((err) => console.warn('Background master sync trigger:', err));
-  }, [cookLogs]);
+    if (!currentUser?.uid) return;
+    setSyncStatus('syncing');
+    saveUserBundleToFirestore(currentUser.uid, {
+      profile,
+      cookLogs,
+      fuelLogs,
+      charGPTMemory: loadCharGPTMemory(),
+      deletedCookLogIds: loadDeletedCookLogIds(),
+    }).then((success) => setSyncStatus(success ? 'synced' : 'error'))
+      .catch(() => setSyncStatus('error'));
+  }, [cookLogs, currentUser?.uid]);
 
   // Sync fuel log changes
   useEffect(() => {
@@ -547,12 +536,7 @@ export default function App() {
               const saved = localStorage.getItem('pitmaster_local_user_account');
               if (saved) return JSON.parse(saved);
             } catch (e) {}
-            return {
-              name: 'Pitmaster Guest',
-              email: currentUser?.email || '',
-              title: 'Guest Pitmaster',
-              createdAt: new Date().toISOString().slice(0, 10),
-            };
+            return undefined;
           })();
 
           const backupPayload = {
@@ -568,17 +552,23 @@ export default function App() {
           // Store daily backup snapshot
           localStorage.setItem('pitmaster_daily_auto_backup_vault', JSON.stringify(backupPayload));
 
-          // Sync with Google Drive if access token available
           const driveToken = accessToken || (await getAccessToken());
-          if (driveToken) {
-            saveToGoogleDrive(driveToken, { profile, cookLogs, fuelLogs, userAccount: localAccountData }).catch(console.warn);
-          }
-
           const nowIso = new Date().toISOString();
-          const updatedConfig = { ...autoConfig, lastAutoBackup: nowIso };
+          const updatedConfig: Record<string, unknown> = { ...autoConfig, lastAutoBackup: nowIso };
+          if (autoConfig.googleDrive) {
+            if (driveToken) {
+              try {
+                await saveToGoogleDrive(driveToken, { profile, cookLogs, fuelLogs, userAccount: localAccountData });
+                updatedConfig.lastDriveBackup = nowIso;
+                updatedConfig.lastDriveBackupError = null;
+              } catch (error: any) {
+                updatedConfig.lastDriveBackupError = error?.message || 'Google Drive write failed.';
+              }
+            } else {
+              updatedConfig.lastDriveBackupError = 'Google Drive authorization required.';
+            }
+          }
           localStorage.setItem('pitmaster_auto_backup_config', JSON.stringify(updatedConfig));
-
-          console.log('Daily automatic backup of log and user data completed.');
         }
       } catch (e) {
         console.warn('Auto backup check encountered an issue:', e);
@@ -649,11 +639,14 @@ export default function App() {
       console.warn('Local account profile save warning:', e);
     }
 
-    if (autoSyncNewCooks && !forceOffline) {
-      syncCookLogsToServer(updatedCooks);
-      showToast(`Smoke journal entry "${cookToSave.title}" saved & auto-synced to cloud server!`);
+    if (autoSyncNewCooks && !forceOffline && currentUser?.uid) {
+      syncCookLogsToServer(updatedCooks).then((success) => {
+        showToast(success
+          ? `Smoke journal entry "${cookToSave.title}" saved and synchronized.`
+          : `Smoke journal entry "${cookToSave.title}" saved locally; cloud synchronization is pending.`);
+      });
     } else {
-      showToast(`Smoke journal entry "${cookToSave.title}" saved locally to account! (Ready for analysis upload)`);
+      showToast(`Smoke journal entry "${cookToSave.title}" saved locally.`);
     }
 
     setPrefilledRecipe(null);
@@ -676,59 +669,28 @@ export default function App() {
     showToast(`Loaded ${AI_PITMASTER_NAME} consultation for "${recipe.title}"!`);
   };
 
-  const syncCookLogsToServer = (logs: CookLog[], deletedIds?: string[]) => {
-    const userEmail = (() => {
-      try {
-        const saved = localStorage.getItem('pitmaster_local_user_account');
-        if (saved) return JSON.parse(saved)?.email || '';
-      } catch (e) {}
-      return '';
-    })();
-
-    const deletedCookLogIds = Array.from(new Set([
+  const syncCookLogsToServer = async (logs: CookLog[], deletedIds?: string[]): Promise<boolean> => {
+    if (!currentUser?.uid) return false;
+    const tombstones = Array.from(new Set([
       ...loadDeletedCookLogIds(),
       ...(deletedIds || []),
     ]));
-
-    fetch('/api/cook-logs/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: userEmail,
-        cookLogs: logs,
-        deletedIds: deletedCookLogIds,
-        deletedCookLogIds,
-      }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.cookLogs)) {
-          const deletedSet = new Set(loadDeletedCookLogIds());
-          const cleanLogs = data.cookLogs.filter((c: CookLog) => c && c.id && !deletedSet.has(c.id));
-          setCookLogs((prev) => {
-            const map = new Map<string, CookLog>();
-            prev.forEach((c) => c && c.id && !deletedSet.has(c.id) && map.set(c.id, c));
-            cleanLogs.forEach((c: CookLog) => {
-              if (c && c.id && !deletedSet.has(c.id)) {
-                const ex = map.get(c.id);
-                map.set(c.id, { ...ex, ...c });
-              }
-            });
-            const mergedList = Array.from(map.values());
-            if (JSON.stringify(mergedList) !== JSON.stringify(prev)) {
-              saveCookLogs(mergedList);
-              return mergedList;
-            }
-            return prev;
-          });
-        }
-      })
-      .catch((err) => console.warn('Direct cook log API sync warning:', err));
-
+    saveDeletedCookLogIds(tombstones);
+    setSyncStatus('syncing');
     try {
-      masterVersionSyncService.syncWithMasterWeb();
-    } catch (syncErr) {
-      console.warn('Master Version Sync error:', syncErr);
+      const success = await saveUserBundleToFirestore(currentUser.uid, {
+        profile,
+        cookLogs: logs,
+        fuelLogs,
+        charGPTMemory: loadCharGPTMemory(),
+        deletedCookLogIds: tombstones,
+      });
+      setSyncStatus(success ? 'synced' : 'error');
+      return success;
+    } catch (err) {
+      console.warn('Firestore cook log sync failed:', err);
+      setSyncStatus('error');
+      return false;
     }
   };
 
@@ -764,63 +726,37 @@ export default function App() {
     showToast('Smoker profile updated.');
   };
 
-  const handleUploadAndSyncProfile = () => {
+  const handleUploadAndSyncProfile = async () => {
     saveSmokerProfile(profile);
     saveCookLogs(cookLogs);
-
-    if (profile.currentHours !== undefined) {
-      SmokerHours.setHours(profile.currentHours);
+    if (!currentUser?.uid) {
+      showToast('Sign in to synchronize account data. Local changes remain on this device.');
+      return;
     }
 
-    const userEmail = (() => {
-      try {
-        const saved = localStorage.getItem('pitmaster_local_user_account');
-        if (saved) return JSON.parse(saved)?.email || '';
-      } catch (e) {}
-      return '';
-    })();
-
-    fetch('/api/cook-logs/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: userEmail, cookLogs, profile }),
-    }).catch((err) => console.warn('Server cook log & profile sync warning:', err));
-
-    fetch('/sync/hours', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        deviceId: localStorage.getItem('smoker_app_device_id') || 'default',
-        entries: [
-          {
-            id: `entry-${profile.id || 'default'}`,
-            deviceId: localStorage.getItem('smoker_app_device_id') || 'default',
-            totalHours: profile.currentHours || 0,
-            timestamp: Date.now(),
-            app: 'SmokerHours',
-          },
-        ],
-      }),
-    }).catch((err) => console.warn('Hours endpoint sync warning:', err));
-
-    try {
-      masterVersionSyncService.syncWithMasterWeb();
-    } catch (syncErr) {
-      console.warn('Master Version Sync error:', syncErr);
+    setSyncStatus('syncing');
+    const synced = await saveUserBundleToFirestore(currentUser.uid, {
+      profile,
+      cookLogs,
+      fuelLogs,
+      charGPTMemory: loadCharGPTMemory(),
+      deletedCookLogIds: loadDeletedCookLogIds(),
+    }).catch(() => false);
+    setSyncStatus(synced ? 'synced' : 'error');
+    if (!synced) {
+      showToast('Account synchronization failed. Local data was preserved.');
+      return;
     }
 
-    getAccessToken().then((driveToken) => {
-      const activeToken = accessToken || driveToken;
-      if (activeToken) {
-        const savedAcc = localStorage.getItem('pitmaster_local_user_account');
-        const userAcc = savedAcc ? JSON.parse(savedAcc) : undefined;
-        saveToGoogleDrive(activeToken, { profile, cookLogs, fuelLogs, userAccount: userAcc })
-          .then(() => showToast('Smoker hours & logs uploaded to profile and backed up to Google Drive!'))
-          .catch(() => showToast('Smoker hours & logs uploaded to profile!'));
-      } else {
-        showToast('Smoker hours & logs uploaded to profile!');
-      }
-    });
+    showToast('SmokeStack account synchronized.');
+    const driveToken = accessToken || (await getAccessToken());
+    if (driveToken) {
+      const savedAcc = localStorage.getItem('pitmaster_local_user_account');
+      const userAcc = savedAcc ? JSON.parse(savedAcc) : undefined;
+      saveToGoogleDrive(driveToken, { profile, cookLogs, fuelLogs, userAccount: userAcc })
+        .then(() => showToast('SmokeStack account synchronized and Google Drive backup completed.'))
+        .catch(() => showToast('SmokeStack account synchronized; Google Drive backup failed.'));
+    }
   };
 
   const handleCustomSmokerCreated = (
@@ -891,7 +827,7 @@ export default function App() {
       setProfile(restored.profile);
       setCookLogs(restored.cookLogs);
       setFuelLogs(restored.fuelLogs);
-      showToast('All smoker logs restored to baseline sample data.');
+      showToast('Local smoker data reset to clean defaults.');
     }
   };
 
@@ -1015,6 +951,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 pt-3 sm:pt-6 pb-28 md:pb-12 overflow-x-hidden">
+        <React.Suspense fallback={<div className="rounded-2xl border border-zinc-800 bg-zinc-950/60 p-8 text-center text-sm text-zinc-400">Loading this SmokeStack workspace…</div>}>
         {activeTab === 'analytics' && (
           <AnalyticsDashboard
             cookLogs={cookLogs}
@@ -1079,6 +1016,7 @@ export default function App() {
         {activeTab === 'new-cook' && (
           <CookLogForm
             profile={profile}
+            isAuthenticated={Boolean(currentUser?.uid)}
             nextPageNumber={editingCook?.pageNumber || maxPageNumber + 1}
             initialRecipe={prefilledRecipe}
             initialCook={editingCook}
@@ -1101,15 +1039,18 @@ export default function App() {
         )}
 
         {activeTab === 'maintenance' && (
-          <FuelAndMaintenance
-            profile={profile}
-            cookLogs={cookLogs}
-            fuelLogs={fuelLogs}
-            onUpdateProfile={handleUpdateProfile}
-            onAddFuelLog={handleAddFuelLog}
-            onUpdateFuelLog={handleUpdateFuelLog}
-            onDeleteFuelLog={handleDeleteFuelLog}
-          />
+          <>
+            <FuelAndMaintenance
+              profile={profile}
+              cookLogs={cookLogs}
+              fuelLogs={fuelLogs}
+              onUpdateProfile={handleUpdateProfile}
+              onAddFuelLog={handleAddFuelLog}
+              onUpdateFuelLog={handleUpdateFuelLog}
+              onDeleteFuelLog={handleDeleteFuelLog}
+            />
+            <FuelMarketTracker />
+          </>
         )}
 
         {activeTab === 'ai-pitmaster' && (
@@ -1119,12 +1060,23 @@ export default function App() {
             initialCookId={aiInitialCookId}
             initialPrompt={aiInitialPrompt}
             currentUserEmail={currentUser?.email || userSession?.email || ''}
+            onMemoryUpdate={(memory) => {
+              saveCharGPTMemory(memory);
+              if (!currentUser?.uid) return;
+              setSyncStatus('syncing');
+              saveUserBundleToFirestore(currentUser.uid, { charGPTMemory: memory })
+                .then((success) => setSyncStatus(success ? 'synced' : 'error'))
+                .catch(() => setSyncStatus('error'));
+            }}
             onNavigateToPlanner={() => setActiveTab('planner')}
             onNavigateToNewCook={() => setActiveTab('new-cook')}
             onOpenMasterAdmin={() => setIsMasterAdminModalOpen(true)}
           />
         )}
+        </React.Suspense>
       </main>
+
+      <React.Suspense fallback={null}>
 
       {/* Printable Smoker Paper Sheet Modal */}
       <CookLogSheetModal
@@ -1176,12 +1128,7 @@ export default function App() {
               const saved = localStorage.getItem('pitmaster_local_user_account');
               if (saved) return JSON.parse(saved);
             } catch (e) {}
-            return {
-              name: 'Pitmaster Guest',
-              email: currentUser?.email || '',
-              title: 'Guest Pitmaster',
-              createdAt: new Date().toISOString().slice(0, 10),
-            };
+            return undefined;
           })(),
         }}
         onRestoreData={handleRestoreFromDrive}
@@ -1246,12 +1193,7 @@ export default function App() {
                 const saved = localStorage.getItem('pitmaster_local_user_account');
                 if (saved) return JSON.parse(saved);
               } catch (e) {}
-              return {
-                name: 'Pitmaster Guest',
-                email: currentUser?.email || '',
-                title: 'Guest Pitmaster',
-                createdAt: new Date().toISOString().slice(0, 10),
-              };
+              return undefined;
             })(),
           }}
           onRestoreData={handleRestoreFromDrive}
@@ -1268,7 +1210,7 @@ export default function App() {
         isOpen={isCustomSmokerModalOpen}
         onClose={() => setIsCustomSmokerModalOpen(false)}
         currentUser={currentUser}
-        pitmasterAlias={profile.name || currentUser?.email || 'Pitmaster Guest'}
+        pitmasterAlias={profile.name || currentUser?.email || ''}
         onSmokerCreated={handleCustomSmokerCreated}
       />
 
@@ -1291,7 +1233,8 @@ export default function App() {
         }}
       />
 
-      {/* Master Admin & Developer Dashboard Modal */}
+      {/* SmokeStack Operations — visible only after verified ADMIN/OWNER role hydration */}
+      {userSession?.isMasterAdmin === true && (
       <MasterAdminDashboardModal
         isOpen={isMasterAdminModalOpen}
         onClose={() => setIsMasterAdminModalOpen(false)}
@@ -1306,6 +1249,7 @@ export default function App() {
         }}
         showToast={showToast}
       />
+      )}
 
       {/* Download App & Play Store Hub Modal */}
       <AppDownloadStoreModal
@@ -1324,9 +1268,10 @@ export default function App() {
         onAccept={() => {
           localStorage.setItem('pitmaster_terms_accepted', 'true');
           setIsTermsModalOpen(false);
-          showToast('✅ Terms & App Permissions accepted!');
+          showToast('Terms accepted. Optional permissions will be requested only when needed.');
         }}
       />
+      </React.Suspense>
 
       {/* Fire TV On-Screen Notification Toast Overlay */}
       <FireTVToastOverlay />

@@ -1,0 +1,132 @@
+SMOKESTACK APP CONSTITUTION
+
+Status: Governing law
+Revision: 3
+Effective: 2026-08-14
+Applies to: every SmokeStack client, server, background job, deployment,
+integration, AI response, administrator surface, data migration, and release
+artifact.
+
+1. SUPREMACY AND SCOPE
+
+This Constitution governs all SmokeStack code and behavior. Product copy,
+feature requests, generated code, migrations, integrations, and release
+instructions are subordinate to it. A feature that cannot pass its
+constitutional gate remains unavailable and must be labeled unavailable.
+
+2. TRUTH AND NON-FABRICATION
+
+2.1 Unknown means unknown. Missing data is never replaced by a plausible value.
+2.2 SmokeStack must not fabricate cooks, smoker hours, fuel, prices, telemetry,
+device connections, identities, AI memory, verification, timestamps, backup
+success, synchronization, deployment, or store availability.
+2.3 Demonstration and simulated data must be labeled DEMO or SIMULATED when it
+is created and must retain that provenance everywhere it is used.
+2.4 Success language is permitted only after the corresponding operation has
+succeeded and been verified.
+2.5 Configuration is not connection. Network availability is not AI grounding.
+A selected catalog item is not a paired device.
+
+3. AUTHORITATIVE DATA AND IDENTITY
+
+3.1 Firebase Authentication establishes account identity. Client-supplied
+email addresses, device IDs, query parameters, and local storage never grant
+authority.
+3.2 Firestore under the verified Firebase UID is authoritative for signed-in
+account data.
+3.3 Local storage and browser caches may hold drafts and offline replicas, but
+may not silently overwrite newer authoritative records.
+3.4 Google Drive is an explicit backup/export destination, not a competing
+synchronization authority.
+3.5 Deletes require durable tombstones or an equivalent conflict-safe
+mechanism. Partial writes remain visibly incomplete and are never reported as
+synchronized.
+3.6 New accounts start empty. Switching accounts never imports another
+account's local data.
+
+4. CONSENT, PRIVACY, AND PERMISSIONS
+
+4.1 Terms acceptance, privacy disclosure, optional data sharing, and device
+permissions are separate decisions.
+4.2 Camera, Bluetooth, notifications, location, Google Drive, and similar
+permissions are requested only when the user invokes the relevant feature.
+4.3 Optional permissions are never described as globally required.
+4.4 SmokeStack does not claim legal, regulatory, or platform-policy compliance
+without an approved and current review.
+4.5 Data collection, retention, sharing, export, and deletion descriptions must
+match deployed behavior.
+
+5. EVIDENCE AND PROVENANCE
+
+5.1 Verified claims retain their source, publisher, retrieval time, review
+status, and evidence.
+5.2 AI output, community entries, retailer copy, search snippets, and user
+observations do not become verified merely because they exist.
+5.3 Manufacturer sources govern manufacturer specifications. Government
+sources govern safety facts. User observations govern only that user's
+observations.
+5.4 An exact specification or claim extracted from an approved manufacturer
+website is a VERIFIED_SOURCE manufacturer-stated fact when its URL, publisher,
+retrieval time, exact evidence, and content hash are retained. Inference beyond
+the extracted evidence is not a manufacturer fact.
+5.5 Conflicting credible claims remain visible for review; SmokeStack does not
+silently choose a winner.
+5.6 Food-safety minimums remain distinct from culinary tenderness and finish
+targets.
+5.7 AMENDMENT-BBQ-VS-GRILLING.md is incorporated into this Constitution.
+
+6. CHARGPT
+
+6.1 CharGPT assists with interpretation and planning. It does not own
+authoritative records or releases.
+6.2 CharGPT uses account history only after verified retrieval and distinguishes
+account facts, calculations, verified references, user observations, and
+general suggestions.
+6.3 Durable memory requires an explicit user save or approval action.
+Conversation text is not silently promoted into a rule.
+6.4 CharGPT exposes uncertainty and does not claim grounding, analysis,
+learning, memory, or verification that did not occur.
+6.5 Every core workflow remains available through direct forms and controls
+without CharGPT.
+
+7. INTEGRATIONS AND DEVICES
+
+7.1 Each integration has one explicit state: unavailable, available,
+authorization_required, configured_unverified, verified, or error.
+7.2 Preview interfaces remain labeled preview and cannot create provider
+sessions, linking codes, telemetry, or success claims.
+7.3 Real device telemetry requires a real supported protocol session with
+preserved provenance.
+
+8. EXPERIENCE, ACCESSIBILITY, AND PARITY
+
+8.1 Mobile web, installed PWA, desktop web, and Android packaging share the
+same domain rules and authoritative data boundary.
+8.2 Core workflows use progressive disclosure, autosaved drafts, clear
+recovery, and truthful empty states.
+8.3 Every interactive control has a programmatic name, keyboard access, visible
+focus, and an adequate touch target.
+8.4 Destructive operations are explicit and recoverable where practical.
+8.5 App-code updates never merge, align, or overwrite account data.
+
+9. ENGINEERING AND RELEASE GOVERNANCE
+
+9.1 Canonical production behavior lives in canonical source files. Generated
+patch copies are not a security boundary.
+9.2 Reviewed GitHub commits, required CI gates, immutable build artifacts, and
+approved deployment workflows are the only production release path.
+9.3 CI tests constitutional invariants, authentication rules, persistence,
+offline startup, accessibility, mobile layout, and critical workflows.
+9.4 Releases are versioned from one source. A roadmap version is not displayed
+until its implementation and gates pass.
+9.5 Dependencies with known security findings are upgraded or explicitly
+risk-accepted before production release.
+
+10. GATE AND FAILURE BEHAVIOR
+
+Every change follows this sequence:
+
+AUDIT -> REPAIR -> TEST -> GATE -> REPORT -> RELEASE
+
+If any gate fails, release stops. The failure remains visible and is not
+converted into simulated success, fallback data, or optimistic copy.

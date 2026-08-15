@@ -4,7 +4,6 @@ import {
   Flame, Home, LogOut, MoreHorizontal, PlusCircle, RefreshCw, Settings,
   User as UserIcon, Wrench, X,
 } from 'lucide-react';
-import { isMasterAdmin } from '../utils/adminAuth';
 import { UserAuthSession } from '../utils/userAuthSession';
 import { convertTemp } from '../utils/tempUtils';
 import { fetchAutoWeatherData, WeatherData } from '../utils/weatherService';
@@ -65,7 +64,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [showGetApp, setShowGetApp] = useState(false);
-  const isAdmin = isMasterAdmin(currentUserEmail) || userSession?.isMasterAdmin;
+  // UI visibility follows a server-verified role hydrated into userSession.
+  const isAdmin = userSession?.isMasterAdmin === true;
 
   useEffect(() => {
     fetchAutoWeatherData().then(setWeatherData).catch(() => setWeatherData(null));

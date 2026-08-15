@@ -42,7 +42,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   isOpen,
   onClose,
   currentUser,
-  pitmasterAlias = 'Pitmaster Guest',
+  pitmasterAlias = '',
   onSmokerCreated,
 }) => {
   const [activeTab, setActiveTab] = useState<'custom' | 'manufacturer' | 'community'>('custom');
@@ -52,11 +52,11 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   const [builderName, setBuilderName] = useState('');
   const [customSmokerType, setCustomSmokerType] = useState('Custom Reverse Flow Offset');
   const [customFuelType, setCustomFuelType] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Wood Splits');
-  const [metalGauge, setMetalGauge] = useState('1/4" Heavy Rolled Steel');
-  const [customChamberVolumeSqIn, setCustomChamberVolumeSqIn] = useState<number | string>(1200);
+  const [metalGauge, setMetalGauge] = useState('');
+  const [customChamberVolumeSqIn, setCustomChamberVolumeSqIn] = useState<number | string>('');
   const [customHopperCapacityLbs, setCustomHopperCapacityLbs] = useState<number | string>(0);
-  const [customBaselineBurnRateLbsHr, setCustomBaselineBurnRateLbsHr] = useState<number | string>(1.25);
-  const [draftType, setDraftType] = useState('Reverse Flow Airflow');
+  const [customBaselineBurnRateLbsHr, setCustomBaselineBurnRateLbsHr] = useState<number | string>('');
+  const [draftType, setDraftType] = useState('');
   const [customNotes, setCustomNotes] = useState('');
 
   // Manufacturer Spec Form State
@@ -64,19 +64,19 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   const [mfgModel, setMfgModel] = useState('');
   const [mfgCategory, setMfgCategory] = useState('Pellet Smoker / Grill');
   const [mfgFuelType, setMfgFuelType] = useState<'Pellets' | 'Charcoal' | 'Wood Splits' | 'Electric' | 'Gas'>('Pellets');
-  const [mfgBaselineBurnRate, setMfgBaselineBurnRate] = useState<number | string>(1.20);
-  const [mfgHighHeatBurnRate, setMfgHighHeatBurnRate] = useState<number | string>(2.50);
-  const [mfgHopperCapacity, setMfgHopperCapacity] = useState<number | string>(22);
+  const [mfgBaselineBurnRate, setMfgBaselineBurnRate] = useState<number | string>('');
+  const [mfgHighHeatBurnRate, setMfgHighHeatBurnRate] = useState<number | string>('');
+  const [mfgHopperCapacity, setMfgHopperCapacity] = useState<number | string>('');
   const [mfgBowlCapacity, setMfgBowlCapacity] = useState<number | string>(0);
-  const [mfgCookingArea, setMfgCookingArea] = useState<number | string>(850);
-  const [mfgInsulation, setMfgInsulation] = useState('Double-Wall Insulated Steel');
-  const [mfgThermalRating, setMfgThermalRating] = useState<'Extreme' | 'High' | 'Standard' | 'Moderate'>('High');
-  const [mfgController, setMfgController] = useState('Digital PID Wi-Fi Screen');
+  const [mfgCookingArea, setMfgCookingArea] = useState<number | string>('');
+  const [mfgInsulation, setMfgInsulation] = useState('');
+  const [mfgThermalRating, setMfgThermalRating] = useState<'Extreme' | 'High' | 'Standard' | 'Moderate'>('Standard');
+  const [mfgController, setMfgController] = useState('');
   const [mfgNotes, setMfgNotes] = useState('');
 
   // Common Options
   const [setActiveAsCurrent, setSetActiveAsCurrent] = useState(true);
-  const [contributeToPool, setContributeToPool] = useState(true);
+  const [contributeToPool, setContributeToPool] = useState(false);
 
   // Status & Community Database State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,14 +98,29 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
   const fetchCommunityDatabase = async () => {
     setIsLoadingCommunity(true);
     try {
-      const res = await fetch('/api/smoker-database');
+      if (!currentUser) throw new Error('Sign in to browse the reviewed community smoker pool.');
+      const token = await currentUser.getIdToken();
+      const res = await fetch('/api/knowledge?type=smoker&limit=100', { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      if (data.success) {
-        setCommunityCustomSmokers(data.customSmokers || []);
-        setCommunityMfgSmokers(data.manufacturerSmokers || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch community smoker database', e);
+      if (!res.ok) throw new Error(data?.error || 'Community smoker pool is unavailable.');
+      const records = (Array.isArray(data.records) ? data.records : []).map((record: any) => {
+        const flattened = Object.fromEntries(Object.entries(record.structuredSpecs || {}).map(([field, metric]: [string, any]) => [field, metric?.value]));
+        const manufacturerFact = record.verificationScope === 'manufacturer_stated_fact' && record.source?.type === 'manufacturer';
+        return {
+          ...record,
+          ...flattened,
+          name: flattened.name || record.title,
+          manufacturerFact,
+          pitmasterAlias: manufacturerFact ? record.source?.publisher : 'Reviewed community observation',
+        };
+      });
+      setCommunityCustomSmokers(records.filter((record: any) => record.communityKind === 'custom'));
+      setCommunityMfgSmokers(records.filter((record: any) => record.manufacturerFact || record.communityKind === 'manufacturer'));
+      setStatusMessage(null);
+    } catch (e: any) {
+      setCommunityCustomSmokers([]);
+      setCommunityMfgSmokers([]);
+      setStatusMessage({ type: 'error', text: e?.message || 'Community smoker pool is unavailable.' });
     } finally {
       setIsLoadingCommunity(false);
     }
@@ -122,19 +137,19 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
     }
 
     setIsSubmitting(true);
-    setStatusMessage({ type: 'info', text: 'Saving custom smoker specs to account & contributing to server database pool...' });
+    setStatusMessage({ type: 'info', text: contributeToPool ? 'Saving locally and submitting a community observation for review…' : 'Saving custom smoker on this device…' });
 
     const newCustom: CustomSmokerSpec = {
       id: `custom-${Date.now()}`,
       name: customName.trim(),
-      builderName: builderName.trim() || 'Self-Built / Custom Shop',
-      smokerType: customSmokerType.trim() || 'Custom Smoker',
+      builderName: builderName.trim(),
+      smokerType: customSmokerType.trim(),
       fuelType: customFuelType,
-      metalGauge: metalGauge.trim() || 'Custom Steel Construction',
-      chamberVolumeSqIn: Number(customChamberVolumeSqIn) || 1200,
-      hopperCapacityLbs: Number(customHopperCapacityLbs) || 30,
-      baselineBurnRateLbsHr: Number(customBaselineBurnRateLbsHr) || 1.25,
-      draftType: draftType.trim() || 'Standard Draft',
+      metalGauge: metalGauge.trim(),
+      chamberVolumeSqIn: Number(customChamberVolumeSqIn) || 0,
+      hopperCapacityLbs: Number(customHopperCapacityLbs) || 0,
+      baselineBurnRateLbsHr: Number(customBaselineBurnRateLbsHr) || 0,
+      draftType: draftType.trim(),
       notes: customNotes.trim(),
       createdAt: new Date().toISOString(),
       pitmasterAlias,
@@ -146,36 +161,36 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
 
     // Contribute to Server Pool if checked
     let contributedOk = false;
+    let contributionError: string | null = null;
     if (contributeToPool) {
       try {
-        const isTermsAccepted = localStorage.getItem('pitmaster_terms_accepted') !== 'false';
-        const hasAccount = !!(currentUser?.email || (pitmasterAlias && pitmasterAlias !== 'Pitmaster Guest' && pitmasterAlias !== 'guest'));
-
-        const res = await fetch('/api/custom-smokers/contribute', {
+        if (!currentUser) throw new Error('Sign in before submitting to the community pool.');
+        const token = await currentUser.getIdToken();
+        const res = await fetch('/api/community-smokers/contribute', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({
-            pitmasterAlias,
-            hasAccount,
-            termsAccepted: isTermsAccepted,
-            smokerSpecs: newCustom,
+            kind: 'custom',
+            consent: true,
+            specs: newCustom,
           }),
         });
         const resData = await res.json();
-        if (resData.success) {
-          contributedOk = true;
-        }
-      } catch (err) {
-        console.error('Failed to contribute custom smoker specs:', err);
+        if (!res.ok) throw new Error(resData?.error || 'Community submission failed.');
+        contributedOk = resData.status === 'pending_review';
+      } catch (err: any) {
+        contributionError = err?.message || 'Unknown error';
       }
     }
 
     setIsSubmitting(false);
     setStatusMessage({
-      type: 'success',
-      text: contributedOk
-        ? `Custom smoker '${newCustom.name}' saved to user account and submitted to server database!`
-        : `Custom smoker '${newCustom.name}' saved to your local user account!`,
+      type: contributionError ? 'error' : 'success',
+      text: contributionError
+        ? `${newCustom.name} was saved locally, but community submission failed: ${contributionError}`
+        : contributedOk
+        ? `Custom smoker '${newCustom.name}' saved locally and submitted for community review.`
+        : `Custom smoker '${newCustom.name}' saved on this device.`,
     });
 
     setTimeout(() => {
@@ -193,7 +208,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
     }
 
     setIsSubmitting(true);
-    setStatusMessage({ type: 'info', text: 'Saving manufacturer specs to user account & contributing to server database pool...' });
+    setStatusMessage({ type: 'info', text: contributeToPool ? 'Saving locally and submitting user-entered manufacturer specs for review…' : 'Saving manufacturer specs on this device…' });
 
     const newMfg: ManufacturerSmokerSpec = {
       id: `mfg-${Date.now()}`,
@@ -201,28 +216,30 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
       model: mfgModel.trim(),
       category: mfgCategory,
       fuelType: mfgFuelType,
-      factoryBaselineBurnRateLbsHr: Number(mfgBaselineBurnRate) || 1.20,
-      factoryHighHeatBurnRateLbsHr: Number(mfgHighHeatBurnRate) || 2.50,
-      hopperCapacityLbs: Number(mfgHopperCapacity) || 20,
+      factoryBaselineBurnRateLbsHr: Number(mfgBaselineBurnRate) || 0,
+      factoryHighHeatBurnRateLbsHr: Number(mfgHighHeatBurnRate) || 0,
+      hopperCapacityLbs: Number(mfgHopperCapacity) || 0,
       bowlCapacityLbs: Number(mfgBowlCapacity) || 0,
-      cookingAreaSqIn: Number(mfgCookingArea) || 800,
+      cookingAreaSqIn: Number(mfgCookingArea) || 0,
       insulationType: mfgInsulation,
       thermalEfficiencyRating: mfgThermalRating,
       controllerType: mfgController,
       notes: mfgNotes.trim(),
       createdAt: new Date().toISOString(),
       pitmasterAlias,
-      isVerifiedManufacturerData: true,
+      isVerifiedManufacturerData: false,
     };
 
     // Auto convert manufacturer capacity to account metric if set as active
     if (setActiveAsCurrent) {
-      const effectiveCap = (Number(mfgBowlCapacity) || 0) > 0 ? (Number(mfgBowlCapacity) || 0) : (Number(mfgHopperCapacity) || 20);
+      const effectiveCap = (Number(mfgBowlCapacity) || 0) > 0 ? (Number(mfgBowlCapacity) || 0) : (Number(mfgHopperCapacity) || 0);
       try {
         const rawAcc = localStorage.getItem('pitmaster_local_user_account');
-        const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
-        acc.fuelOnHand = `${effectiveCap} lbs`;
-        localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+        if (rawAcc && effectiveCap > 0) {
+          const acc = JSON.parse(rawAcc);
+          acc.fuelOnHand = `${effectiveCap} lbs`;
+          localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+        }
       } catch (e) {}
     }
 
@@ -232,36 +249,36 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
 
     // Contribute to Server Pool if checked
     let contributedOk = false;
+    let contributionError: string | null = null;
     if (contributeToPool) {
       try {
-        const isTermsAccepted = localStorage.getItem('pitmaster_terms_accepted') !== 'false';
-        const hasAccount = !!(currentUser?.email || (pitmasterAlias && pitmasterAlias !== 'Pitmaster Guest' && pitmasterAlias !== 'guest'));
-
-        const res = await fetch('/api/manufacturer-smokers/contribute', {
+        if (!currentUser) throw new Error('Sign in before submitting to the community pool.');
+        const token = await currentUser.getIdToken();
+        const res = await fetch('/api/community-smokers/contribute', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({
-            pitmasterAlias,
-            hasAccount,
-            termsAccepted: isTermsAccepted,
-            manufacturerSpecs: newMfg,
+            kind: 'manufacturer',
+            consent: true,
+            specs: newMfg,
           }),
         });
         const resData = await res.json();
-        if (resData.success) {
-          contributedOk = true;
-        }
-      } catch (err) {
-        console.error('Failed to contribute manufacturer smoker specs:', err);
+        if (!res.ok) throw new Error(resData?.error || 'Community submission failed.');
+        contributedOk = resData.status === 'pending_review';
+      } catch (err: any) {
+        contributionError = err?.message || 'Unknown error';
       }
     }
 
     setIsSubmitting(false);
     setStatusMessage({
-      type: 'success',
-      text: contributedOk
-        ? `Manufacturer smoker '${newMfg.brand} ${newMfg.model}' collected for server smoker database!`
-        : `Manufacturer smoker '${newMfg.brand} ${newMfg.model}' saved to your local user account!`,
+      type: contributionError ? 'error' : 'success',
+      text: contributionError
+        ? `${newMfg.brand} ${newMfg.model} was saved locally, but community submission failed: ${contributionError}`
+        : contributedOk
+        ? `Manufacturer smoker '${newMfg.brand} ${newMfg.model}' saved locally and submitted as user-entered data for review.`
+        : `Manufacturer smoker '${newMfg.brand} ${newMfg.model}' saved on this device.`,
     });
 
     setTimeout(() => {
@@ -275,21 +292,21 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
     if (isMfg) {
       const mfgSpec: ManufacturerSmokerSpec = {
         id: `imported-mfg-${Date.now()}`,
-        brand: record.brand || 'Commercial Brand',
-        model: record.model || 'Smoker Model',
-        category: record.category || 'Smoker',
-        fuelType: record.fuelType || 'Pellets',
-        factoryBaselineBurnRateLbsHr: record.factoryBaselineBurnRateLbsHr || 1.2,
-        factoryHighHeatBurnRateLbsHr: record.factoryHighHeatBurnRateLbsHr || 2.5,
-        hopperCapacityLbs: record.hopperCapacityLbs || 20,
-        cookingAreaSqIn: record.cookingAreaSqIn || 800,
-        insulationType: record.insulationType || 'Standard Steel',
-        thermalEfficiencyRating: record.thermalEfficiencyRating || 'Standard',
-        controllerType: record.controllerType || 'PID Controller',
+        brand: record.brand || '',
+        model: record.model || record.title || '',
+        category: record.category || '',
+        fuelType: record.fuelType || ('' as any),
+        factoryBaselineBurnRateLbsHr: Number(record.factoryBaselineBurnRateLbsHr) || 0,
+        factoryHighHeatBurnRateLbsHr: Number(record.factoryHighHeatBurnRateLbsHr) || 0,
+        hopperCapacityLbs: Number(record.hopperCapacityLbs) || 0,
+        cookingAreaSqIn: Number(record.cookingAreaSqIn) || 0,
+        insulationType: record.insulationType || '',
+        thermalEfficiencyRating: record.thermalEfficiencyRating || ('' as any),
+        controllerType: record.controllerType || '',
         notes: record.notes || '',
         createdAt: new Date().toISOString(),
         pitmasterAlias: record.pitmasterAlias,
-        isVerifiedManufacturerData: true,
+        isVerifiedManufacturerData: record.manufacturerFact === true,
       };
 
       const existing = loadSavedManufacturerSmokers();
@@ -298,15 +315,15 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
     } else {
       const customSpec: CustomSmokerSpec = {
         id: `imported-custom-${Date.now()}`,
-        name: record.name,
-        builderName: record.builderName || 'Custom Builder',
-        smokerType: record.smokerType || 'Custom Smoker',
-        fuelType: record.fuelType || 'Wood Splits',
-        metalGauge: record.metalGauge || 'Heavy Steel',
-        chamberVolumeSqIn: record.chamberVolumeSqIn || 1200,
-        hopperCapacityLbs: record.hopperCapacityLbs || 30,
-        baselineBurnRateLbsHr: record.baselineBurnRateLbsHr || 1.25,
-        draftType: record.draftType || 'Reverse Flow Airflow',
+        name: record.name || record.title || '',
+        builderName: record.builderName || '',
+        smokerType: record.smokerType || '',
+        fuelType: record.fuelType || ('' as any),
+        metalGauge: record.metalGauge || '',
+        chamberVolumeSqIn: Number(record.chamberVolumeSqIn) || 0,
+        hopperCapacityLbs: Number(record.hopperCapacityLbs) || 0,
+        baselineBurnRateLbsHr: Number(record.baselineBurnRateLbsHr) || 0,
+        draftType: record.draftType || '',
         notes: record.notes || '',
         createdAt: new Date().toISOString(),
         pitmasterAlias: record.pitmasterAlias,
@@ -606,7 +623,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                   />
                   <span className="text-xs font-semibold text-zinc-200 flex items-center space-x-1">
                     <Database className="w-3.5 h-3.5 text-orange-400" />
-                    <span>Contribute custom smoker specs to Pitmaster Community Smoker Database</span>
+                    <span>Submit as user-entered data for community review</span>
                   </span>
                 </label>
               </div>
@@ -860,7 +877,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                   />
                   <span className="text-xs font-semibold text-zinc-200 flex items-center space-x-1">
                     <Database className="w-3.5 h-3.5 text-orange-400" />
-                    <span>Contribute manufacturer specs to the Pitmaster Community Smoker Database</span>
+                    <span>Submit these user-entered specs for community review</span>
                   </span>
                 </label>
               </div>
@@ -895,7 +912,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                     <span>Pitmaster Community Smoker Database Pool</span>
                   </h3>
                   <p className="text-[11px] text-zinc-400">
-                    Browse verified manufacturer specs and custom built pit specifications contributed by pitmasters
+                    Manufacturer-site facts retain source evidence; reviewed community observations remain labeled separately.
                   </p>
                 </div>
                 <button
@@ -963,9 +980,9 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                 <div className="space-y-3">
                   {filteredMfgList.length === 0 && filteredCustomList.length === 0 ? (
                     <div className="p-8 text-center bg-[#202020] rounded-xl border border-[#2a2a2a] space-y-2">
-                      <div className="text-zinc-300 font-bold text-sm">Server Smoker Database Pool Cleared</div>
+                      <div className="text-zinc-300 font-bold text-sm">No published smoker records yet</div>
                       <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                        The community server pool is cleared for initial deployment. When pitmasters opt-in and contribute custom smoker specs or manufacturer data to the pool, they will appear here for everyone!
+                        Use the OWNER Knowledge Source Harvester with an approved manufacturer URL, or submit an authenticated community observation for review.
                       </p>
                     </div>
                   ) : (
@@ -998,7 +1015,7 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                                   {mfg.brand} {mfg.model}
                                 </span>
                                 <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded text-[10px] font-mono font-bold">
-                                  Manufacturer Spec
+                                  {mfg.manufacturerFact ? 'Manufacturer-Site Fact' : 'Reviewed Community Observation'}
                                 </span>
                                 {mfg.thermalEfficiencyRating && (
                                   <span className="px-2 py-0.5 bg-orange-500/10 text-orange-300 border border-orange-500/20 rounded text-[10px] font-mono">
@@ -1009,8 +1026,8 @@ export const CustomSmokerModal: React.FC<CustomSmokerModalProps> = ({
                               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-400 font-mono">
                                 <span>Category: {mfg.category}</span>
                                 <span>Fuel: {mfg.fuelType}</span>
-                                <span>Baseline Burn: {mfg.factoryBaselineBurnRateLbsHr} lbs/hr</span>
-                                <span>Hopper: {mfg.hopperCapacityLbs} lbs</span>
+                                {Number(mfg.factoryBaselineBurnRateLbsHr) > 0 && <span>Baseline Burn: {mfg.factoryBaselineBurnRateLbsHr} lbs/hr</span>}
+                                {Number(mfg.hopperCapacityLbs) > 0 && <span>Hopper: {mfg.hopperCapacityLbs} lbs</span>}
                                 {mfg.cookingAreaSqIn && <span>Area: {mfg.cookingAreaSqIn} sq in</span>}
                               </div>
                               {mfg.notes && <p className="text-[11px] text-zinc-400 italic">{mfg.notes}</p>}

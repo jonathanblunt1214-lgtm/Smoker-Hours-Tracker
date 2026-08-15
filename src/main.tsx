@@ -1,6 +1,6 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.trusted.tsx';
+import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { installAuthenticatedAdminFetch } from './utils/installAuthenticatedAdminFetch.ts';
 import './index.css';

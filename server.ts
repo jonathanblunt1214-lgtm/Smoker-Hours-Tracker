@@ -6,22 +6,81 @@ import multer from 'multer';
 import * as pdfParseModule from 'pdf-parse';
 import { getEffectiveSmokerSpecs } from './src/utils/smokerCalculations';
 import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';
+import { adminRolesRouter } from './server/adminRoles';
+import { verifiedKnowledgeRouter, getPublishedKnowledgeForPrompt } from './server/verifiedKnowledge';
+import { meatKnowledgeRouter } from './server/meatKnowledgeRoutes';
+import { communitySmokersRouter } from './server/communitySmokers';
 
 dotenv.config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// CORS & Frame-Ancestors Middleware to allow live widget/extension iframe loading
+// Production authorization routes: Firebase token + server-side role claims.
+app.use('/api/admin', adminRolesRouter);
+app.use('/api/knowledge', verifiedKnowledgeRouter);
+app.use('/api/knowledge', meatKnowledgeRouter);
+app.use('/api/community-smokers', communitySmokersRouter);
+
+// Phase-0 trust firewall. These legacy routes used simulated/global state,
+// client-supplied account identity, or unverified seeded knowledge. The trusted
+// client no longer depends on them; keep them unavailable until replaced by a
+// source-backed implementation.
+const disabledLegacyPrefixes = [
+  '/api/master-version',
+  '/api/master/generate-code-patch',
+  '/api/cook-logs',
+  '/sync/hours',
+  '/api/sync/hours',
+  '/api/v1/smoker/sync',
+  '/smoker/sync',
+  '/api/federated-learning',
+  '/api/smoker-database',
+  '/api/custom-smokers',
+  '/api/manufacturer-smokers',
+  '/api/verified-cuts',
+  '/api/togrill',
+  '/api/alexa',
+  '/api/push/send-alert',
+  '/api/analyze-cook-graph',
+  '/api/chargpt/analyze-meat-photo',
+  '/api/chargpt/identify-unknown-cut',
+  '/api/chargpt/verify-cut-online',
+  '/api/chargpt/optimize-blend',
+  '/api/chargpt/pitmaster-courses',
+];
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (disabledLegacyPrefixes.some((prefix) => req.path === prefix || req.path.startsWith(prefix + '/'))) {
+    return res.status(503).json({
+      success: false,
+      error: 'This legacy integration is disabled in the trusted runtime until a verified implementation is available.',
+      integrationStatus: 'unavailable',
+    });
+  }
+  next();
+});
+
+// Same-origin by default. Additional trusted origins must be configured
+// explicitly; a wildcard origin would expose authenticated APIs to any site.
+app.use((req, res, next) => {
+  const configuredOrigins = new Set((process.env.SMOKESTACK_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean));
+  const origin = req.header('origin');
+  const isSameOrigin = (() => {
+    if (!origin) return true;
+    try { return new URL(origin).host === req.get('host'); } catch { return false; }
+  })();
+  if (origin && (isSameOrigin || configuredOrigins.has(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' chrome-extension://* moz-extension://* *;");
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self';");
   if (req.method === 'OPTIONS') {
+    if (origin && !isSameOrigin && !configuredOrigins.has(origin)) return res.sendStatus(403);
     return res.sendStatus(200);
   }
   next();
@@ -965,7 +1024,8 @@ app.use('/api/master-version', (_req, res) => res.status(410).json({
 app.get('/api/cook-logs', (req, res) => {
   try {
     const rawEmail = ((req.query.email as string) || '').trim().toLowerCase();
-    const lookupKey = rawEmail || 'jonathanblunt1214@gmail.com';
+    if (!rawEmail) return res.status(400).json({ success: false, error: 'Account email is required by this retired compatibility route.' });
+    const lookupKey = rawEmail;
     const account = serverUserAccounts[lookupKey];
 
     return res.json({
@@ -984,7 +1044,8 @@ app.get('/api/cook-logs', (req, res) => {
 app.post('/api/cook-logs/sync', (req, res) => {
   try {
     const { email, cookLogs, deletedIds, deletedCookLogIds } = req.body;
-    const lookupKey = (email || 'jonathanblunt1214@gmail.com').trim().toLowerCase();
+    const lookupKey = String(email || '').trim().toLowerCase();
+    if (!lookupKey) return res.status(400).json({ success: false, error: 'Account email is required by this retired compatibility route.' });
     const incomingLogs: any[] = Array.isArray(cookLogs) ? cookLogs : [];
     const incomingDeletedIds: string[] = [
       ...(Array.isArray(deletedIds) ? deletedIds : []),
@@ -1148,6 +1209,16 @@ app.post('/smoker/sync', handleSmokerSyncEngine);
 
 // Lazy init for Gemini AI client
 function getGeminiClient() {
+  const useVertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE);
+  if (useVertex) {
+    const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+    const location = process.env.GOOGLE_CLOUD_LOCATION || 'global';
+    if (!project) {
+      console.error('Vertex AI project is not configured.');
+      return null;
+    }
+    return new GoogleGenAI({ vertexai: true, project, location });
+  }
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
@@ -1155,24 +1226,186 @@ function getGeminiClient() {
   return new GoogleGenAI({ apiKey });
 }
 
+
+app.use('/api/chargpt', (req, res, next) => {
+  const body = req.body ?? {};
+
+  const hasTrustedProvenance = (value: any): boolean => {
+    if (!value || typeof value !== 'object') return false;
+
+    if (
+      value.userEntered === true ||
+      value.isVerified === true ||
+      value.verified === true
+    ) {
+      return true;
+    }
+
+    const provenance =
+      value.provenance ||
+      value.sourceProvenance ||
+      value.sourceMetadata;
+
+    if (!provenance || typeof provenance !== 'object') {
+      return false;
+    }
+
+    const status = String(
+      provenance.status || provenance.verificationStatus || ''
+    ).toLowerCase();
+
+    const type = String(
+      provenance.type || provenance.kind || provenance.origin || ''
+    ).toLowerCase();
+
+    return (
+      status === 'verified' ||
+      type === 'user' ||
+      type === 'user_data' ||
+      type === 'verified_manufacturer'
+    );
+  };
+
+  const trustedSmokerProfile = hasTrustedProvenance(body.smokerProfile);
+  const trustedEffectiveSpecs = hasTrustedProvenance(body.effectiveSpecs);
+
+  if (!trustedSmokerProfile) {
+    delete body.smokerProfile;
+  }
+
+  if (!trustedEffectiveSpecs) {
+    delete body.effectiveSpecs;
+  }
+
+  const memoryApproved =
+    body.charGPTMemory?.approved === true ||
+    body.charGPTMemory?.approvalStatus === 'approved';
+
+  if (!memoryApproved) {
+    delete body.charGPTMemory;
+  }
+
+  req.body = body;
+
+  const hasTrustedEquipment =
+    trustedSmokerProfile || trustedEffectiveSpecs;
+
+  const originalJson = res.json.bind(res);
+
+  res.json = ((payload: any) => {
+    const text =
+      payload && typeof payload.text === 'string'
+        ? payload.text
+        : '';
+
+    const forbiddenEvidenceLabel =
+      /\[(KNOWN|MFR SPECS)\]/i.test(text);
+
+    const unsupportedPreferenceClaim =
+      /based on your saved preferences/i.test(text);
+
+    const unsupportedEquipmentPersonalization =
+      !hasTrustedEquipment &&
+      (
+        /(?:customized|tuned) to your .*smoker/i.test(text) ||
+        /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(text)
+      );
+
+    if (
+      forbiddenEvidenceLabel ||
+      unsupportedPreferenceClaim ||
+      unsupportedEquipmentPersonalization
+    ) {
+      res.statusCode = 503;
+
+      return originalJson({
+        error:
+          'CharGPT grounding check rejected an answer containing unsupported equipment-specific claims. No unverified answer was shown.',
+        availability: 'grounding_rejected',
+        groundingStatus: 'rejected'
+      });
+    }
+
+    return originalJson(payload);
+  }) as any;
+
+  next();
+});
+
+
+app.get('/api/integrations/status', (_req, res) => {
+  const alexaConfigured = Boolean(process.env.ALEXA_SKILL_ID && process.env.ALEXA_OAUTH_CLIENT_ID && process.env.ALEXA_OAUTH_CLIENT_SECRET);
+  const googleHomeConfigured = Boolean(process.env.GOOGLE_HOME_OAUTH_CLIENT_ID && process.env.GOOGLE_HOME_PROJECT_ID);
+  const fireTvConfigured = Boolean(process.env.FIRE_TV_INTEGRATION_ID);
+  return res.json({
+    alexa: { state: alexaConfigured ? 'configured_unverified' : 'unconfigured', verified: false },
+    googleHome: { state: googleHomeConfigured ? 'configured_unverified' : 'unconfigured', verified: false },
+    fireTv: { state: fireTvConfigured ? 'configured_unverified' : 'unconfigured', verified: false },
+    googleDrive: { state: 'authorization_required', verified: false, verification: 'OAuth plus successful write/read-back required' }
+  });
+});
+app.use(['/api/alexa/skill', '/api/alexa/sync-telemetry'], (_req, res) => res.status(503).json({
+  success: false, integration: 'alexa', state: 'unconfigured', previewOnly: true,
+  error: 'Real Alexa account linking is not configured. Legacy server simulation is disabled.'
+}));
+
 // CharGPT API Route Handler
-const handleCharGPTRequest = async (req: express.Request, res: express.Response) => {
+const handleCharGPTRequest = async (req: AuthenticatedRequest, res: express.Response) => {
   try {
-    const { prompt, cookContext, allCookLogs, charGPTMemory, smokerProfile, effectiveSpecs, userAccount, conversationHistory, massCookInput, image, userEmail, isDevOverride } = req.body;
+    const { prompt, cookContext, allCookLogs, charGPTMemory, smokerProfile, effectiveSpecs, userAccount, conversationHistory, massCookInput, image } = req.body;
+
+    const companionMissionContext = (() => {
+      const logs = Array.isArray(allCookLogs) ? allCookLogs.filter((log: any) => log && typeof log === 'object') : [];
+      const clean = (value: any) => String(value || '').trim().replace(/\s+/g, ' ');
+      const proteinCounts = new Map<string, number>();
+      const dishCounts = new Map<string, number>();
+      for (const log of logs) {
+        const protein = clean(log.proteinType || log.protein || log.meatType || log.meat || log.category);
+        const dish = clean(log.title || log.recipeName || log.dishName || log.cutName || log.meatCut || log.cut);
+        if (protein) proteinCounts.set(protein, (proteinCounts.get(protein) || 0) + 1);
+        if (dish) dishCounts.set(dish, (dishCounts.get(dish) || 0) + 1);
+      }
+      const ranked = (map: Map<string, number>) => Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+      const proteins = ranked(proteinCounts);
+      const dishes = ranked(dishCounts);
+      const dominantProtein = proteins[0];
+      const dominantDish = dishes[0];
+      const proteinShare = dominantProtein && logs.length ? dominantProtein[1] / logs.length : 0;
+      const dishShare = dominantDish && logs.length ? dominantDish[1] / logs.length : 0;
+      const proteinNorm = Boolean(dominantProtein && dominantProtein[1] >= 3 && proteinShare >= 0.5);
+      const dishNorm = Boolean(dominantDish && dominantDish[1] >= 3 && dishShare >= 0.4);
+      const history = logs.length > 0
+        ? [
+            'HISTORICAL COOK-DIVERSITY ANALYSIS:',
+            'Cook logs analyzed: ' + logs.length,
+            dominantProtein ? 'Most frequent protein: ' + dominantProtein[0] + ' (' + dominantProtein[1] + '/' + logs.length + ')' : 'Most frequent protein: not identifiable',
+            dominantDish ? 'Most frequent dish/cut: ' + dominantDish[0] + ' (' + dominantDish[1] + '/' + logs.length + ')' : 'Most frequent dish/cut: not identifiable',
+            'Protein pattern is established norm: ' + (proteinNorm ? 'yes' : 'no'),
+            'Dish/cut pattern is established norm: ' + (dishNorm ? 'yes' : 'no'),
+          ].join('\n')
+        : 'HISTORICAL COOK-DIVERSITY ANALYSIS: No usable cook-log history was supplied.';
+      return [
+        'SMOKESTACK AI BBQ COMPANION MISSION — MANDATORY:',
+        '- Be an ongoing BBQ companion, not merely a question-answer bot: help the pitmaster learn, plan, troubleshoot, compare outcomes, and discover appropriate next cooks.',
+        '- Treat supplied cook-log patterns as [HISTORICAL], never as VERIFIED manufacturer or food-safety facts.',
+        '- When a protein or dish has become an established norm, proactively offer 2–4 adjacent but meaningfully different proteins, cuts, or recipes that use transferable techniques or flavor profiles.',
+        '- Explain why each suggestion is similar enough to be approachable and different enough to expand the pitmaster repertoire.',
+        '- Do not imply the user is bored, dissatisfied, or wants variety. Present diversification as an optional recommendation.',
+        '- Do not invent recipes as verified facts. Recipe concepts and technique suggestions are [GENERAL GUIDANCE] unless backed by published Knowledge records. Food-safety claims must remain claim-scoped to verified sources when available.',
+        '- Prefer suggestions that can be evaluated with future cook logs so SmokeStack can compare outcomes over time.',
+        history,
+      ].join('\n');
+    })();
     const ai = getGeminiClient();
 
     if (!ai) {
       return res.status(503).json({
-        error: 'Gemini API key is not configured. Please set GEMINI_API_KEY in environment variables.',
+        error: 'CharGPT model access is not configured for this runtime.',
       });
     }
 
-    // Master Developer Override Check
-    const isMasterAdminEmail = (userEmail || '').trim().toLowerCase() === 'jonathanblunt1214@gmail.com';
-    const isDevOverrideActive = isMasterAdminEmail && Boolean(isDevOverride);
-
     // Server-side strict BBQ Guardrail Validation
-    if (!isDevOverrideActive && prompt) {
+    if (prompt) {
       const bbqKeywords = [
         'bbq', 'barbecue', 'barbeque', 'smoke', 'smoker', 'grill', 'grilling', 'pellet', 'brisket',
         'pork', 'ribs', 'steak', 'chicken', 'turkey', 'sausage', 'wings', 'salmon', 'meat', 'beef',
@@ -1194,7 +1427,7 @@ const handleCharGPTRequest = async (req: express.Request, res: express.Response)
 
       if (isExplicitNonBBQ && !hasBBQTerm) {
         return res.json({
-          text: `⛔ **CharGPT Strict BBQ Guardrail Active**\n\nI am CharGPT, an AI strictly dedicated to BBQ, smoking meats, grilling, wood pellet physics, and pitmaster science. I cannot respond to non-BBQ topics.\n\n*(Note: Non-BBQ developer testing prompts can only be unlocked with express Developer Master Permission from the verified developer account: \`jonathanblunt1214@gmail.com\` via the Master Admin Dashboard.)*`,
+          text: `CharGPT is limited to BBQ, smoking, grilling, equipment, fuel, food-safety, and pitmaster workflows. This topic is outside that scope.`,
         });
       }
     }
@@ -1296,7 +1529,21 @@ If the user's prompt teaches you a new rule, preference, or correction (e.g. "Re
 `;
     }
 
-    const systemInstruction = `You are CharGPT, an elite Competition Pitmaster, Wood Physics Specialist, Meat Scientist, and BBQ Learning Advisor for the Smoke Stack app.
+    const systemInstruction = companionMissionContext + '\n\n' + `EVIDENCE AND PROVENANCE POLICY — MANDATORY:
+- VERIFIED: Use only when a claim is backed by an explicitly provided verified source record.
+- USER DATA: Use only for values actually present in the authenticated user's supplied SmokeStack context.
+- CALCULATED: Use only for deterministic calculations from VERIFIED or USER DATA inputs; show the inputs/assumptions.
+- ESTIMATED: Use for modeled estimates; state assumptions and never relabel an estimate as a manufacturer specification.
+- GENERAL GUIDANCE: Use for broadly applicable BBQ guidance that is not specific to this user's equipment.
+- UNVERIFIED: Use when a specific claim cannot be proven from provided context or verified retrieval.
+
+Hard rules:
+1. Never invent or infer a smoker model, hopper size, burn rate, controller stability, modification state, saved preference, manufacturer specification, or user history that is not explicitly present in the request context.
+2. Never label a claim KNOWN or MFR SPECS. Use VERIFIED or USER DATA only when the evidence is actually present.
+3. If equipment-specific data is missing, say that it is not verified and ask for the missing smoker/profile detail only when needed.
+4. Do not convert model knowledge into a claim about this user's smoker. General knowledge must remain GENERAL GUIDANCE.
+5. Before returning an answer, self-check every equipment-specific number and personalization claim. Downgrade unsupported claims to ESTIMATED/GENERAL GUIDANCE/UNVERIFIED or remove them.
+6. Durable memory must not be updated from an unsupported or inferred claim.\n\n` + `You are CharGPT, an elite Competition Pitmaster, Wood Physics Specialist, Meat Scientist, and BBQ Learning Advisor for the Smoke Stack app.
 You possess memory of the user's specific smoker preferences, past feedback, learned rules, cook log analytics, and LINKED SMOKER PROFILE DATA.
 You analyze smoker logs (cooking temperature curves, internal meat temperatures, ambient outdoor weather, smoker model, wood pellet types & custom blends, rubs, finished notes, next time notes, and quality ratings).
 
@@ -1382,7 +1629,36 @@ ${recentHistory.map((m: any) => `${m.role === 'user' ? 'User' : 'CharGPT'}: ${m.
 `;
     }
 
+    let verifiedKnowledgeContextStr = '';
+    let verifiedRecordsForRequest: any[] = [];
+    try {
+      verifiedRecordsForRequest = await getPublishedKnowledgeForPrompt(String(prompt || ''), 8);
+      if (verifiedRecordsForRequest.length > 0) {
+        verifiedKnowledgeContextStr = `
+=== VERIFIED SMOKESTACK KNOWLEDGE ===
+The following records passed SmokeStack provenance and human review. Claims from these records may be labeled [VERIFIED]. Do not extend a verified claim beyond its exact wording.
+
+${verifiedRecordsForRequest.map((record: any, idx: number) => {
+          const claims = Array.isArray(record.claims) ? record.claims : [];
+          return `[Verified Record #${idx + 1}]
+Type: ${record.type}
+Title: ${record.title}
+Publisher: ${record.source?.publisher || 'Verified source'}
+Source: ${record.source?.url}
+Claims:
+${claims.map((claim: string) => '- ' + claim).join('\n')}`;
+        }).join('\n\n')}
+`;
+      }
+    } catch (verifiedKnowledgeError: any) {
+      console.warn('Verified knowledge retrieval unavailable; continuing without verified context:', verifiedKnowledgeError?.message || verifiedKnowledgeError);
+    }
+
     let userMessage = prompt || 'Please analyze my smoker logs and provide Smoke Stack pitmaster improvement recommendations.';
+
+    if (verifiedKnowledgeContextStr) {
+      userMessage = verifiedKnowledgeContextStr + '\n\nUser Question: ' + userMessage;
+    }
 
     userMessage = `${federatedContextStr}\n\n${userMessage}`;
 
@@ -1488,57 +1764,104 @@ User Question: ${userMessage}`;
       }
     }
 
-    if (response?.text) {
-      const groundingChunks = (response.candidates?.[0] as any)?.groundingMetadata?.groundingChunks || [];
-      const searchEntryPoint = (response.candidates?.[0] as any)?.groundingMetadata?.searchEntryPoint?.renderedContent || '';
+    if (verifiedRecordsForRequest.length > 0) {
+      const verifiedSections = verifiedRecordsForRequest.map((record: any) => {
+        const claims = Array.isArray(record.claims) ? record.claims : [];
+        const title = String(record.title || 'Verified SmokeStack record');
+        const publisher = String(record.source?.publisher || 'Verified source');
+        const sourceUrl = String(record.source?.url || '');
+        const claimLines = claims.map((claim: string) => '- ' + claim + ' [VERIFIED]').join('\n');
+        return '### ' + title + '\n\n' + claimLines + '\n\nSource: ' + publisher + (sourceUrl ? ' — ' + sourceUrl : '');
+      }).join('\n\n---\n\n');
 
       return res.json({
-        text: response.text,
-        groundingChunks,
-        searchEntryPoint,
+        text: verifiedSections + '\n\nSmokeStack is limiting model-specific facts to the reviewed claims above. Conflicting, unpublished, or unsupported equipment specifications are intentionally omitted. [VERIFIED]',
+        groundingChunks: [],
+        searchEntryPoint: '',
+        groundingStatus: 'verified_claims_only',
+        verifiedRecordCount: verifiedRecordsForRequest.length,
       });
     }
 
-    // Fallback response for offline or unauthenticated mode
-    const queryTerm = prompt || 'Custom BBQ Cut';
-    const fallbackText = `🔎 CharGPT Recipe & Smoking Guide for "${queryTerm}":
+    if (response?.text) {
+      const groundingChunks = (response.candidates?.[0] as any)?.groundingMetadata?.groundingChunks || [];
+      const searchEntryPoint = (response.candidates?.[0] as any)?.groundingMetadata?.searchEntryPoint?.renderedContent || '';
+      const firstText = String(response.text || '');
 
-• Target Pit Temp: 225°F - 250°F Low & Slow
-• Target Internal Meat Temp: 165°F - 203°F (Probe tender)
-• Estimated Smoking Duration: 5.5 hours (Approx 1.2 lbs pellets/hr)
-• Recommended Wood Pairing: CharGPT Custom Pecan & Oak Blend
-• Rub & Seasoning Profile: Coarse Kosher Salt, 16-mesh Black Pepper, Granulated Garlic, Smoked Paprika, Brown Sugar
-• Stall & Wrap Strategy: Wrap at 160°F in peach butcher paper with tallow or butter
-• Step-by-Step CharGPT Instructions:
-1. Preheat pellet smoker to 225°F with hardwood pellets.
-2. Season ${queryTerm} thoroughly with mustard binder and rub blend.
-3. Smoke until internal temperature reaches 160°F stall.
-4. Wrap tightly in butcher paper; return to smoker until probe tender (approx 203°F).
-5. Rest in insulated cooler for 45-60 minutes before serving.
+      const firstAnswerUnsafe =
+        /\[(KNOWN|MFR SPECS)\]/i.test(firstText) ||
+        /based on your saved preferences/i.test(firstText) ||
+        /(?:customized|tuned) to your .*smoker/i.test(firstText) ||
+        /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(firstText);
 
-🧠 *CharGPT Memory Update: Saved "${queryTerm}" preference to BBQ Vault.*`;
+      if (!firstAnswerUnsafe) {
+        return res.json({
+          text: firstText,
+          groundingChunks,
+          searchEntryPoint,
+          groundingStatus: 'accepted',
+        });
+      }
 
-    return res.json({
-      text: fallbackText,
-      groundingChunks: [],
-      searchEntryPoint: '',
+      console.warn('CharGPT grounding rejected first answer; retrying with context-free safe grounding.');
+
+      const safeSystemInstruction = `You are CharGPT, a BBQ cooking assistant. The previous draft was rejected because it contained unsupported personalized or equipment-specific claims.
+
+Answer the user's original BBQ question again using ONLY the original question below. Do not use or infer any saved preference, smoker profile, hopper size, burn rate, controller stability, modification state, manufacturer specification, account history, or equipment-specific fact.
+
+Allowed evidence labels are only [GENERAL GUIDANCE], [ESTIMATED], [CALCULATED], [USER DATA], [VERIFIED], and [UNVERIFIED]. Never output [KNOWN] or [MFR SPECS]. Do not say "your smoker" unless the original user question itself explicitly provides the relevant smoker fact. If equipment-specific data would materially improve the answer, give useful general guidance first and then state what specific data is needed for personalization. Never claim that memory was updated.`;
+
+      try {
+        const safeResponse = await ai.models.generateContent({
+          model: 'gemini-3.6-flash',
+          contents: prompt || 'Provide safe general BBQ guidance.',
+          config: {
+            systemInstruction: safeSystemInstruction,
+          },
+        });
+
+        const safeText = String(safeResponse?.text || '');
+        const retryStillUnsafe =
+          !safeText ||
+          /\[(KNOWN|MFR SPECS)\]/i.test(safeText) ||
+          /based on your saved preferences/i.test(safeText) ||
+          /(?:customized|tuned) to your .*smoker/i.test(safeText) ||
+          /your .{0,45}(?:hopper|burn rate|controller|smoker setup|active mods|efficiency rating)/i.test(safeText);
+
+        if (!retryStillUnsafe) {
+          return res.json({
+            text: safeText,
+            groundingChunks: [],
+            searchEntryPoint: '',
+            groundingStatus: 'safe_retry',
+          });
+        }
+      } catch (safeRetryError: any) {
+        console.warn('CharGPT safe grounding retry failed:', safeRetryError?.message || safeRetryError);
+      }
+
+      return res.status(503).json({
+        error: 'CharGPT could not produce a grounded answer after a safe retry. No unverified answer was shown.',
+        availability: 'grounding_rejected',
+        groundingStatus: 'rejected_after_retry',
+      });
+    }
+
+    return res.status(503).json({
+      error: 'CharGPT is temporarily unavailable. No AI response or memory update was generated.',
+      availability: 'unavailable',
     });
   } catch (err: any) {
     console.error('Error in CharGPT endpoint:', err);
-    return res.status(200).json({
-      text: `🔎 CharGPT Recipe & Technique Guide:
-• Maintain 225°F - 250°F smoker temperature.
-• Use 16-mesh black pepper and coarse kosher salt for a clean bark.
-• Wrap at 160°F - 165°F stall to protect moisture.
-• Rest minimum 45 minutes in a warm cooler.`,
-      groundingChunks: [],
-      searchEntryPoint: '',
+    return res.status(503).json({
+      error: 'CharGPT request failed. No fallback cooking advice was fabricated.',
+      availability: 'error',
     });
   }
 };
 
-app.post('/api/chargpt', handleCharGPTRequest);
-app.post('/api/ai-pitmaster', handleCharGPTRequest);
+app.post('/api/chargpt', requireAuth, handleCharGPTRequest);
+app.post('/api/ai-pitmaster', requireAuth, handleCharGPTRequest);
 
 // Computer Vision Route: Analyze Meat or Scale / Packaging Tag
 app.post('/api/chargpt/analyze-meat-photo', async (req, res) => {

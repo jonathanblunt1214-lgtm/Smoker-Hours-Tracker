@@ -18,6 +18,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/docs/constitution ./docs/constitution
 
 EXPOSE 8080
 CMD ["node", "dist/server.cjs"]

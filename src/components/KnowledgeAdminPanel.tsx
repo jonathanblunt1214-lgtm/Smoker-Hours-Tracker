@@ -45,7 +45,9 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Source harvest failed.');
       setHarvest({ ...harvest, value: '' });
-      showToast('Source harvested into Pending Review. Nothing was published automatically.');
+      showToast(data?.manufacturerFact
+        ? 'Manufacturer-stated facts published with exact evidence and provenance.'
+        : 'Source harvested into Pending Review. Nothing was published automatically.');
       await load(); await onChanged?.();
     } catch (error: any) { showToast(error?.message || 'Source harvest failed. Nothing was saved.'); }
     finally { setBusy(null); }
@@ -90,8 +92,8 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
 
   return <div className="space-y-5">
     <section className="rounded-2xl border border-orange-900/50 bg-orange-500/5 p-4 sm:p-5">
-      <h3 className="font-semibold text-white">Source Harvester</h3>
-      <p className="mt-1 text-xs leading-5 text-zinc-400">Manually enter an approved manufacturer URL, smoker model/name, fuel name, or modification/accessory name. Extracted claims are saved only to Pending Review and are never automatically trusted.</p>
+      <h3 className="font-semibold text-white">Verified Source Data Miner</h3>
+      <p className="mt-1 text-xs leading-5 text-zinc-400">Enter an approved manufacturer URL or a known smoker, fuel, or modification. Exact facts extracted from an approved manufacturer domain are published with claim-level evidence, retrieval time, and a content hash. Other source types remain pending review.</p>
       <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto]">
         <select value={harvest.mode} onChange={(e) => setHarvest({ mode: e.target.value, value: '' })} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white">
           <option value="url">Manual URL</option>

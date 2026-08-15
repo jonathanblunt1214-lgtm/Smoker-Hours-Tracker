@@ -12,6 +12,7 @@ import {
 import { SmokerProfile, CookLog, FuelLog, LocalUserProfile } from '../types';
 import { Cloud, CloudUpload, CloudDownload, LogOut, CheckCircle, AlertTriangle, X, RefreshCw, ShieldCheck, FileText } from 'lucide-react';
 import { TermsOfServiceModal } from './TermsOfServiceModal';
+import { verifyDriveBackup } from '../lib/driveBackupVerifier';
 
 interface GoogleDriveSyncModalProps {
   isOpen: boolean;
@@ -114,12 +115,16 @@ export const GoogleDriveSyncModal: React.FC<GoogleDriveSyncModalProps> = ({
 
     try {
       const res = await saveToGoogleDrive(token, currentAppData);
+      const verification = await verifyDriveBackup(token);
+      if (!verification.ok) {
+        throw new Error('Google Drive write completed but read-back verification failed: ' + verification.message);
+      }
       setDriveFileInfo({ exists: true, fileId: res.fileId });
       setStatusMsg({
         type: 'success',
         text: res.createdNew
-          ? 'Created and saved new pitmaster_smoker_data.json file in your Google Drive!'
-          : 'Successfully updated pitmaster_smoker_data.json in your Google Drive!',
+          ? `Created Google Drive backup and verified read-back (${verification.cookLogCount} cook logs, ${verification.fuelLogCount} fuel logs).`
+          : `Updated Google Drive backup and verified read-back (${verification.cookLogCount} cook logs, ${verification.fuelLogCount} fuel logs).`,
       });
     } catch (err: any) {
       setStatusMsg({ type: 'error', text: err.message || 'Failed to save to Google Drive' });

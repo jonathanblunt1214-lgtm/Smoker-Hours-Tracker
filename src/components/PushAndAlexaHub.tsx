@@ -99,10 +99,10 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
   // Alexa Voice Simulator state
   const [simulatedVoiceQuery, setSimulatedVoiceQuery] = useState('Alexa, ask Smoke Stack for my brisket internal temp');
   const [alexaResponseText, setAlexaResponseText] = useState<string | null>(
-    'Your Brisket Flat is currently at 198°F, 5 degrees away from your 203°F finish goal!'
+    null
   );
   const [alexaCardContent, setAlexaCardContent] = useState<string | null>(
-    'Brisket Flat: 198°F / Target: 203°F | Pit Temp: 225°F'
+    null
   );
   const [isSimulatingVoice, setIsSimulatingVoice] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -115,25 +115,6 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
         setPushConfig((prev) => ({ ...prev, browserPermission: perm as any }));
       } catch (e) {}
     }
-
-    // Auto-sync current cook and telemetry to server for Alexa requests
-    const syncTelemetryToServer = async () => {
-      try {
-        const effectiveSpecs = smokerProfile ? getEffectiveSmokerSpecs(smokerProfile) : null;
-        await fetch('/api/alexa/sync-telemetry', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            activeCook,
-            smokerProfile,
-            effectiveSpecs,
-          }),
-        });
-      } catch (e) {
-        console.warn('Telemetry sync error', e);
-      }
-    };
-    syncTelemetryToServer();
   }, [activeCook, smokerProfile]);
 
   const handleTogglePush = (key: keyof CharGPTPushConfig) => {
@@ -179,79 +160,24 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
   };
 
   const handleCopyLinkCode = () => {
-    navigator.clipboard.writeText(alexaConfig.linkCode);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-    if (onShowToast) onShowToast('Copied Alexa Account Linking Code!');
+    if (onShowToast) onShowToast('Alexa account linking is not configured. No real link code is available.');
   };
 
   const handleRegenerateCode = () => {
-    const randomPin = Math.floor(1000 + Math.random() * 9000);
-    const newCode = `ALEXA-SMOKE-${randomPin}`;
-    const updated = { ...alexaConfig, linkCode: newCode };
-    setAlexaConfig(updated);
-    saveAlexaConfig(updated);
-    if (onShowToast) onShowToast(`Generated new Alexa link code: ${newCode}`);
+    if (onShowToast) onShowToast('Alexa account linking requires a real Alexa Skill OAuth flow; local codes are disabled.');
   };
 
   const handleExecuteVoiceQuery = async (queryText?: string) => {
     const query = queryText || simulatedVoiceQuery;
     setSimulatedVoiceQuery(query);
     setIsSimulatingVoice(true);
-
-    try {
-      const effectiveSpecs = smokerProfile ? getEffectiveSmokerSpecs(smokerProfile) : null;
-      let intent = 'GetMeatTempIntent';
-      const qLower = query.toLowerCase();
-      if (qLower.includes('all probe') || qLower.includes('probes') || qLower.includes('multi probe')) {
-        intent = 'GetAllProbesIntent';
-      } else if (qLower.includes('pit') || qLower.includes('ambient') || qLower.includes('smoker temp')) {
-        intent = 'GetPitTempIntent';
-      } else if (qLower.includes('hopper') || qLower.includes('pellet') || qLower.includes('fuel')) {
-        intent = 'GetHopperLevelIntent';
-      } else if (qLower.includes('stall') || qLower.includes('wrap')) {
-        intent = 'GetStallStatusIntent';
-      } else if (qLower.includes('set') || qLower.includes('target') || qLower.includes('goal')) {
-        intent = 'SetTempGoalIntent';
-      }
-
-      const res = await fetch('/api/alexa/skill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          intent,
-          activeCook,
-          smokerProfile,
-          effectiveSpecs,
-        }),
-      });
-
-      const data = await res.json();
-      const spoken = data?.spokenText || data?.response?.outputSpeech?.ssml?.replace(/<[^>]+>/g, '') || 'Smoke Stack is connected to Alexa.';
-      const card = data?.cardText || 'Smoke Stack Skill Online';
-
-      setAlexaResponseText(spoken);
-      setAlexaCardContent(card);
-
-      // Play audio spoken voice
-      setIsPlayingAudio(true);
-      speakAlexaVoice(spoken);
-      setTimeout(() => setIsPlayingAudio(false), 4000);
-
-      const updated = {
-        ...alexaConfig,
-        lastAlexaQuery: query,
-        lastAlexaResponse: spoken,
-        lastAlexaSync: new Date().toISOString(),
-      };
-      setAlexaConfig(updated);
-      saveAlexaConfig(updated);
-    } catch (e) {
-      console.error('Alexa skill call failed', e);
-      setAlexaResponseText('Sorry, Smoke Stack could not connect to Alexa skill server.');
-    } finally {
-      setIsSimulatingVoice(false);
-    }
+    const spoken = 'Alexa cloud integration is not configured. This is a local SmokeStack voice-preview surface and no request was sent to Amazon.';
+    setAlexaResponseText(spoken);
+    setAlexaCardContent('Preview only — no Amazon account or Alexa Skill linked');
+    setIsPlayingAudio(true);
+    speakAlexaVoice(spoken);
+    setTimeout(() => setIsPlayingAudio(false), 3000);
+    setIsSimulatingVoice(false);
   };
 
   if (isCollapsible) {
@@ -269,7 +195,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
-                {titleOverride || 'Amazon Alexa Cloud Sync & Voice Controls'}
+                {titleOverride || 'Alexa Voice Preview & Browser Alerts'}
                 <span
                   className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${
                     alexaConfig.enabled
@@ -277,11 +203,11 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
                       : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
                   }`}
                 >
-                  {alexaConfig.enabled ? 'Alexa Live Sync' : 'Sync Paused'}
+                  {alexaConfig.enabled ? 'Preview Mode' : 'Preview Off'}
                 </span>
               </h3>
               <p className="text-xs text-zinc-300">
-                Sync live smoker temperature telemetry to Amazon Alexa for hands-free voice queries & Echo alerts
+                Preview Alexa-style voice responses locally. No Amazon cloud or Echo connection is active until a real Alexa Skill is linked.
               </p>
             </div>
           </button>
@@ -330,7 +256,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <span>Amazon Smart Home & Media Hub</span>
+                      <span>Amazon / Alexa Integration Status</span>
                       {userSession ? (
                         <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
                           <CheckCircle2 className="w-3 h-3 text-emerald-400" />
@@ -344,8 +270,8 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
                     </h4>
                     <p className="text-xs text-zinc-300">
                       {userSession
-                        ? `Connected as ${userSession.name} (${userSession.email}). Fire TV on-screen toasts & Alexa voice sync enabled.`
-                        : 'Sign in with Amazon to enable Fire TV notifications and link Alexa speaker alerts across your devices.'}
+                        ? `Connected as ${userSession.name} (${userSession.email}). SmokeStack account signed in; Amazon, Fire TV, and Alexa cloud linking are not configured.`
+                        : 'Amazon account linking is not configured in this build. Browser previews remain local to this device.'}
                     </p>
                   </div>
                 </div>
@@ -365,9 +291,9 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
                           isMasterAdmin: false,
                           loggedInAt: new Date().toISOString(),
                         };
-                        saveActiveUserSession(session, true);
-                        setUserSession(session);
-                        if (onShowToast) onShowToast('Signed in with Amazon account successfully!');
+                        if (onShowToast) onShowToast('Amazon account linking is not configured. This is a local preview only.');
+                        void session;
+                        if (onShowToast) onShowToast('Amazon account linking is not configured. This panel is preview-only.');
                       }}
                       className="px-3.5 py-2 bg-gradient-to-r from-[#232F3E] via-[#1a232e] to-[#131921] hover:from-[#2d3c4f] hover:to-[#1a232e] border border-[#FF9900]/60 text-[#FF9900] font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-2 shrink-0"
                     >
@@ -1135,7 +1061,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
             </div>
             <div>
               <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                <span>Amazon Smart Home & Media Hub</span>
+                <span>Amazon / Alexa Integration Status</span>
                 {userSession?.provider === 'amazon' ? (
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3 text-emerald-400" />
@@ -1149,7 +1075,7 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
               </h4>
               <p className="text-xs text-zinc-300">
                 {userSession?.provider === 'amazon'
-                  ? `Connected as ${userSession.name} (${userSession.email}). Fire TV on-screen toasts & Alexa voice sync enabled.`
+                  ? `Connected as ${userSession.name} (${userSession.email}). SmokeStack account signed in; Amazon, Fire TV, and Alexa cloud linking are not configured.`
                   : 'Sign in with your Amazon account to enable Fire TV notifications and link Alexa speaker alerts across your devices.'}
               </p>
             </div>
@@ -1186,9 +1112,9 @@ export const PushAndAlexaHub: React.FC<PushAndAlexaHubProps> = ({
                     isMasterAdmin: false,
                     loggedInAt: new Date().toISOString(),
                   };
-                  saveActiveUserSession(session, true);
-                  setUserSession(session);
-                  if (onShowToast) onShowToast('Signed in with Amazon account successfully!');
+                  if (onShowToast) onShowToast('Amazon account linking is not configured. This is a local preview only.');
+                  void session;
+                  if (onShowToast) onShowToast('Amazon account linking is not configured. This panel is preview-only.');
                 }}
                 className="px-3.5 py-2 bg-gradient-to-r from-[#232F3E] via-[#1a232e] to-[#131921] hover:from-[#2d3c4f] hover:to-[#1a232e] border border-[#FF9900]/60 text-[#FF9900] font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center space-x-2 shrink-0"
               >

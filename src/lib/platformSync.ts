@@ -7,7 +7,7 @@ export interface PlatformSyncHandlers {
   onProfile?: (profile: SmokerProfile) => void;
   onCookLogs?: (logs: CookLog[]) => void;
   onFuelLogs?: (logs: FuelLog[]) => void;
-  onStatus?: (status: 'synced' | 'syncing' | 'offline' | 'error') => void;
+  onStatus?: (status: 'synced' | 'syncing' | 'pending' | 'offline' | 'error') => void;
   /** Fires once after the initial user, cook-log, and fuel-log snapshots resolve. */
   onHydrated?: () => void;
 }
@@ -63,6 +63,15 @@ export function startAuthoritativePlatformSync(uid: string, handlers: PlatformSy
   let cooksReady = false;
   let fuelReady = false;
   let hydrated = false;
+  let authoritativeState: 'writing' | 'synced' | 'error' | 'unknown' = 'unknown';
+
+  const emitSnapshotStatus = (metadata: { fromCache: boolean; hasPendingWrites: boolean }) => {
+    if (!navigator.onLine && metadata.fromCache) return handlers.onStatus?.('offline');
+    if (metadata.hasPendingWrites || authoritativeState === 'writing') return handlers.onStatus?.('syncing');
+    if (authoritativeState === 'error') return handlers.onStatus?.('error');
+    if (authoritativeState !== 'synced') return handlers.onStatus?.('pending');
+    handlers.onStatus?.('synced');
+  };
 
   const maybeHydrated = () => {
     if (hydrated || !userReady || !cooksReady || !fuelReady) return;
@@ -73,11 +82,14 @@ export function startAuthoritativePlatformSync(uid: string, handlers: PlatformSy
   const unsubUser = onSnapshot(doc(db, 'users', uid), { includeMetadataChanges: true }, (snap) => {
     if (snap.exists()) {
       const data: any = snap.data();
+      authoritativeState = data.syncState === 'writing' || data.syncState === 'synced' || data.syncState === 'error'
+        ? data.syncState
+        : 'unknown';
       tombstones = new Set(Array.isArray(data.deletedCookLogIds) ? data.deletedCookLogIds : []);
       if (data.profile) handlers.onProfile?.(data.profile as SmokerProfile);
     }
     userReady = true;
-    handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    emitSnapshotStatus(snap.metadata);
     maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 
@@ -87,14 +99,14 @@ export function startAuthoritativePlatformSync(uid: string, handlers: PlatformSy
       .filter((log) => log?.id && !tombstones.has(log.id));
     handlers.onCookLogs?.(logs);
     cooksReady = true;
-    handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    emitSnapshotStatus(snap.metadata);
     maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 
   const unsubFuel = onSnapshot(collection(db, 'users', uid, 'fuelLogs'), { includeMetadataChanges: true }, (snap) => {
     handlers.onFuelLogs?.(snap.docs.map((d) => d.data() as FuelLog).filter((log) => !!log?.id));
     fuelReady = true;
-    handlers.onStatus?.(snap.metadata.fromCache && !navigator.onLine ? 'offline' : 'synced');
+    emitSnapshotStatus(snap.metadata);
     maybeHydrated();
   }, () => handlers.onStatus?.('error'));
 

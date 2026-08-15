@@ -606,7 +606,7 @@ export const PROTEIN_SAFETY_AND_COOK_TEMPS: ProteinGuide[] = [
     targetFinishF: 160,
     bbqTargetRangeF: '160°F - 165°F (Bear Roast up to 195°F)',
     donenessLevels: [
-      { label: 'Trichinosis Safety Standard (Bear)', tempF: 160, description: '100% pasteurized and parasite-free.' },
+      { label: 'Reference Minimum (Bear)', tempF: 160, description: 'Reference value only; verify current authoritative wild-game guidance and measure with a calibrated thermometer.' },
       { label: 'BBQ Braised Bear Shoulder', tempF: 195, description: 'Rich, tender pulled roast wrapped in foil with dark beer.' }
     ],
     pitmasterTips: 'Slow-smoke bear shoulder at 225°F until 160°F, then wrap with onion, garlic, and Guinness stout to finish braising.'
@@ -855,17 +855,16 @@ export function runLiveSubcategoryAndUsdaAnalysis(verifiedCuts: VerifiedMeatCut[
     };
   });
 
-  const compliancePassRatePercent = totalCuts > 0 ? Math.round((compliantCount / totalCuts) * 100) : 100;
+  const compliancePassRatePercent = totalCuts > 0 ? Math.round((compliantCount / totalCuts) * 100) : 0;
 
   return {
     timestamp: new Date().toISOString(),
     totalCutsAnalyzed: totalCuts,
     compliancePassRatePercent,
-    verifiedStatus: '100% USDA • FSIS • FDA Compliant',
+    verifiedStatus: 'Internal reference-field completeness check only',
     proteinCategoryBreakdown,
     subcategoryBreakdown,
     auditDetails,
   };
 }
-
 

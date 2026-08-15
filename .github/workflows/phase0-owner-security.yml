@@ -1,7 +1,9 @@
-name: Phase 0 Trust Foundation Gate
+name: Constitution and Security Gate
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -9,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  trust-build:
+  constitutional-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Constitution gate
+        run: npm run check:constitution
+
+      - name: TypeScript check
+        run: npm run lint
+
       - name: Set up Java for the Firestore emulator
         uses: actions/setup-java@v4
         with:
@@ -33,58 +41,28 @@ jobs:
       - name: Verify Firestore ownership rules
         run: npm run test:firestore-rules
 
-      - name: Generate and verify trusted runtime
-        run: npm run verify:owner-security
-
-      - name: Verify trusted client assertions
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f src/App.trusted.tsx
-          test -f src/components/Navbar.trusted.tsx
-          test -f src/utils/storage.trusted.ts
-          grep -q "userSession?.isMasterAdmin === true" src/components/Navbar.trusted.tsx
-          grep -q "'/api/admin/me'" src/App.trusted.tsx
-          grep -q "Firestore is authoritative" src/App.trusted.tsx
-          grep -q "deletedCookLogIds: tombstones" src/App.trusted.tsx
-          grep -q "const cleanProfile: SmokerProfile = { ...INITIAL_SMOKER_PROFILE }" src/App.trusted.tsx
-          if grep -q "auth_token_default" src/App.trusted.tsx; then echo "Legacy default auth token remains"; exit 1; fi
-          if grep -q "MASTER_ADMIN_EMAIL" src/App.trusted.tsx; then echo "Hard-coded owner email remains"; exit 1; fi
-          if grep -q "autoEvolveCharGPTMemory" src/App.trusted.tsx; then echo "Automatic durable AI learning remains"; exit 1; fi
-          if grep -q "isMasterAdmin(currentUserEmail)" src/components/Navbar.trusted.tsx; then echo "Navbar still trusts email"; exit 1; fi
-          if grep -q "hoursLogged = 6.0" src/utils/storage.trusted.ts; then echo "Fabricated cook duration remains"; exit 1; fi
-          if grep -q "Excellent smoke ring" src/utils/storage.trusted.ts; then echo "Fabricated cook notes remain"; exit 1; fi
-
-      - name: Verify trusted data and UX assertions
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q "schemaVersion: '0.03'" src/lib/firestoreData.ts
-          grep -q "deletedCookLogIds" src/lib/firestoreData.ts
-          grep -q "deleteDoc" src/lib/firestoreData.ts
-          if grep -q "schemaVersion: '0.04A'" src/lib/firestoreData.ts; then echo "Legacy 0.04A Firestore schema label remains"; exit 1; fi
-          if grep -q "lastSyncedAt: userData.lastSyncedAt || new Date" src/lib/firestoreData.ts; then echo "Firestore load fabricates sync timestamp"; exit 1; fi
-          grep -q "Not yet published" src/components/AppDownloadStoreModal.tsx
-          grep -q "Google Drive is a separate backup/export destination" src/components/SettingsModal.tsx
-          if grep -q "MasterVersionSyncCard\|MasterSyncEngine\|MASTER_ADMIN_EMAIL\|isAdminUser" src/components/SettingsModal.tsx; then echo "Legacy admin/master-sync controls remain in Settings"; exit 1; fi
-
-      - name: Verify trusted server assertions
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f server.secure.generated.ts
-          grep -q "disabledLegacyPrefixes" server.secure.generated.ts
-          grep -q "'/api/master/generate-code-patch'" server.secure.generated.ts
-          grep -q "In-app code generation has been removed" server.secure.generated.ts
-          grep -q "Legacy Master Web synchronization has been removed" server.secure.generated.ts
-          grep -q "'/api/federated-learning'" server.secure.generated.ts
-          grep -q "'/api/manufacturer-smokers'" server.secure.generated.ts
-          grep -q "'/api/verified-cuts'" server.secure.generated.ts
-          grep -q "No fallback cooking advice was fabricated" server.secure.generated.ts
-          if grep -q "Air-Gapped AI Code Generator\|Applied Live\|Ready to deploy live" server.secure.generated.ts; then echo "Legacy AI Studio deployment authority remains"; exit 1; fi
-
-      - name: TypeScript check
-        run: npm run lint
+      - name: Product contract tests
+        run: npm test
 
       - name: Production build
         run: npm run build
+
+      - name: Verify canonical runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f src/App.tsx
+          test -f server.ts
+          test -f docs/constitution/SMOKESTACK-APP-CONSTITUTION.txt
+          test -f docs/constitution/CHARGPT-CAPABILITIES.txt
+          if find src -name '*.trusted.*' -print -quit | grep -q .; then
+            echo 'Generated trusted copies are forbidden.'
+            exit 1
+          fi
+          if grep -R "MASTER_ADMIN_EMAIL\|auth_token_default\|Applied Live" src server.ts server; then
+            echo 'A forbidden authority or success marker remains.'
+            exit 1
+          fi
+          grep -q "requireAuth, requireOwner" server/adminRoles.ts
+          grep -q "syncState: 'writing'" src/lib/firestoreData.ts
+          grep -q "SMOKESTACK_RUNTIME_CACHE" public/sw.js

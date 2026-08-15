@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { calculateCostPerLb } from '../utils/costUnits';
 import { FuelDatabaseItem, FUEL_AND_WOOD_DATABASE, filterFuelDatabase } from '../utils/fuelDatabase';
 import { ProteinType, FuelLog } from '../types';
 import { Search, Filter, Flame, FlaskConical, Layers, Zap, Sparkles, Check, Plus, X, ChevronRight, Award, Info, Scale, ShieldCheck, ArrowUpDown, BookOpen, RefreshCw, Database } from 'lucide-react';
@@ -68,7 +69,9 @@ export const FuelDatabaseExplorer: React.FC<FuelDatabaseExplorerProps> = ({
     e.preventDefault();
     if (!restockItem) return;
 
-    const costPerLb = restockBagLbs > 0 ? Number((restockPrice / restockBagLbs).toFixed(2)) : 0.75;
+    const calculatedCostPerLb = calculateCostPerLb(restockPrice, restockBagLbs);
+    if (calculatedCostPerLb === null) return;
+    const costPerLb = Number(calculatedCostPerLb.toFixed(2));
 
     const newLog: FuelLog = {
       id: `fuel-${Date.now()}`,

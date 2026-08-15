@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth, requireOwner } from './authMiddleware';
@@ -27,6 +29,26 @@ adminRolesRouter.get('/me', requireAuth, (req: AuthenticatedRequest, res) => {
       developer: req.user!.role === 'owner' || req.user!.claims.developer === true,
     },
   });
+});
+
+const governanceDocuments = {
+  constitution: 'SMOKESTACK-APP-CONSTITUTION.txt',
+  chargpt: 'CHARGPT-CAPABILITIES.txt',
+} as const;
+
+adminRolesRouter.get('/governance/:document', requireAuth, requireOwner, async (req: AuthenticatedRequest, res) => {
+  const key = req.params.document as keyof typeof governanceDocuments;
+  const filename = governanceDocuments[key];
+  if (!filename) return res.status(404).json({ error: 'Governance document not found.' });
+
+  const documentPath = path.join(process.cwd(), 'docs', 'constitution', filename);
+  if (!fs.existsSync(documentPath)) {
+    return res.status(503).json({ error: 'Governance document is unavailable in this release.' });
+  }
+
+  await audit(req, 'governance.document.downloaded', req.user!.uid, { document: key });
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.download(documentPath, filename);
 });
 
 adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => {

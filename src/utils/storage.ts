@@ -342,83 +342,16 @@ export function saveRecipeAnalysis(analysisText: string, logCount: number): Save
 }
 
 export function autoEvolveCharGPTMemory(logs: CookLog[], currentMemory?: CharGPTMemory): CharGPTMemory {
-  const publishedLogs = (logs || []).filter((l) => l.isPublishedToTotalHours === true);
   const baseMemory = currentMemory || loadCharGPTMemory();
-  const existingRuleTitles = new Set(baseMemory.learnedRules.map((r) => r.title.toLowerCase()));
-
-  const newRules: CharGPTRule[] = [...baseMemory.learnedRules];
-  const woodCounts: Record<string, number> = {};
-  const proteinCounts: Record<string, number> = {};
-
-  publishedLogs.forEach((log) => {
-    // Count fuel wood types
-    if (log.fuelType) {
-      woodCounts[log.fuelType] = (woodCounts[log.fuelType] || 0) + 1;
-    }
-    // Count protein cuts
-    const proteinLabel = `${log.proteinType} (${log.proteinCut})`;
-    proteinCounts[proteinLabel] = (proteinCounts[proteinLabel] || 0) + 1;
-
-    // Analyze high rated logs for automatic rule creation
-    if (log.ratings && log.ratings.overall >= 4) {
-      if (log.seasoningRubs && !existingRuleTitles.has(`rub-${log.proteinCut.toLowerCase()}`)) {
-        const title = `${log.proteinCut} Seasoning Preference`;
-        if (!existingRuleTitles.has(title.toLowerCase())) {
-          newRules.push({
-            id: `rule-auto-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            category: 'rub_recipe',
-            title,
-            detail: `Learned rub profile for ${log.proteinCut}: "${log.seasoningRubs}". Awarded ${log.ratings.overall}/5 rating.`,
-            source: 'cook_log_insight',
-            createdAt: new Date().toISOString(),
-            confidenceScore: 88,
-          });
-          existingRuleTitles.add(title.toLowerCase());
-        }
-      }
-
-      if (log.nextTimeNotes && !existingRuleTitles.has(`next-time-${log.id}`)) {
-        const title = `Insight from ${log.title}`;
-        if (!existingRuleTitles.has(title.toLowerCase())) {
-          newRules.push({
-            id: `rule-insight-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            category: 'technique',
-            title,
-            detail: log.nextTimeNotes,
-            source: 'cook_log_insight',
-            createdAt: new Date().toISOString(),
-            confidenceScore: 85,
-          });
-          existingRuleTitles.add(title.toLowerCase());
-        }
-      }
-    }
-  });
-
-  // Top preferred wood types & proteins
-  const sortedWood = Object.entries(woodCounts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([wood]) => wood)
-    .slice(0, 4);
-
-  const sortedProteins = Object.entries(proteinCounts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([p]) => p)
-    .slice(0, 4);
-
-  const updatedMemory: CharGPTMemory = {
+  return {
     ...baseMemory,
-    totalLogsAnalyzed: logs.length,
-    learnedRules: logs.length > 0 ? newRules : [],
-    preferredWoodTypes: logs.length > 0 ? (sortedWood.length > 0 ? sortedWood : baseMemory.preferredWoodTypes) : [],
-    favoriteProteins: logs.length > 0 ? (sortedProteins.length > 0 ? sortedProteins : baseMemory.favoriteProteins) : [],
-    lastEvolvedAt: new Date().toISOString(),
+    totalLogsAnalyzed: Array.isArray(logs) ? logs.length : 0,
+    learnedRules: [...(baseMemory.learnedRules || [])],
+    favoriteProteins: [...(baseMemory.favoriteProteins || [])],
+    preferredWoodTypes: [...(baseMemory.preferredWoodTypes || [])],
+    topTechniques: [...(baseMemory.topTechniques || [])],
   };
-
-  saveCharGPTMemory(updatedMemory);
-  return updatedMemory;
 }
-
 
 export function loadSmokerProfile(): SmokerProfile {
   try {
@@ -481,139 +414,42 @@ export function addDeletedCookLogId(idOrIds: string | string[]): void {
 }
 
 export function sanitizeAndFillCookLog(c: Partial<CookLog>, index = 0): CookLog {
-  let title = (c.title || '').trim();
-  let cut = (c.proteinCut || '').trim();
-
-  const stripHeader = (str: string) => {
-    return str
-      .replace(/^(what\s*is\s*cook\s*[:\?]?|cook\s*title\s*[:\?]?|title\s*[:\?]?|protein\s*cut\s*[:\?]?|cut\s*[:\?]?)\s*/i, '')
-      .trim();
-  };
-
-  title = stripHeader(title);
-  cut = stripHeader(cut);
-
-  const isGenericTitle = !title ||
-    /^(cook\s*log|smoke\s*session|untitled\s*cook|page\s*\d+|session\s*log|log\s*\d+|bbq\s*cook\s*log.*)$/i.test(title);
-
-  if (isGenericTitle && cut) {
-    title = cut;
-  } else if (!cut && title) {
-    cut = title;
-  }
-
-  if (!title && !cut) {
-    title = 'BBQ Smoke Session';
-    cut = 'Custom Cut';
-  }
-
-  let proteinType = (c.proteinType || '') as ProteinType;
-  const combinedText = `${title} ${cut}`.toLowerCase();
-  const validTypes: ProteinType[] = ['Beef', 'Pork', 'Chicken', 'Seafood', 'Turkey', 'Lamb', 'Venison', 'Other'];
-
-  if (!proteinType || proteinType === 'Other' || !validTypes.includes(proteinType)) {
-    if (/(pork|butt|boston|pulled\s*pork|ribs|baby\s*back|st\.\s*louis|belly|shoulder|ham|bacon|pork\s*chop)/i.test(combinedText)) {
-      proteinType = 'Pork';
-    } else if (/(brisket|beef|tri-tip|tri\s*tip|chuck|ribeye|tomahawk|beef\s*ribs|pastrami|steak|burnt\s*ends)/i.test(combinedText)) {
-      proteinType = 'Beef';
-    } else if (/(chicken|wings|thighs|drumstick|spatchcock|whole\s*bird|quarters|poultry)/i.test(combinedText)) {
-      proteinType = 'Chicken';
-    } else if (/(turkey|turkey\s*breast)/i.test(combinedText)) {
-      proteinType = 'Turkey';
-    } else if (/(salmon|fish|shrimp|seafood|trout|mahi|lobster|tuna)/i.test(combinedText)) {
-      proteinType = 'Seafood';
-    } else if (/(lamb|mutton|rack\s*of\s*lamb)/i.test(combinedText)) {
-      proteinType = 'Lamb';
-    } else if (/(venison|deer|elk)/i.test(combinedText)) {
-      proteinType = 'Venison';
-    } else {
-      proteinType = 'Pork';
-    }
-  }
-
-  if (!title || title.toLowerCase().startsWith('cook log')) {
-    title = `${proteinType} ${cut}`.trim();
-  }
-
-  let hoursLogged = typeof c.hoursLogged === 'number' && c.hoursLogged > 0 ? c.hoursLogged : 0;
-  if (hoursLogged <= 0) {
-    if (typeof c.endingSmokerHours === 'number' && typeof c.startingSmokerHours === 'number' && c.endingSmokerHours > c.startingSmokerHours) {
-      hoursLogged = Number((c.endingSmokerHours - c.startingSmokerHours).toFixed(2));
-    } else if (Array.isArray(c.temperatureReadings) && c.temperatureReadings.length > 1) {
-      const maxMins = Math.max(...c.temperatureReadings.map((r) => r.timestampMinutes || 0));
-      if (maxMins > 0) hoursLogged = Number((maxMins / 60).toFixed(2));
-    }
-    if (hoursLogged <= 0) hoursLogged = 6.0;
-  }
-  hoursLogged = Number(hoursLogged.toFixed(2));
-
-  const startingSmokerHours = typeof c.startingSmokerHours === 'number' && c.startingSmokerHours >= 0
-    ? c.startingSmokerHours
-    : index * 10;
-  const endingSmokerHours = typeof c.endingSmokerHours === 'number' && c.endingSmokerHours > startingSmokerHours
-    ? c.endingSmokerHours
-    : Number((startingSmokerHours + hoursLogged).toFixed(2));
-
-  const dateStr = c.date && !isNaN(Date.parse(c.date))
-    ? c.date
-    : new Date().toISOString().split('T')[0];
-
-  const fuelLbsConsumed = typeof c.fuelLbsConsumed === 'number' && c.fuelLbsConsumed > 0
-    ? c.fuelLbsConsumed
-    : Number((hoursLogged * 1.25).toFixed(1));
-
-  const readings = Array.isArray(c.temperatureReadings) && c.temperatureReadings.length > 0
-    ? c.temperatureReadings
-    : [
-        {
-          id: `tr-start-${Date.now()}-${index}`,
-          time: '0:00',
-          timestampMinutes: 0,
-          targetTemp: 225,
-          cookingTemp: 225,
-          meatTemp: 40,
-          ambientTemp: 72,
-          actionsTaken: 'Started smoker & loaded protein',
-        },
-        {
-          id: `tr-end-${Date.now()}-${index}`,
-          time: `${Math.floor(hoursLogged)}:00`,
-          timestampMinutes: Math.floor(hoursLogged * 60),
-          targetTemp: 225,
-          cookingTemp: 225,
-          meatTemp: 203,
-          ambientTemp: 75,
-          actionsTaken: 'Completed cook & rested meat',
-        },
-      ];
+  const title = String(c.title || '').trim() || 'Untitled cook';
+  const proteinCut = String(c.proteinCut || '').trim() || 'Unknown cut';
+  const proteinType = (c.proteinType || 'Other') as ProteinType;
+  const hoursLogged = typeof c.hoursLogged === 'number' && Number.isFinite(c.hoursLogged) ? Math.max(0, c.hoursLogged) : 0;
+  const startingSmokerHours = typeof c.startingSmokerHours === 'number' && Number.isFinite(c.startingSmokerHours) ? Math.max(0, c.startingSmokerHours) : 0;
+  const endingSmokerHours = typeof c.endingSmokerHours === 'number' && Number.isFinite(c.endingSmokerHours)
+    ? Math.max(startingSmokerHours, c.endingSmokerHours)
+    : startingSmokerHours + hoursLogged;
 
   return {
     id: c.id || `cook-${Date.now()}-${index}-${Math.random().toString(36).substring(2, 6)}`,
     title,
-    date: dateStr,
+    date: c.date || '',
     pageNumber: c.pageNumber ?? (index + 1),
     proteinType,
-    proteinCut: cut,
-    meatWeightLbs: typeof c.meatWeightLbs === 'number' && c.meatWeightLbs > 0 ? c.meatWeightLbs : 8.0,
+    proteinCut,
+    meatWeightLbs: typeof c.meatWeightLbs === 'number' && Number.isFinite(c.meatWeightLbs) ? Math.max(0, c.meatWeightLbs) : 0,
     startingSmokerHours,
     hoursLogged,
     endingSmokerHours,
-    smokerId: c.smokerId || 'rig-pitboss-5series',
-    smokerType: c.smokerType || 'Pellet Smoker',
-    fuelType: c.fuelType || 'Pellets',
-    fuelLbsConsumed,
-    seasoningRubs: c.seasoningRubs || 'Pitmaster SPG (Salt, Pepper, Garlic)',
-    saucesGlazes: c.saucesGlazes || 'Sweet & Smoky BBQ Sauce',
-    finishedNotes: c.finishedNotes || 'Excellent smoke ring, tender interior, crisp bark.',
-    nextTimeNotes: c.nextTimeNotes || 'Keep airflow consistent throughout stall.',
-    wouldMakeAgain: c.wouldMakeAgain ?? true,
-    ratings: c.ratings || { smokeRing: 5, bark: 5, tenderness: 5, overall: 5 },
-    weatherConditions: c.weatherConditions || 'Clear 72°F',
+    smokerId: c.smokerId || '',
+    smokerType: c.smokerType || ('' as any),
+    fuelType: c.fuelType || '',
+    fuelLbsConsumed: typeof c.fuelLbsConsumed === 'number' && Number.isFinite(c.fuelLbsConsumed) ? Math.max(0, c.fuelLbsConsumed) : 0,
+    seasoningRubs: c.seasoningRubs || '',
+    saucesGlazes: c.saucesGlazes || '',
+    finishedNotes: c.finishedNotes || '',
+    nextTimeNotes: c.nextTimeNotes || '',
+    wouldMakeAgain: c.wouldMakeAgain ?? false,
+    ratings: c.ratings || { smokeRing: 0, bark: 0, tenderness: 0, overall: 0 },
+    weatherConditions: c.weatherConditions || '',
     zipcode: c.zipcode,
-    temperatureReadings: readings,
-    status: c.status || 'Completed',
-    isPublishedToTotalHours: c.isPublishedToTotalHours ?? true,
-    timerSeconds: c.timerSeconds ?? Math.round(hoursLogged * 3600),
+    temperatureReadings: Array.isArray(c.temperatureReadings) ? c.temperatureReadings : [],
+    status: c.status || ('Draft' as any),
+    isPublishedToTotalHours: c.isPublishedToTotalHours ?? false,
+    timerSeconds: typeof c.timerSeconds === 'number' && Number.isFinite(c.timerSeconds) ? Math.max(0, c.timerSeconds) : 0,
   };
 }
 
@@ -911,103 +747,8 @@ export function saveCharGPTChatHistory(messages: StoredChatMessage[]): void {
   safeSetItem(KEYS.CHARGPT_CHAT_HISTORY, JSON.stringify(trimmed));
 }
 
-export const INITIAL_VERIFIED_MEAT_CUTS: import('../types').VerifiedMeatCut[] = [
-  {
-    id: 'cut-120-brisket',
-    name: 'Full Packer Brisket',
-    aliases: ['Beef Brisket', 'Packer Cut', 'Whole Brisket'],
-    proteinType: 'Beef',
-    primalOrigin: 'Beef Breast / Anterior Ventral Subprimal',
-    impsCode: 'IMPS 120 / 180',
-    description: 'Consists of the flat (pectoralis profundus) and point (pectoralis superficialis) connected by a thick seam of hard fat (deckle).',
-    visualKeyFeatures: ['Flat rectangular end with lean grain', 'Thick fat cap on top (1/4 inch)', 'Distinct deckle fat seam separating point and flat'],
-    muscleAnatomy: 'M. Pectoralis Profundus & M. Pectoralis Superficialis',
-    idealSmokeTempF: 225,
-    targetInternalTempF: 203,
-    cookingStrategy: 'Low & slow wood smoke. Option to wrap in peach butcher paper with tallow around 165°F stall. Probe-tender rest of 2+ hours.',
-    verifiedStatus: 'Global Online Verified',
-    onlineVerificationDate: new Date().toISOString(),
-    onlineSourceCitations: ['USDA NAMP Meat Buyers Guide - IMPS 120', 'BBQ Pitmaster Standards Catalog'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'cut-184d-picanha',
-    name: 'Picanha / Coulotte',
-    aliases: ['Top Sirloin Cap', 'Rump Cap', 'Coulotte Steak', 'Sirloin Cap'],
-    proteinType: 'Beef',
-    primalOrigin: 'Beef Loin / Top Sirloin Subprimal',
-    impsCode: 'IMPS 184D',
-    description: 'Triangular whole muscle cut from the top of the sirloin with a thick, iconic fat cap that renders during cooking.',
-    visualKeyFeatures: ['Triangular slab profile', 'Thick uniform white fat cap (1/2 inch)', 'Coarse, pronounced grain direction running diagonally'],
-    muscleAnatomy: 'M. Biceps Femoris',
-    idealSmokeTempF: 225,
-    targetInternalTempF: 132,
-    cookingStrategy: 'Reverse sear on wood smoke to 125°F internal, then high-heat char or rotisserie skewer until fat cap renders crispy.',
-    verifiedStatus: 'Global Online Verified',
-    onlineVerificationDate: new Date().toISOString(),
-    onlineSourceCitations: ['USDA NAMP Meat Buyers Guide - IMPS 184D', 'Churrasco Pitmaster Guild'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'cut-406-pork-butt',
-    name: 'Boston Pork Butt',
-    aliases: ['Pork Shoulder', 'Boston Roast', 'Pork Butt'],
-    proteinType: 'Pork',
-    primalOrigin: 'Pork Shoulder Primal / Upper Blade',
-    impsCode: 'IMPS 406',
-    description: 'Upper portion of the pork shoulder containing the blade bone (scapula), heavily marbled with intramuscular fat and collagen.',
-    visualKeyFeatures: ['Blocky rectangular mass', 'Intense intramuscular fat marbling', 'Blade bone exposed on one edge'],
-    muscleAnatomy: 'M. Supraspinatus & M. Infraspinatus',
-    idealSmokeTempF: 250,
-    targetInternalTempF: 205,
-    cookingStrategy: 'Heavy hickory/apple wood smoke. Wrap in foil/paper at 165°F with apple cider sauce until bone pulls clean.',
-    verifiedStatus: 'Global Online Verified',
-    onlineVerificationDate: new Date().toISOString(),
-    onlineSourceCitations: ['USDA NAMP Meat Buyers Guide - IMPS 406'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'cut-185d-tritip',
-    name: 'Tri-Tip Roast',
-    aliases: ['Santa Maria Cut', 'Triangle Roast', 'Bottom Sirloin Butt'],
-    proteinType: 'Beef',
-    primalOrigin: 'Beef Bottom Sirloin Subprimal',
-    impsCode: 'IMPS 185D',
-    description: 'A crescent/boomerang-shaped triangular roast with two distinct grain directions meeting in the corner.',
-    visualKeyFeatures: ['Boomerang/triangle shape', 'Grain changes direction halfway through the roast', 'Lean with fine marbling'],
-    muscleAnatomy: 'M. Tensor Fasciae Latae',
-    idealSmokeTempF: 225,
-    targetInternalTempF: 135,
-    cookingStrategy: 'Oak smoke to 128°F internal, rest, then sear over red oak embers. Slice perpendicular to grain in two sections.',
-    verifiedStatus: 'Global Online Verified',
-    onlineVerificationDate: new Date().toISOString(),
-    onlineSourceCitations: ['USDA NAMP Meat Buyers Guide - IMPS 185D', 'Santa Maria BBQ Society'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'cut-116g-denver',
-    name: 'Denver Cut / Chuck Flap',
-    aliases: ['Underblade Steak', 'Chuck Flap Tail', 'Denver Steak'],
-    proteinType: 'Beef',
-    primalOrigin: 'Beef Chuck Subprimal / Underblade',
-    impsCode: 'IMPS 116G',
-    description: 'Extremely tender cut extracted from the chuck underblade, featuring intense Wagyu-like marbling.',
-    visualKeyFeatures: ['Uniform flat rectangular slab', 'Fine spiderweb marbling throughout muscle', 'Parallel tender grain'],
-    muscleAnatomy: 'M. Serratus Ventralis',
-    idealSmokeTempF: 225,
-    targetInternalTempF: 135,
-    cookingStrategy: 'Light smoke finish or quick hot-and-fast sear. Slices like butter when cooked medium-rare.',
-    verifiedStatus: 'Global Online Verified',
-    onlineVerificationDate: new Date().toISOString(),
-    onlineSourceCitations: ['USDA NAMP Meat Buyers Guide - IMPS 116G'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }
-];
+export const INITIAL_VERIFIED_MEAT_CUTS: import('../types').VerifiedMeatCut[] = [];
+// Food-safety references with source URLs are defined in src/data/verifiedMeatCutsData.ts.
 
 export function loadVerifiedMeatCuts(): import('../types').VerifiedMeatCut[] {
   try {

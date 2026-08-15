@@ -5,8 +5,8 @@ export const INITIAL_SMOKER_PROFILE: SmokerProfile = {
   name: '',
   model: '',
   smokerType: '' as any,
-  fuelType: 'Pellets',
-  fuelOnHand: '0 lbs',
+  fuelType: '' as any,
+  fuelOnHand: '',
   initialHours: 0, // Baseline starting hours
   currentHours: 0, // Clean slate 0 hours for app deployment
   pelletHopperCapacityLbs: 0,

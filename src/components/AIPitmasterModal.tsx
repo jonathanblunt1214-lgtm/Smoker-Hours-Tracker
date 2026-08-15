@@ -60,7 +60,6 @@ import { getUsdaSafetyForMeatCut, determineProteinType, determineProteinSubcateg
 import {
   loadCharGPTMemory,
   saveCharGPTMemory,
-  autoEvolveCharGPTMemory,
   addDeletedVaultRuleId,
   loadCharGPTChatHistory,
   saveCharGPTChatHistory,
@@ -79,7 +78,9 @@ import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { calculateMassCookSchedule, MassCookInput, MassCookResult } from '../utils/massCalculator';
 import { PushAndAlexaHub } from './PushAndAlexaHub';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME, AI_ADVISOR_NAME } from '../constants/appName';
-import { validateBBQTopicConstraint, getCharGPTDeveloperOverride, isMasterAdmin } from '../utils/adminAuth';
+import { validateBBQTopicConstraint } from '../utils/adminAuth';
+import { charGPTAvailabilityLabel } from '../lib/constitution';
+import { authorizedApiFetch } from '../lib/authorizedApi';
 
 interface AIPitmasterModalProps {
   cookLogs: CookLog[];
@@ -266,19 +267,20 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   const [cutSearchQuery, setCutSearchQuery] = useState('');
   const [cutProteinFilter, setCutProteinFilter] = useState<'ALL' | ProteinType>('ALL');
 
-  // Network Connectivity State for Offline Mode & Automated Verification
+  // Network state is availability only. It never proves grounding or enables a
+  // fabricated local AI engine.
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [isBatchVerifying, setIsBatchVerifying] = useState(false);
 
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
-      setTeachSuccessNotice('🟢 Back online! Live Gemini search grounding & online verification restored.');
+      setTeachSuccessNotice('Network restored. CharGPT will verify each request independently.');
       setTimeout(() => setTeachSuccessNotice(null), 4000);
     };
     const handleOffline = () => {
       setIsOnline(false);
-      setTeachSuccessNotice('⚡ Offline Mode Active: Running with local CharGPT pitmaster engine.');
+      setTeachSuccessNotice('CharGPT is unavailable offline. Saved forms and records remain available.');
       setTimeout(() => setTeachSuccessNotice(null), 4000);
     };
 
@@ -325,14 +327,11 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     const saved = loadCharGPTChatHistory();
     if (saved && saved.length > 0) return saved;
     const nameGreeting = charGPTMemory.userName ? `, ${charGPTMemory.userName}` : '';
-    const askNameText = !charGPTMemory.userName
-      ? `\n\nBefore we fire up the smoker, what is your name? I'd love to remember who I'm cooking with!`
-      : '';
     return [
       {
         id: 'msg-welcome',
         role: 'assistant',
-        text: `Hello Pitmaster${nameGreeting}! I am ${AI_PITMASTER_NAME}, your self-learning, evolving BBQ Chatbot & Smoker Scientist 🧠🔥${askNameText}\n\nI store our conversation dialogue history, remember your custom preferences, and feature a Mass & Weight Physics Calculator so you can manage cooks by exact meat weight! Ask me anything, or run a data analysis audit on your smoke logs.`,
+        text: `Hello Pitmaster${nameGreeting}! I am ${AI_PITMASTER_NAME}, an evidence-aware BBQ cooking assistant. I can use verified references and the account records you select. Suggestions remain suggestions, and durable rules are saved only when you explicitly approve them.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -485,14 +484,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   const [teachCategory, setTeachCategory] = useState<CharGPTRule['category']>('preference');
   const [teachSuccessNotice, setTeachSuccessNotice] = useState<string | null>(null);
 
-  // Auto-evolve memory when component mounts or cookLogs change
-  useEffect(() => {
-    const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
-    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
-    setCharGPTMemory(updated);
-    if (onMemoryUpdate) onMemoryUpdate(updated);
-  }, [cookLogs.length]);
-
   // Handle initial prompt if passed from external button
   useEffect(() => {
     if (initialPrompt) {
@@ -507,16 +498,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   }, [initialCookId]);
 
   const activeCook = selectedCookId !== 'ALL_LOGS' ? cookLogs.find((c) => c.id === selectedCookId) : null;
-
-  // Manual Trigger to re-analyze logs
-  const handleManualEvolve = () => {
-    const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
-    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
-    setCharGPTMemory(updated);
-    if (onMemoryUpdate) onMemoryUpdate(updated);
-    setTeachSuccessNotice(`🧠 ${AI_NAME} analyzed ${published.length} published cook logs! Updated learned preferences.`);
-    setTimeout(() => setTeachSuccessNotice(null), 4000);
-  };
 
   // Handler: Add Analysed Cut from Cook Log to Meat Safety & BBQ Cook Target Temps Guide
   const handleAddAnalysedCutFromCookLog = (cook: CookLog) => {
@@ -611,70 +592,17 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     setTimeout(() => setTeachSuccessNotice(null), 5000);
   };
 
-  // Handler: Identify Unknown Cut via Server & Gemini (with Offline Fallback)
+  // Handler: Identify an unknown cut through the server. No offline identity,
+  // weight, confidence, or cooking result is fabricated.
   const handleIdentifyUnknownCut = async () => {
     if (!scanQuery.trim() && !scanImageBase64) return;
     setIsScanningCut(true);
     setScanError(null);
     setScanResult(null);
 
-    // If offline, use local offline muscle anatomy search & heuristics engine
     if (!navigator.onLine) {
-      setTimeout(() => {
-        setIsScanningCut(false);
-        const q = scanQuery.toLowerCase().trim();
-        const matched = verifiedCuts.find(
-          (c) =>
-            (q && c.name.toLowerCase().includes(q)) ||
-            (c.aliases && c.aliases.some((a) => a.toLowerCase().includes(q))) ||
-            (c.impsCode && c.impsCode.toLowerCase().includes(q))
-        );
-
-        if (matched) {
-          setScanResult({
-            identifiedCutName: matched.name,
-            proteinType: matched.proteinType,
-            primalOrigin: matched.primalOrigin,
-            impsCode: matched.impsCode,
-            confidenceScore: 95,
-            aliases: matched.aliases,
-            visualMarkersDetected: matched.visualKeyFeatures,
-            anatomyDetails: matched.muscleAnatomy || 'Local muscle anatomical structure',
-            recommendedCookingStrategy: matched.cookingStrategy,
-            idealSmokeTempF: matched.idealSmokeTempF,
-            targetInternalTempF: matched.targetInternalTempF,
-            explanation: `⚡ Offline Mode: Matched against your local confirmed database ("${matched.name}").`,
-          });
-        } else {
-          let inferredProtein: ProteinType = 'Beef';
-          let targetTemp = 203;
-          if (q.includes('pork') || q.includes('butt') || q.includes('shoulder') || q.includes('chops')) {
-            inferredProtein = 'Pork';
-            targetTemp = 203;
-          } else if (q.includes('chicken') || q.includes('turkey') || q.includes('thigh') || q.includes('breast')) {
-            inferredProtein = q.includes('turkey') ? 'Turkey' : 'Chicken';
-            targetTemp = 165;
-          } else if (q.includes('lamb')) {
-            inferredProtein = 'Lamb';
-            targetTemp = 145;
-          }
-
-          setScanResult({
-            identifiedCutName: scanQuery.trim() || 'Custom Offline Meat Cut',
-            proteinType: inferredProtein,
-            primalOrigin: 'Local Subprimal',
-            impsCode: 'IMPS-Offline-Local',
-            confidenceScore: 84,
-            aliases: scanQuery.trim() ? [scanQuery.trim()] : ['User Scanned Cut'],
-            visualMarkersDetected: ['Muscle grain direction', 'Intramuscular fat marbling'],
-            anatomyDetails: 'Anatomical structure derived from CharGPT offline muscle heuristics.',
-            recommendedCookingStrategy: 'Low and slow smoke at 225°F until target internal temperature is achieved.',
-            idealSmokeTempF: 225,
-            targetInternalTempF: targetTemp,
-            explanation: '⚡ Offline Mode: Scanned using CharGPT local pitmaster anatomy rules. Save to database to confirm.',
-          });
-        }
-      }, 500);
+      setIsScanningCut(false);
+      setScanError('Cut identification requires a network request. No offline identification was generated.');
       return;
     }
 
@@ -711,22 +639,23 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     }
   };
 
-  // Handler: Convert Scan Result to Confirmed Database Entry (With Automated Online Verification)
+  // AI scan results remain user-confirmed observations; they are never promoted
+  // to verified knowledge without the reviewed provenance workflow.
   const handleSaveScanResultToDatabase = () => {
     if (!scanResult) return;
     const newCut: VerifiedMeatCut = {
       id: `cut-user-${Date.now()}`,
       name: scanResult.identifiedCutName,
       aliases: scanResult.aliases || [],
-      proteinType: scanResult.proteinType || 'Beef',
-      primalOrigin: scanResult.primalOrigin || 'Custom Subprimal',
-      impsCode: scanResult.impsCode || 'IMPS User-Verified',
-      description: scanResult.explanation || scanResult.anatomyDetails || 'Identified cut via CharGPT Computer Vision & Muscle Registry.',
+      proteinType: scanResult.proteinType || ('Other' as ProteinType),
+      primalOrigin: scanResult.primalOrigin || 'Unknown — AI suggestion confirmed by user',
+      impsCode: scanResult.impsCode || undefined,
+      description: scanResult.explanation || scanResult.anatomyDetails || 'User-confirmed AI suggestion; not independently verified.',
       visualKeyFeatures: scanResult.visualMarkersDetected || [],
       muscleAnatomy: scanResult.anatomyDetails || undefined,
-      idealSmokeTempF: scanResult.idealSmokeTempF || 225,
-      targetInternalTempF: scanResult.targetInternalTempF || 140,
-      cookingStrategy: scanResult.recommendedCookingStrategy || 'Low and slow smoke with wood coal embers.',
+      idealSmokeTempF: scanResult.idealSmokeTempF || 0,
+      targetInternalTempF: scanResult.targetInternalTempF || 0,
+      cookingStrategy: scanResult.recommendedCookingStrategy || 'No verified cooking strategy recorded.',
       verifiedStatus: 'Local User Confirmed',
       samplePhotoUrl: scanImageBase64 || undefined,
       userUploadedPhotos: scanImageBase64 ? [scanImageBase64] : [],
@@ -737,137 +666,22 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     const updated = addOrUpdateVerifiedMeatCut(newCut);
     setVerifiedCuts(updated);
     
-    // Automate Verification: If online, immediately cross-verify against live USDA/NAMP online data
-    if (isOnline) {
-      setTeachSuccessNotice(`✅ Added "${newCut.name}"! Auto-verifying against online USDA/NAMP databases...`);
-      handleVerifyCutOnline(newCut);
-    } else {
-      setTeachSuccessNotice(`✅ Added "${newCut.name}" to Local Confirmed Cut Database (Queued for online auto-verification).`);
-      setTimeout(() => setTeachSuccessNotice(null), 4000);
-    }
+    setTeachSuccessNotice(`Saved "${newCut.name}" as user-confirmed, unverified data.`);
+    setTimeout(() => setTeachSuccessNotice(null), 4000);
   };
 
-  // Handler: Cross-Verify Cut against Live Online Data (USDA/NAMP Grounding)
+  // Verification is available only through the administrator-reviewed Knowledge
+  // pipeline. This user surface cannot promote records.
   const handleVerifyCutOnline = async (cut: VerifiedMeatCut) => {
-    if (!isOnline) {
-      setTeachSuccessNotice(`⚡ Offline Mode: "${cut.name}" is saved locally and will auto-verify when internet connection returns.`);
-      setTimeout(() => setTeachSuccessNotice(null), 4000);
-      return;
-    }
-
-    setVerifyingCutId(cut.id);
-    try {
-      const res = await fetch('/api/chargpt/verify-cut-online', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cutName: cut.name,
-          primalOrigin: cut.primalOrigin,
-          impsCode: cut.impsCode,
-          aliases: cut.aliases,
-        }),
-      });
-
-      const data = await res.json();
-      setVerifyingCutId(null);
-
-      if (data.success && data.result) {
-        const r = data.result;
-        const updatedCut: VerifiedMeatCut = {
-          ...cut,
-          name: r.verifiedCutName || cut.name,
-          impsCode: r.verifiedImpsCode || cut.impsCode,
-          primalOrigin: r.verifiedPrimalOrigin || cut.primalOrigin,
-          aliases: Array.from(new Set([...(cut.aliases || []), ...(r.verifiedAliases || [])])),
-          muscleAnatomy: r.verifiedMuscleAnatomy || cut.muscleAnatomy,
-          description: r.verifiedDescription || cut.description,
-          visualKeyFeatures: r.verifiedVisualFeatures?.length ? r.verifiedVisualFeatures : cut.visualKeyFeatures,
-          idealSmokeTempF: r.idealSmokeTempF || cut.idealSmokeTempF,
-          targetInternalTempF: r.targetInternalTempF || cut.targetInternalTempF,
-          cookingStrategy: r.verifiedCookingStrategy || cut.cookingStrategy,
-          verifiedStatus: 'Global Online Verified',
-          onlineVerificationDate: new Date().toISOString(),
-          onlineSourceCitations: r.sourceCitations || ['USDA NAMP Meat Buyers Guide'],
-          updatedAt: new Date().toISOString(),
-        };
-
-        const updatedList = addOrUpdateVerifiedMeatCut(updatedCut);
-        setVerifiedCuts(updatedList);
-        setTeachSuccessNotice(`🌐 Cross-verified "${updatedCut.name}" against USDA & online butcher specifications!`);
-        setTimeout(() => setTeachSuccessNotice(null), 4000);
-      }
-    } catch (e) {
-      setVerifyingCutId(null);
-      console.error('Online verification failed', e);
-    }
+    setVerifyingCutId(null);
+    setTeachSuccessNotice(`"${cut.name}" remains user-provided and unverified. Global publication requires administrator review with claim-level sources.`);
+    setTimeout(() => setTeachSuccessNotice(null), 5000);
   };
 
   // Handler: Batch Auto-Verify All Unverified Cuts Against Online Data
   const handleBatchAutoVerifyUnverifiedCuts = async () => {
-    const unverified = verifiedCuts.filter((c) => c.verifiedStatus !== 'Global Online Verified');
-    if (unverified.length === 0) {
-      setTeachSuccessNotice('✨ All meat cuts in your database are already Global Online Verified!');
-      setTimeout(() => setTeachSuccessNotice(null), 4000);
-      return;
-    }
-
-    if (!isOnline) {
-      setTeachSuccessNotice('⚡ Currently in Offline Mode. Batch verification will run automatically when connected to the internet.');
-      setTimeout(() => setTeachSuccessNotice(null), 4000);
-      return;
-    }
-
-    setIsBatchVerifying(true);
-    setTeachSuccessNotice(`🌐 Auto-verifying ${unverified.length} cuts against USDA & NAMP online databases...`);
-
-    let countSuccess = 0;
-    let currentList = [...verifiedCuts];
-
-    for (const cut of unverified) {
-      try {
-        const res = await fetch('/api/chargpt/verify-cut-online', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cutName: cut.name,
-            primalOrigin: cut.primalOrigin,
-            impsCode: cut.impsCode,
-            aliases: cut.aliases,
-          }),
-        });
-
-        const data = await res.json();
-        if (data.success && data.result) {
-          const r = data.result;
-          const updatedCut: VerifiedMeatCut = {
-            ...cut,
-            name: r.verifiedCutName || cut.name,
-            impsCode: r.verifiedImpsCode || cut.impsCode,
-            primalOrigin: r.verifiedPrimalOrigin || cut.primalOrigin,
-            aliases: Array.from(new Set([...(cut.aliases || []), ...(r.verifiedAliases || [])])),
-            muscleAnatomy: r.verifiedMuscleAnatomy || cut.muscleAnatomy,
-            description: r.verifiedDescription || cut.description,
-            visualKeyFeatures: r.verifiedVisualFeatures?.length ? r.verifiedVisualFeatures : cut.visualKeyFeatures,
-            idealSmokeTempF: r.idealSmokeTempF || cut.idealSmokeTempF,
-            targetInternalTempF: r.targetInternalTempF || cut.targetInternalTempF,
-            cookingStrategy: r.verifiedCookingStrategy || cut.cookingStrategy,
-            verifiedStatus: 'Global Online Verified',
-            onlineVerificationDate: new Date().toISOString(),
-            onlineSourceCitations: r.sourceCitations || ['USDA NAMP Meat Buyers Guide'],
-            updatedAt: new Date().toISOString(),
-          };
-
-          currentList = addOrUpdateVerifiedMeatCut(updatedCut);
-          setVerifiedCuts(currentList);
-          countSuccess++;
-        }
-      } catch (e) {
-        console.warn(`Failed online verification for cut ${cut.name}:`, e);
-      }
-    }
-
     setIsBatchVerifying(false);
-    setTeachSuccessNotice(`🎉 Automated Verification Complete! Verified ${countSuccess} cuts against global online butcher databases.`);
+    setTeachSuccessNotice('Automatic promotion is disabled. Use the reviewed Knowledge workbench to publish source-backed claims.');
     setTimeout(() => setTeachSuccessNotice(null), 5000);
   };
 
@@ -890,13 +704,13 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       name: newCutName.trim(),
       aliases: aliasList,
       proteinType: newCutProtein,
-      primalOrigin: newCutPrimal.trim() || 'Subprimal Cut',
-      impsCode: newCutImps.trim() || 'IMPS Custom',
-      description: newCutDesc.trim() || 'Custom user confirmed meat cut.',
-      visualKeyFeatures: featureList.length ? featureList : ['User verified muscle structure'],
-      idealSmokeTempF: 225,
-      targetInternalTempF: 140,
-      cookingStrategy: 'Low and slow smoking to target temperature.',
+      primalOrigin: newCutPrimal.trim() || 'Unknown — user did not provide an origin',
+      impsCode: newCutImps.trim() || undefined,
+      description: newCutDesc.trim() || 'User-provided meat cut; not independently verified.',
+      visualKeyFeatures: featureList,
+      idealSmokeTempF: 0,
+      targetInternalTempF: 0,
+      cookingStrategy: 'No verified cooking strategy recorded.',
       verifiedStatus: 'Local User Confirmed',
       samplePhotoUrl: newCutPhotoBase64 || undefined,
       userUploadedPhotos: newCutPhotoBase64 ? [newCutPhotoBase64] : [],
@@ -916,14 +730,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     setNewCutFeatures('');
     setNewCutPhotoBase64(null);
 
-    // Automate Verification: If online, immediately cross-verify against live USDA/NAMP online data
-    if (isOnline) {
-      setTeachSuccessNotice(`✅ Added "${newCut.name}"! Auto-verifying against online USDA/NAMP databases...`);
-      handleVerifyCutOnline(newCut);
-    } else {
-      setTeachSuccessNotice(`✅ Added "${newCut.name}" to Local Confirmed Database (Will auto-verify when back online).`);
-      setTimeout(() => setTeachSuccessNotice(null), 4000);
-    }
+    setTeachSuccessNotice(`Saved "${newCut.name}" as user-provided, unverified data.`);
+    setTimeout(() => setTeachSuccessNotice(null), 4000);
   };
 
 
@@ -988,38 +796,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     }
   };
 
-  // Offline Assistant Response Generator
-  const generateOfflineResponse = (query: string): string => {
-    const q = query.toLowerCase();
-    let resp = `⚡ **[Offline Mode Active]** ${AI_PITMASTER_NAME} local pitmaster engine response:\n\n`;
-
-    const matchingRules = charGPTMemory.learnedRules.filter(
-      (r) => r.title.toLowerCase().includes(q) || r.detail.toLowerCase().includes(q) || q.includes(r.category.toLowerCase())
-    );
-
-    if (matchingRules.length > 0) {
-      resp += `🧠 **Learned Preferences Applied:**\n` + matchingRules.map((r) => `• **${r.title}**: ${r.detail}`).join('\n') + `\n\n`;
-    }
-
-    if (q.includes('stall') || q.includes('wrap')) {
-      resp += `🔥 **Pitmaster Stall Guidance**: At ~150-165°F internal, evaporative cooling causes the stall. Wrap in Peach Butcher Paper with tallow or a foil boat to push through while preserving bark.`;
-    } else if (q.includes('temp') || q.includes('target') || q.includes('done') || q.includes('pull')) {
-      resp += `🌡️ **Thermal Target Rule**: Brisket & Pork Shoulder target 203°F internal (probe tender like warm butter). Tri-Tip / Picanha targets 132-135°F (medium-rare). Ribs target ~200°F (bend test).`;
-    } else if (q.includes('wood') || q.includes('smoke')) {
-      resp += `🪵 **Wood Pairing Strategy**: Post Oak & Hickory for Beef Cuts; Pecan & Apple wood for Pork; Cherry wood for rich color on Poultry.`;
-    } else if (q.includes('rub') || q.includes('season')) {
-      resp += `🧂 **Rub Strategy**: 1:1 coarse kosher salt to 16-mesh black pepper base. Apply ~1 oz per 5 lbs of meat mass.`;
-    } else if (q.includes('audit') || q.includes('analysis')) {
-      resp += `📊 **Offline Cook Log Audit**: Evaluated ${cookLogs.length} saved cook logs. Average cook rating: ${
-        cookLogs.length ? (cookLogs.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) / cookLogs.length).toFixed(1) : '5.0'
-      }/5.0. Target smoking temp consistently maintained around 225°F.`;
-    } else {
-      resp += `I am operating using your local smoker profile (${profile.name || 'Smoker'}), ${cookLogs.length} saved cook logs, and learned preferences. All calculations and chat logs are saved in browser local storage. When connected back online, live Gemini search grounding will re-enable automatically!`;
-    }
-
-    return resp;
-  };
-
   const handleAsk = async (userQuery?: string, attachedImageBase64?: string | null) => {
     const queryToUse = userQuery || prompt;
     const imgToSend = attachedImageBase64 !== undefined ? attachedImageBase64 : chatImageBase64;
@@ -1044,9 +820,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
     setLoading(true);
 
     // Perform Strict BBQ Topic Constraint check
-    const activeEmail = currentUserEmail || '';
-    const devOverride = getCharGPTDeveloperOverride(activeEmail);
-    const bbqCheck = validateBBQTopicConstraint(effectiveQuery, devOverride.allowed);
+    const bbqCheck = validateBBQTopicConstraint(effectiveQuery);
 
     if (!bbqCheck.isBBQ) {
       setTimeout(() => {
@@ -1055,7 +829,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
           {
             id: `msg-assistant-${Date.now()}`,
             role: 'assistant',
-            text: `⛔ **CharGPT Strict BBQ Guardrail Active**\n\nI am CharGPT, an AI specifically engineered and constrained to BBQ, smoking meats, grilling, wood pellet physics, and pitmaster science. I cannot respond to non-BBQ topics.\n\n*(Note: Non-BBQ developer testing prompts can only be unlocked with express Developer Master Permission from the verified developer account: \`jonathanblunt1214@gmail.com\` via the Master Admin Dashboard.)*`,
+            text: `CharGPT is limited to BBQ, smoking, grilling, fuel, food safety, and pitmaster workflows. This request is outside that scope.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           },
         ]);
@@ -1064,21 +838,14 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       return;
     }
 
-    // If offline, use local offline assistant generator
     if (!navigator.onLine) {
-      setTimeout(() => {
-        const offlineText = generateOfflineResponse(effectiveQuery);
-        setMessages([
-          ...newMessages,
-          {
-            id: `msg-assistant-${Date.now()}`,
-            role: 'assistant',
-            text: offlineText,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          },
-        ]);
-        setLoading(false);
-      }, 500);
+      setMessages([...newMessages, {
+        id: `msg-assistant-${Date.now()}`,
+        role: 'assistant',
+        text: 'CharGPT is unavailable offline. No fallback cooking advice was generated. Your saved records and forms remain available.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      }]);
+      setLoading(false);
       return;
     }
 
@@ -1097,14 +864,12 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       const userAcct = calculateUserAccount(cookLogs, [], profile, charGPTMemory);
       const effectiveSpecs = getEffectiveSmokerSpecs(profile);
 
-      const res = await fetch('/api/chargpt', {
+      const res = await authorizedApiFetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: effectiveQuery,
           image: imagePayload,
-          userEmail: activeEmail,
-          isDevOverride: devOverride.allowed,
           charGPTMemory,
           smokerProfile: profile,
           effectiveSpecs,
@@ -1118,12 +883,12 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 smokerType: activeCook.smokerType,
                 proteinType: activeCook.proteinType,
                 proteinCut: activeCook.proteinCut,
-                currentPitTemp: lastReading?.cookingTemp || 225,
-                currentMeatTemp: lastReading?.meatTemp || 160,
-                targetTemp: 203,
+                currentPitTemp: lastReading?.cookingTemp,
+                currentMeatTemp: lastReading?.meatTemp,
+                targetTemp: undefined,
                 hoursLogged: activeCook.hoursLogged,
                 rub: activeCook.seasoningRubs,
-                overallRating: activeCook.ratings?.overall || 5,
+                overallRating: activeCook.ratings?.overall,
                 notes: activeCook.finishedNotes,
                 nextTimeNotes: activeCook.nextTimeNotes,
               }
@@ -1134,21 +899,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       const data = await res.json();
       const rawAssistantText = data.text || (data.error ? `⚠️ ${AI_NAME} Note: ${data.error}` : `Sorry, ${AI_NAME} encountered a thermal connection issue.`);
 
-      // Extract user name if provided in user prompt or returned via AI tag
-      let extractedName: string | null = null;
-      const promptNameMatch = effectiveQuery.match(/(?:my name is|i'm|i am|call me|you can call me|name is|name's)\s+([a-zA-Z0-9_ -]{1,25})/i);
-      if (promptNameMatch && promptNameMatch[1]) {
-        extractedName = promptNameMatch[1].trim().replace(/[.,!?;:]/g, '');
-      } else if (!charGPTMemory.userName && /^[A-Z][a-zA-Z0-9'-]{1,20}(?:\s+[A-Z][a-zA-Z0-9'-]{1,20}){0,2}$/.test(effectiveQuery.trim())) {
-        extractedName = effectiveQuery.trim();
-      }
-
-      const tagMatch = rawAssistantText.match(/\[LEARNED_USER_NAME:\s*([^\]]+)\]/i);
-      if (tagMatch) {
-        extractedName = tagMatch[1].trim();
-      }
-
-      // Clean out tag from assistant text before rendering
+      // The model cannot silently create durable identity memory. Strip any
+      // legacy learning tag and require the explicit profile/memory controls.
       const cleanedAssistantText = rawAssistantText.replace(/\[LEARNED_USER_NAME:\s*[^\]]+\]/gi, '').trim();
 
       setMessages([
@@ -1161,46 +913,23 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
         },
       ]);
 
-      // Increase interaction count & update userName if learned
+      // Interaction count is observed telemetry, not a learned preference.
       setCharGPTMemory((prevMemory) => {
-        let updatedMemory: CharGPTMemory = {
+        const updatedMemory: CharGPTMemory = {
           ...prevMemory,
           totalInteractions: (prevMemory.totalInteractions || 0) + 1,
-          lastEvolvedAt: new Date().toISOString(),
         };
-
-        if (extractedName) {
-          const nameRule: CharGPTRule = {
-            id: `rule-name-${Date.now()}`,
-            category: 'general',
-            title: 'Pitmaster Name',
-            detail: `User's name is ${extractedName}`,
-            source: 'user_taught',
-            createdAt: new Date().toISOString(),
-          };
-          const updatedRules = [
-            nameRule,
-            ...updatedMemory.learnedRules.filter((r) => r.title !== 'Pitmaster Name'),
-          ];
-          updatedMemory = {
-            ...updatedMemory,
-            userName: extractedName,
-            learnedRules: updatedRules,
-          };
-        }
-
         saveCharGPTMemory(updatedMemory);
         if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
         return updatedMemory;
       });
     } catch (e: any) {
-      const offlineText = generateOfflineResponse(effectiveQuery);
       setMessages([
         ...newMessages,
         {
           id: `msg-assistant-${Date.now()}`,
           role: 'assistant',
-          text: offlineText,
+          text: 'CharGPT could not complete this request. No fallback advice or analysis was fabricated.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -1208,7 +937,6 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
         const updatedMemory: CharGPTMemory = {
           ...prevMemory,
           totalInteractions: (prevMemory.totalInteractions || 0) + 1,
-          lastEvolvedAt: new Date().toISOString(),
         };
         saveCharGPTMemory(updatedMemory);
         if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
@@ -1264,18 +992,18 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
           {isMobileHeaderExpanded && (
             <div className="pt-2 border-t border-purple-500/20 space-y-2 text-[11px] animate-fadeIn">
               <p className="text-purple-200/90 leading-snug">
-                Self-evolving BBQ Intelligence powered by Gemini AI — Learns from cook log analytics, wood blends, and custom rules.
+                Evidence-aware cooking guidance. Account facts and durable rules are used only after verified retrieval or explicit approval.
               </p>
               <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                 {isOnline ? (
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
                     <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <span>🟢 Online</span>
+                    <span>{charGPTAvailabilityLabel({ online: true, authenticated: Boolean(currentUserEmail?.trim()), grounded: false })}</span>
                   </span>
                 ) : (
                   <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
                     <WifiOff className="w-3 h-3 text-amber-400 shrink-0" />
-                    <span>⚡ Offline</span>
+                    <span>{charGPTAvailabilityLabel({ online: false, authenticated: Boolean(currentUserEmail?.trim()), grounded: false })}</span>
                   </span>
                 )}
                 <span className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-0.5 rounded-md font-medium truncate max-w-[150px]">
@@ -1306,11 +1034,11 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 </h2>
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-md flex items-center space-x-1 shrink-0">
                   <Zap className="w-3 h-3 text-amber-400" />
-                  <span>Learning Chatbot</span>
+                  <span>Evidence-aware assistant</span>
                 </span>
               </div>
               <p className="text-[11px] sm:text-xs text-purple-200/80 mt-0.5 leading-normal">
-                Self-evolving BBQ Intelligence powered by Gemini AI — Learns from cook log analytics, wood blends, and custom rules.
+                Uses verified sources, retrieved account data, and rules you explicitly approve. Unknown information remains unknown.
               </p>
 
               {/* Linked Smoker & User Account & Online/Offline Status Badge */}
@@ -1318,17 +1046,17 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 {isOnline ? (
                   <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
                     <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
-                    <span>🟢 Online (Gemini Grounded)</span>
+                    <span>{charGPTAvailabilityLabel({ online: true, authenticated: Boolean(currentUserEmail?.trim()), grounded: false })}</span>
                   </span>
                 ) : (
                   <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1 animate-pulse">
                     <WifiOff className="w-3 h-3 text-amber-400 shrink-0" />
-                    <span>⚡ Offline Mode (Local Engine)</span>
+                    <span>{charGPTAvailabilityLabel({ online: false, authenticated: Boolean(currentUserEmail?.trim()), grounded: false })}</span>
                   </span>
                 )}
 
                 <span className="bg-orange-500/20 text-orange-300 border border-orange-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
-                  🔥 Linked Smoker: <strong className="text-white font-bold truncate max-w-[140px] sm:max-w-none">{profile.name || 'Smoker Rig'}</strong>
+                  🔥 Linked Smoker: <strong className="text-white font-bold truncate max-w-[140px] sm:max-w-none">{profile.name || 'None selected'}</strong>
                 </span>
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-md font-medium flex items-center gap-1">
                   👤 Account: <strong className="text-white font-bold">{currentUserEmail && currentUserEmail.trim() ? currentUserEmail : 'None'}</strong>
@@ -1383,14 +1111,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 <option value="alexa_push">🔔 Push & Alexa</option>
               </select>
 
-              <button
-                type="button"
-                onClick={handleManualEvolve}
-                className="px-3 py-2 bg-orange-500/20 hover:bg-orange-500/30 text-orange-400 border border-orange-500/40 font-extrabold rounded-xl text-xs flex items-center justify-center space-x-1 cursor-pointer transition-all min-h-[42px] shrink-0"
-                title={`Force ${AI_NAME} to scan all cook logs and update memory`}
-              >
-                <RefreshCw className="w-3.5 h-3.5 shrink-0 text-orange-400" />
-                <span>Audit</span>
+              <button type="button" onClick={() => setActiveTab('memory')} className="px-3 py-2 bg-purple-500/15 text-purple-300 border border-purple-500/30 font-bold rounded-xl text-xs min-h-[42px] shrink-0" title="Review and explicitly manage saved memory">
+                Memory
               </button>
             </div>
 
@@ -1628,15 +1350,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handleManualEvolve}
-              className="px-3 py-1.5 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 font-bold rounded-xl text-[11px] flex items-center justify-center space-x-1 cursor-pointer transition-all shrink-0 min-h-[36px]"
-              title={`Force ${AI_NAME} to scan all cook logs and update memory`}
-            >
-              <RefreshCw className="w-3 h-3 shrink-0" />
-              <span className="truncate">Audit</span>
-            </button>
+            <button type="button" onClick={() => setActiveTab('memory')} className="px-3 py-1.5 bg-purple-500/10 text-purple-300 border border-purple-500/30 font-bold rounded-xl text-[11px] min-h-[36px]" title="Review and explicitly manage saved memory">Memory</button>
           </div>
         </div>
       </div>
@@ -2630,37 +2344,14 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 <span>Meat Cut Catalog</span>
               </h3>
               <p className="text-xs text-zinc-400 mt-0.5">
-                Identify unknown meat cuts and maintain your local catalog verified against USDA standards.
+                Personal entries remain user-provided and unverified. Published safety claims come only from the reviewed Knowledge system.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              {/* Batch Auto-Verify Button */}
-              <button
-                type="button"
-                onClick={handleBatchAutoVerifyUnverifiedCuts}
-                disabled={isBatchVerifying}
-                className={`px-3 py-2 rounded-xl font-black text-xs shadow-md flex items-center space-x-1.5 transition-all cursor-pointer min-h-[38px] ${
-                  verifiedCuts.some((c) => c.verifiedStatus !== 'Global Online Verified')
-                    ? 'bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white animate-pulse'
-                    : 'bg-[#222] text-zinc-400 border border-[#333]'
-                }`}
-                title="Automate online cross-verification for all unverified meat cuts"
-              >
-                {isBatchVerifying ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-purple-300" />
-                    <span>Auto-Verifying...</span>
-                  </>
-                ) : (
-                  <>
-                    <Globe className="w-4 h-4 text-purple-300" />
-                    <span>
-                      Auto-Verify All ({verifiedCuts.filter((c) => c.verifiedStatus !== 'Global Online Verified').length})
-                    </span>
-                  </>
-                )}
-              </button>
+              <span className="inline-flex min-h-[38px] items-center gap-1.5 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-bold text-purple-200">
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />Admin review required for publication
+              </span>
 
               <button
                 type="button"
@@ -2668,7 +2359,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 className="px-3 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-xs rounded-xl shadow-md flex items-center space-x-1.5 transition-all cursor-pointer min-h-[38px]"
               >
                 <Plus className="w-4 h-4" />
-                <span>Add Confirmed Cut</span>
+                <span>Add Personal Cut</span>
               </button>
             </div>
           </div>
@@ -2678,7 +2369,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl text-xs text-amber-200 flex items-center space-x-2">
               <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                <strong>Offline Mode Active:</strong> Scanned cuts and local additions are stored safely in browser memory. All unverified cuts will auto-verify against global USDA online databases when internet connectivity is restored.
+                <strong>Offline:</strong> Existing personal entries remain available. Identification and source review require a network connection.
               </span>
             </div>
           )}
@@ -2944,7 +2635,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredCuts.map((cut) => {
-                    const isOnlineVerified = cut.verifiedStatus === 'Global Online Verified';
+                    const isOnlineVerified = cut.verifiedStatus === 'Global Online Verified'
+                      && Boolean(cut.onlineSourceCitations?.some((source) => /^https:\/\//i.test(source)));
                     const isVerifying = verifyingCutId === cut.id;
                     const isExpanded = expandedCutIds[cut.id] ?? Boolean(cutSearchQuery);
 
@@ -2996,12 +2688,12 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                             {isOnlineVerified ? (
                               <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1 shrink-0">
                                 <Globe className="w-3 h-3 text-emerald-400 shrink-0" />
-                                <span>Global Online Verified</span>
+                                <span>Source-backed reviewed</span>
                               </span>
                             ) : (
                               <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full flex items-center space-x-1 shrink-0">
                                 <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
-                                <span>Local User Confirmed</span>
+                                <span>User-provided · unverified</span>
                               </span>
                             )}
 
@@ -3086,29 +2778,9 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
                         {/* Bottom Actions Bar (Always clean & available) */}
                         <div className="pt-2.5 border-t border-[#222] flex items-center justify-between gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => handleVerifyCutOnline(cut)}
-                            disabled={isVerifying}
-                            className={`px-2.5 py-1.5 rounded-xl font-bold text-[10px] sm:text-[11px] transition-all flex items-center space-x-1 cursor-pointer shrink-0 min-h-[34px] ${
-                              isOnlineVerified
-                                ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20'
-                                : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
-                            }`}
-                            title="Cross-check against online USDA IMPS & global pitmaster databases using Google Search Grounding"
-                          >
-                            {isVerifying ? (
-                              <>
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                <span>Verifying Online...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Globe className="w-3 h-3" />
-                                <span>{isOnlineVerified ? 'Re-Verify Online' : 'Verify Online'}</span>
-                              </>
-                            )}
-                          </button>
+                          <span className="inline-flex min-h-[34px] items-center gap-1 rounded-xl border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[10px] font-bold text-zinc-400 sm:text-[11px]">
+                            <ShieldCheck className="h-3 w-3" aria-hidden="true" />{isOnlineVerified ? 'Reviewed evidence attached' : 'Admin review required'}
+                          </span>
 
                           <button
                             type="button"
@@ -3132,17 +2804,19 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
         </div>
       )}
 
-      {/* MODAL: ADD CUSTOM VERIFIED MEAT CUT */}
+      {/* MODAL: ADD PERSONAL UNVERIFIED MEAT CUT */}
       {isAddCutModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
           <div className="bg-[#181818] border border-[#333] w-full max-w-lg rounded-2xl p-5 space-y-4 shadow-2xl animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-[#2a2a2a]">
               <h3 className="text-sm font-black text-white flex items-center space-x-2">
                 <Plus className="w-4 h-4 text-amber-400" />
-                <span>Add Confirmed Cut to Local Database</span>
+                <span>Add Personal Meat Cut</span>
               </h3>
               <button
+                type="button"
                 onClick={() => setIsAddCutModalOpen(false)}
+                aria-label="Close personal meat cut form"
                 className="text-zinc-400 hover:text-white p-1 cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -3392,35 +3066,14 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
           {/* TEACH FORM */}
           <div className="bg-[#121212] border border-purple-500/30 rounded-xl p-3.5 sm:p-4 space-y-3">
-            {/* ML EVOLUTION STATUS BANNER */}
-            <div className="bg-gradient-to-r from-purple-950/60 via-zinc-900 to-amber-950/40 border border-purple-500/30 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <Brain className="w-4 h-4 text-purple-400 shrink-0" />
-                  <span className="text-xs font-black text-white uppercase tracking-wider">
-                    CharGPT Automatic Machine Learning Engine
-                  </span>
-                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded font-bold">
-                    ⚡ Auto-Training Active (Live Cloud Server Sync)
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-300">
-                  CharGPT automatically analyzes your cook logs, flavor ratings, and wood blends in real-time. Learned insights, rules, and memory optimizations sync directly to the cloud server for live AI model evolution across all sessions.
-                </p>
+            <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-3">
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-white">
+                <Brain className="h-4 w-4 text-purple-400" aria-hidden="true" />
+                Explicit memory controls
               </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const updated = autoEvolveCharGPTMemory(cookLogs, charGPTMemory);
-                  setCharGPTMemory(updated);
-                  alert(`🎉 Live Cloud ML Re-Training Complete! Analyzed ${cookLogs.length} cook logs and updated ${updated.learnedRules.length} culinary preference rules.`);
-                }}
-                className="px-3.5 py-2 bg-gradient-to-r from-purple-500 to-amber-500 hover:opacity-95 text-zinc-950 font-black text-xs rounded-xl shadow transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 self-start sm:self-auto"
-              >
-                <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
-                <span>Force Re-Train ML Engine</span>
-              </button>
+              <p className="mt-1 text-[11px] leading-relaxed text-zinc-300">
+                CharGPT does not train itself from your cooks or conversations. Only rules you save with the form below become durable preferences, and you can remove them at any time.
+              </p>
             </div>
 
             <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center space-x-1.5 pt-1">
@@ -3603,17 +3256,20 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                   saveCharGPTMemory(charGPTMemory);
                   try {
                     const rawAcc = localStorage.getItem('pitmaster_local_user_account');
-                    const acc = rawAcc ? JSON.parse(rawAcc) : { name: 'Pitmaster', email: '', title: 'Guest Pitmaster', createdAt: new Date().toISOString() };
-                    acc.charGPTMemory = charGPTMemory;
-                    localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                    if (rawAcc) {
+                      const acc = JSON.parse(rawAcc);
+                      acc.charGPTMemory = charGPTMemory;
+                      localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
+                    }
                   } catch (e) {}
-                  setTeachSuccessNotice(`✨ Memory Vault (${charGPTMemory.learnedRules.length} rules) continuously synced to Pitmaster Account & AI server!`);
+                  onMemoryUpdate?.(charGPTMemory);
+                  setTeachSuccessNotice(`Saved ${charGPTMemory.learnedRules.length} explicitly approved memory rule(s).`);
                   setTimeout(() => setTeachSuccessNotice(null), 4000);
                 }}
                 className="px-3 py-2 bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-500 hover:to-orange-400 text-white font-extrabold text-xs rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-md"
               >
                 <Brain className="w-4 h-4 text-purple-200" />
-                <span>Sync Memory Vault to AI Server</span>
+                <span>Save Approved Memory</span>
               </button>
             </div>
           </div>
