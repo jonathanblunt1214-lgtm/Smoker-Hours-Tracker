@@ -1,0 +1,58 @@
+name: Harvest SmokeStack databases
+
+on:
+  schedule:
+    - cron: '23 8 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: smokestack-database-harvest
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT_ID: smoker-log-app
+  GOOGLE_CLOUD_PROJECT: smoker-log-app
+  HARVESTER_SERVICE_ACCOUNT: smokestack-harvester@smoker-log-app.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
+
+jobs:
+  harvest:
+    name: Recheck registered official sources
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Authenticate without a stored Google key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.HARVESTER_SERVICE_ACCOUNT }}
+
+      - name: Run source-backed harvesters
+        run: node --import tsx scripts/run-database-harvesters.mts
+
+      - name: Record constitutional boundary
+        if: always()
+        run: |
+          echo "## SmokeStack database harvest" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Sources: OWNER-registered official or approved URLs" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Output: Pending Review candidates only" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Publication: OWNER approval required" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- User data: never harvested or repurposed" >> "${GITHUB_STEP_SUMMARY}"

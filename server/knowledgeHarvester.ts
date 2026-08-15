@@ -1,7 +1,7 @@
 import { adminDb } from './firebaseAdmin';
 import { StructuredSpecMap } from './manufacturerSpecSchema';
 
-type HarvestInput = { mode: 'url' | 'smoker' | 'fuel' | 'mod'; value: string };
+export type HarvestInput = { mode: 'url' | 'smoker' | 'fuel' | 'mod'; value: string; typeHint?: 'smoker' | 'fuel' | 'mod' };
 type HarvestCandidate = {
   type: 'smoker' | 'fuel' | 'mod';
   title: string;
@@ -12,7 +12,7 @@ type HarvestCandidate = {
   structuredSpecs: StructuredSpecMap;
 };
 
-const MANUFACTURER_DOMAINS = ['pitboss-grills.com','traeger.com','campchef.com','recteq.com','weber.com','masterbuilt.com','greenmountaingrills.com','zgrills.com','charbroil.com','oklahomajoes.com'];
+const MANUFACTURER_DOMAINS = ['pitboss-grills.com','traeger.com','campchef.com','recteq.com','weber.com','masterbuilt.com','greenmountaingrills.com','zgrills.com','charbroil.com','oklahomajoes.com','yodersmokers.com','workhorsepits.com','millscale.co','lonestargrillz.com','horizonbbqsmokers.com','kamadojoe.com','bearmountainbbq.com','bbqlumberjack.com','bbcharcoal.com','jealousdevil.com','kingsford.com','royal-oak.com','cookinpellets.com'];
 
 function clean(value: unknown): string { return typeof value === 'string' ? value.trim() : ''; }
 function hostname(url: string): string { try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; } }
@@ -77,7 +77,7 @@ export async function harvestKnowledge(input:HarvestInput):Promise<HarvestCandid
   let sourceUrl=''; if(input.mode==='url'){ if(!/^https:\/\//i.test(value)) throw new Error('Manual URLs must use HTTPS.'); sourceUrl=value; } else { sourceUrl=await findManufacturerUrl(value)||''; if(!sourceUrl) throw new Error('No approved manufacturer source is known for that search term yet. Add a manufacturer URL first, then harvest it.'); }
   if(!allowedHost(hostname(sourceUrl))) throw new Error('Source domain is not on the approved manufacturer allowlist.');
   const {html,finalUrl}=await fetchHtml(sourceUrl); if(!allowedHost(hostname(finalUrl))) throw new Error('Source redirected outside the approved manufacturer allowlist.');
-  const pageText=textOnly(html); const type=inferType(pageText,input.mode); const title=titleFromHtml(html)||value; const claims=extractClaims(pageText,type); const structuredSpecs=extractStructuredSpecs(pageText,type,finalUrl,title);
+  const pageText=textOnly(html); const type=input.typeHint || inferType(pageText,input.mode); const title=titleFromHtml(html)||value; const claims=extractClaims(pageText,type); const structuredSpecs=extractStructuredSpecs(pageText,type,finalUrl,title);
   if(claims.length===0 && Object.keys(structuredSpecs).length===0) throw new Error('No candidate claims or structured metrics could be extracted from this source. Nothing was saved.');
   return { type,title,publisher:hostname(finalUrl),sourceUrl:finalUrl,sourceType:'manufacturer',claims,structuredSpecs };
 }

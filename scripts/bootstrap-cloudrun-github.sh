@@ -12,9 +12,11 @@ BACKUP_BUCKET="${BACKUP_BUCKET:-${PROJECT_ID}-firestore-backups}"
 BACKUP_LOCATION="${BACKUP_LOCATION:-us-central1}"
 DEPLOYER_NAME="${DEPLOYER_NAME:-smokestack-github}"
 RUNTIME_NAME="${RUNTIME_NAME:-smokestack-runtime}"
+HARVESTER_NAME="${HARVESTER_NAME:-smokestack-harvester}"
 
 DEPLOYER_EMAIL="${DEPLOYER_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 RUNTIME_EMAIL="${RUNTIME_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+HARVESTER_EMAIL="${HARVESTER_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 active_account="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -n 1)"
 if [[ -z "${active_account}" ]]; then
@@ -53,6 +55,11 @@ fi
 if ! gcloud iam service-accounts describe "${RUNTIME_EMAIL}" >/dev/null 2>&1; then
   gcloud iam service-accounts create "${RUNTIME_NAME}" \
     --display-name="Smoke Stack Cloud Run runtime"
+fi
+
+if ! gcloud iam service-accounts describe "${HARVESTER_EMAIL}" >/dev/null 2>&1; then
+  gcloud iam service-accounts create "${HARVESTER_NAME}" \
+    --display-name="Smoke Stack source-backed database harvester"
 fi
 
 if ! gcloud artifacts repositories describe "${ARTIFACT_REPOSITORY}" --location="${REGION}" >/dev/null 2>&1; then
@@ -105,6 +112,15 @@ gcloud iam service-accounts add-iam-policy-binding "${DEPLOYER_EMAIL}" \
   --member="${principal}" \
   --role=roles/iam.workloadIdentityUser
 
+gcloud iam service-accounts add-iam-policy-binding "${HARVESTER_EMAIL}" \
+  --member="${principal}" \
+  --role=roles/iam.workloadIdentityUser
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${HARVESTER_EMAIL}" \
+  --role=roles/datastore.user \
+  --condition=None
+
 for role in \
   roles/artifactregistry.writer \
   roles/datastore.importExportAdmin \
@@ -150,6 +166,7 @@ echo "Allowed ref: refs/heads/main"
 echo "Provider: projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 echo "Deployer: ${DEPLOYER_EMAIL}"
 echo "Runtime: ${RUNTIME_EMAIL}"
+echo "Database harvester: ${HARVESTER_EMAIL} (Firestore data access only)"
 echo "Artifact Registry: ${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}"
 echo "Firebase config: reviewed Firestore rules and indexes deploy from main"
 echo "Firestore backups: gs://${BACKUP_BUCKET}/scheduled (weekly and manual)"

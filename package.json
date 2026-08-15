@@ -23,7 +23,8 @@
     "test:firestore-rules": "npx --yes firebase-tools@15.27.0 emulators:exec --project=smokestack-rules-test --only firestore \"node scripts/test-firestore-rules.mjs\"",
     "test:chargpt-contract": "npm run generate:trusted-runtime && node --import tsx --test scripts/test-chargpt-contract.mts",
     "verify:owner-security": "npm run generate:trusted-runtime",
-    "bootstrap:owner": "node scripts/bootstrap-owner.mjs"
+    "bootstrap:owner": "node scripts/bootstrap-owner.mjs",
+    "test:database-harvesters": "node --import tsx --test scripts/test-database-harvesters.mts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
