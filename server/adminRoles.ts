@@ -42,18 +42,22 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
   const vertexConfigured = process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE);
   const aiConfigured = vertexConfigured || Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.API_KEY);
   const aiProvider = process.env.CHARGPT_PROVIDER || (vertexConfigured ? 'Vertex' : process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'Gemini' : process.env.API_KEY ? 'Configured provider' : null);
-  const aiModel = process.env.CHARGPT_MODEL || null;
+  const aiModel = process.env.CHARGPT_MODEL || (vertexConfigured ? 'gemini-2.5-flash' : null);
   const commit = process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null;
   const revision = process.env.K_REVISION || null;
 
   const pipelineDefinitions = [
-    { id: 'smoker', label: 'Smoker manufacturers', sourcePolicy: 'Manufacturer or verified source required' },
-    { id: 'fuel', label: 'Fuel catalog', sourcePolicy: 'Verified product/manufacturer source required' },
+    { id: 'smoker', label: 'Smokers & grills', sourcePolicy: 'Manufacturer or verified source required' },
+    { id: 'pellet', label: 'Pellet catalog', sourcePolicy: 'Verified pellet manufacturer source required' },
+    { id: 'fuel', label: 'Other BBQ fuels', sourcePolicy: 'Verified product/manufacturer source required' },
     { id: 'meat', label: 'Meat & cut catalog', sourcePolicy: 'Verified food-safety/cooking source required' },
+    { id: 'temperature', label: 'Safety & cook targets', sourcePolicy: 'Government or verified culinary authority required' },
     { id: 'mod', label: 'Smoker modifications', sourcePolicy: 'Verified compatibility/source evidence required' },
+    { id: 'recipe', label: 'Recipes & techniques', sourcePolicy: 'Verified culinary publisher required' },
+    { id: 'retailer_price', label: 'Observed retailer prices', sourcePolicy: 'Approved retailer source; observations expire after 24 hours' },
   ];
 
-  let publishedCounts: Record<string, number> = { smoker: 0, fuel: 0, meat: 0, mod: 0 };
+  let publishedCounts: Record<string, number> = Object.fromEntries(pipelineDefinitions.map(({ id }) => [id, 0]));
   let pendingCount = 0;
   let knowledgeError: string | null = null;
   if (firestore === 'operational') {
@@ -62,8 +66,9 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
       for (const doc of snapshot.docs) {
         const data: any = doc.data();
         if (data?.status === 'pending_review') pendingCount += 1;
-        if (data?.status === 'published' && Object.prototype.hasOwnProperty.call(publishedCounts, data?.type)) {
-          publishedCounts[data.type] += 1;
+        const databaseKind = data?.databaseKind || data?.type;
+        if (data?.status === 'published' && Object.prototype.hasOwnProperty.call(publishedCounts, databaseKind)) {
+          publishedCounts[databaseKind] += 1;
         }
       }
     } catch (error: any) {
@@ -113,11 +118,11 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
       model: aiModel,
       credentials: aiConfigured ? 'configured' : 'missing',
       retrieval: knowledgeError ? 'degraded' : 'published_only',
-      evaluation: 'not_configured',
+      evaluation: 'contract_enforced',
       feedbackReview: 'not_configured',
       durableLearning: 'approval_required',
       detail: aiConfigured
-        ? 'CharGPT can call the configured server-side model and retrieve only reviewed, published knowledge records. Evaluation and learning review services still need production implementation.'
+        ? 'CharGPT can call the configured server-side model, retrieve only reviewed published knowledge, and enforce constitutional response contracts. Feedback-driven behavior changes remain disabled until an auditable review workflow exists.'
         : 'Configure the server-side AI provider before CharGPT can be considered production ready.',
     },
     knowledge: {
