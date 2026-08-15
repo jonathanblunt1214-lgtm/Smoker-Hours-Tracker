@@ -11,6 +11,17 @@ type RecordItem = {
   reviewedAt?: string | null;
 };
 
+type HarvesterSource = {
+  id: string;
+  databaseKind: string;
+  sourceUrl: string;
+  label: string;
+  enabled: boolean;
+  lastRunStatus?: string | null;
+  lastRunAt?: string | null;
+  lastError?: string | null;
+};
+
 type Props = {
   request: (path: string, init?: RequestInit) => Promise<Response>;
   showToast: (message: string) => void;
@@ -22,6 +33,8 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ type: 'fuel', sourceType: 'manufacturer', title: '', publisher: '', sourceUrl: '', claimsText: '' });
   const [harvest, setHarvest] = useState({ mode: 'url', value: '' });
+  const [databaseHarvest, setDatabaseHarvest] = useState({ databaseKind: 'pellet', label: '', sourceUrl: '' });
+  const [harvesterSources, setHarvesterSources] = useState<HarvesterSource[]>([]);
 
   const load = async () => {
     try {
@@ -32,7 +45,16 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
     } catch (error: any) { showToast(error?.message || 'Could not load knowledge queue.'); }
   };
 
-  useEffect(() => { void load(); }, []);
+  const loadHarvesters = async () => {
+    try {
+      const res = await request('/api/knowledge/database-harvesters');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Database harvesters failed.');
+      setHarvesterSources(Array.isArray(data?.sources) ? data.sources : []);
+    } catch (error: any) { showToast(error?.message || 'Could not load database harvesters.'); }
+  };
+
+  useEffect(() => { void load(); void loadHarvesters(); }, []);
 
   const runHarvest = async () => {
     if (!harvest.value.trim()) return showToast('Enter a source URL, smoker model/name, fuel name, or modification name.');
@@ -48,6 +70,51 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
       showToast('Source harvested into Pending Review. Nothing was published automatically.');
       await load(); await onChanged?.();
     } catch (error: any) { showToast(error?.message || 'Source harvest failed. Nothing was saved.'); }
+    finally { setBusy(null); }
+  };
+
+  const registerAndHarvest = async () => {
+    if (!databaseHarvest.sourceUrl.trim()) return showToast('Enter an approved HTTPS source URL.');
+    setBusy('database-harvest');
+    try {
+      const res = await request('/api/knowledge/database-harvesters', {
+        method: 'POST',
+        body: JSON.stringify({ ...databaseHarvest, harvestNow: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Database source harvest failed.');
+      setDatabaseHarvest({ ...databaseHarvest, label: '', sourceUrl: '' });
+      showToast(data?.harvest?.duplicate
+        ? 'Source registered. Its current evidence already exists, so no duplicate was created.'
+        : 'Source registered and a Pending Review candidate was created.');
+      await load(); await loadHarvesters(); await onChanged?.();
+    } catch (error: any) { showToast(error?.message || 'Database source harvest failed. Nothing was published.'); }
+    finally { setBusy(null); }
+  };
+
+  const toggleHarvester = async (source: HarvesterSource) => {
+    setBusy(source.id);
+    try {
+      const res = await request(`/api/knowledge/database-harvesters/${source.id}/enabled`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled: !source.enabled }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Harvester update failed.');
+      await loadHarvesters();
+    } catch (error: any) { showToast(error?.message || 'Harvester update failed.'); }
+    finally { setBusy(null); }
+  };
+
+  const runAllHarvesters = async () => {
+    setBusy('run-all');
+    try {
+      const res = await request('/api/knowledge/database-harvesters/run', { method: 'POST', body: '{}' });
+      const data = await res.json();
+      if (!res.ok && res.status !== 207) throw new Error(data?.error || 'Harvester run failed.');
+      showToast(`Harvester run finished: ${data?.candidateCount || 0} candidate(s), ${data?.unchangedCount || 0} unchanged, ${data?.failureCount || 0} failed.`);
+      await load(); await loadHarvesters(); await onChanged?.();
+    } catch (error: any) { showToast(error?.message || 'Harvester run failed.'); }
     finally { setBusy(null); }
   };
 
@@ -103,6 +170,43 @@ export const KnowledgeAdminPanel: React.FC<Props> = ({ request, showToast, onCha
         <button disabled={busy !== null || !harvest.value.trim()} onClick={() => void runHarvest()} className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50"><Search className="mr-1.5 inline h-4 w-4" />Find verified-source info</button>
       </div>
       <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-500">For model/fuel/mod searches, SmokeStack uses manufacturer URLs already known to the verified catalog. If it does not yet know an approved manufacturer source, enter the official product URL first.</div>
+    </section>
+
+    <section className="rounded-2xl border border-sky-900/50 bg-sky-500/5 p-4 sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-semibold text-white">All Database Harvesters</h3>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-zinc-400">Registers an approved official source, harvests it immediately, and rechecks it on the weekly schedule. Every new or changed record remains Pending Review until OWNER publication.</p>
+        </div>
+        <button disabled={busy !== null || harvesterSources.length === 0} onClick={() => void runAllHarvesters()} className="rounded-lg border border-sky-800/60 px-3 py-2 text-xs text-sky-300 disabled:opacity-50"><RefreshCw className="mr-1 inline h-3.5 w-3.5" />Run all now</button>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-[190px_1fr_1.4fr_auto]">
+        <select value={databaseHarvest.databaseKind} onChange={(e) => setDatabaseHarvest({ ...databaseHarvest, databaseKind: e.target.value })} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white">
+          <option value="smoker">Smokers & grills</option>
+          <option value="pellet">Pellets</option>
+          <option value="fuel">Other BBQ fuels</option>
+          <option value="meat">Meat cuts</option>
+          <option value="temperature">Safety & cook targets</option>
+          <option value="mod">Mods & accessories</option>
+          <option value="recipe">Recipes & techniques</option>
+          <option value="retailer_price">Retail prices</option>
+        </select>
+        <input value={databaseHarvest.label} onChange={(e) => setDatabaseHarvest({ ...databaseHarvest, label: e.target.value })} placeholder="Source label" className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white" />
+        <input value={databaseHarvest.sourceUrl} onChange={(e) => setDatabaseHarvest({ ...databaseHarvest, sourceUrl: e.target.value })} placeholder="https://official-source.example/page" className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white" />
+        <button disabled={busy !== null || !databaseHarvest.sourceUrl.trim()} onClick={() => void registerAndHarvest()} className="rounded-xl bg-sky-400 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50">Add & harvest</button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {harvesterSources.length === 0 ? <p className="text-sm text-zinc-500">No scheduled sources registered yet.</p> : harvesterSources.map((source) => (
+          <div key={source.id} className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="truncate text-sm text-zinc-200">{source.label}</div>
+              <div className="mt-1 truncate text-[11px] text-zinc-500">{source.databaseKind.replaceAll('_', ' ')} · {source.lastRunStatus || 'not run'} · {source.sourceUrl}</div>
+              {source.lastError && <div className="mt-1 text-[11px] text-red-300">{source.lastError}</div>}
+            </div>
+            <button disabled={busy !== null} onClick={() => void toggleHarvester(source)} className={`rounded-lg border px-3 py-1.5 text-xs ${source.enabled ? 'border-emerald-800/60 text-emerald-300' : 'border-zinc-700 text-zinc-400'}`}>{source.enabled ? 'Scheduled' : 'Paused'}</button>
+          </div>
+        ))}
+      </div>
     </section>
 
     <section className="rounded-2xl border border-zinc-800 bg-[#141414] p-4 sm:p-5">
