@@ -1,7 +1,7 @@
 SMOKESTACK APP CONSTITUTION
 
 Status: Governing law
-Revision: 4
+Revision: 5
 Effective: 2026-08-15
 Applies to: every SmokeStack client, server, background job, deployment,
 integration, AI response, administrator surface, data migration, and release
@@ -199,3 +199,150 @@ identity, authorization, truth, audit, or data-integrity requirements.
 12.6 Prior revisions and approvals remain immutable and auditable. A release
 records the Constitution revision it passed and cannot claim compliance with a
 later revision it did not test.
+
+13. INCORPORATED TERMS OF SERVICE, PRIVACY, AND USER DATA OWNERSHIP
+
+Revision 5 is additive. Sections 1 through 12 remain unchanged and fully in
+force. Those sections govern SmokeStack's conduct. This Section 13 states the
+user-facing service agreement and privacy terms for the currently implemented
+application.
+
+13.1 ACCEPTANCE AND ELIGIBILITY
+
+Using an account or selecting Accept Revision 5 records acceptance of this
+Section 13. Acceptance never grants a device, Google, sharing, or AI permission.
+A user must be legally able to accept these terms; where applicable, a parent
+or guardian is responsible for an authorized minor's use. A material change
+requires a new numbered revision and renewed acceptance before the changed
+practice begins.
+
+13.2 CURRENT SERVICE
+
+SmokeStack provides cook logging, equipment and fuel records, planning,
+analytics, maintenance tools, optional Firebase account synchronization,
+optional Google Drive backup, optional CharGPT assistance, and provenance-
+backed community smoker information as those features are actually available.
+Features labeled unavailable, preview, estimated, simulated, or pending review
+are not represented as completed or verified services.
+
+13.3 USER DATA ALWAYS BELONGS TO THE USER
+
+User data always belongs to the user. SmokeStack receives no ownership interest
+in a user's cook logs, equipment records, photos, recipes, notes, preferences,
+backups, community submissions, or other account content. No term, feature,
+upload, synchronization, backup, analysis, or contribution transfers title to
+SmokeStack.
+
+13.4 LIMITED SERVICE PERMISSION
+
+The user gives SmokeStack only the limited, non-exclusive technical permission
+needed to store, process, synchronize, display, export, and delete that user's
+data on the user's instructions and to provide features the user chooses. This
+permission does not permit unrelated use and ends when the data or account is
+deleted, subject only to a specifically disclosed lawful retention requirement.
+
+13.5 NO SALE OR UNREQUESTED SHARING
+
+SmokeStack does not sell user data or use private account data for third-party
+advertising. Optional sharing remains off unless the user performs the specific
+consent action for that contribution. Consent for one purpose or record is not
+consent for another purpose, category, or future feature.
+
+13.6 IDENTITY, STORAGE, AND PROCESSING
+
+Firebase Authentication establishes signed-in identity. The user is responsible
+for protecting account access and authenticated sessions. Signed-in UID-scoped
+Firestore records are authoritative account data. Signed-out records remain on
+that browser and are not described as cloud-synchronized. Firebase and Google
+Cloud process data to provide authentication, storage, security, server
+features, and selected CharGPT requests. A CharGPT request may include the
+prompt and the cook, smoker, photo, or preference context the user chooses to
+send.
+
+13.7 ACCESS, CORRECTION, EXPORT, AND DELETION
+
+Users may access and correct records through the application and download a
+JSON copy from Settings. Authenticated account deletion removes the Firebase
+account, UID-scoped Firestore records and subcollections, account overlays,
+role records, and identifiable Community Smoker Database submissions associated
+with the account. It also clears SmokeStack local data on the device completing
+deletion. External deletion instructions are published at
+/account-deletion.html. A deletion failure remains visible and is not reported
+as success.
+
+13.8 GOOGLE DRIVE BACKUPS
+
+Google Drive is a separate, optional, user-authorized backup destination.
+SmokeStack requests access only for its backup workflow. Disconnecting
+SmokeStack or deleting the SmokeStack account does not delete a backup already
+stored in the user's Google Drive; that file remains under the user's ownership
+and control and can be deleted in Drive.
+
+13.9 COMMUNITY SMOKER DATABASE CONTRIBUTIONS
+
+Each community contribution requires an authenticated account and explicit
+consent for that submission. It enters pending review as USER_ENTERED and does
+not become a manufacturer fact merely because it was submitted. The user keeps
+ownership and grants SmokeStack only the limited permission to review, label,
+publish, and display that submission in the community pool until it is
+withdrawn or the associated account is deleted. Broader federated cook-data
+sharing remains unavailable unless a future granular consent workflow is
+implemented and separately accepted.
+
+13.10 CHARGPT AND COOKING SAFETY
+
+CharGPT is optional informational cooking assistance. Output may be incomplete
+or wrong, remains distinguishable from verified facts, and does not replace
+direct controls, authoritative records, professional advice, or the user's
+judgment. Users must verify food-safety requirements with current authoritative
+sources and use appropriate care around heat, fire, electricity, fuel, sharp
+tools, allergens, smoke, and perishable food.
+
+13.11 ACCEPTABLE USE AND USER CONTENT
+
+Users may not use SmokeStack to violate law, compromise accounts or services,
+upload malicious material, infringe another person's rights, misrepresent
+unsafe or fabricated information as verified, or interfere with the service.
+Users are responsible for content they enter and must have the rights and
+permissions needed to submit it.
+
+13.12 THIRD-PARTY SERVICES AND SOURCES
+
+Firebase, Google Cloud, Google Drive, Google AI, device platforms, manufacturer
+websites, and other external services have their own terms, policies, security,
+and availability. SmokeStack identifies their role truthfully but cannot
+control those services. Manufacturer-stated facts remain governed by Section 5
+and do not constitute a SmokeStack warranty of the product.
+
+13.13 AVAILABILITY, CONTAINMENT, AND TERMINATION
+
+SmokeStack may change, suspend, contain, or discontinue a feature for safety,
+security, maintenance, legal, or technical reasons. It may restrict abusive or
+unauthorized use. Constitutional truth, ownership, export, deletion, migration,
+and recovery protections continue to apply. Discontinuing a feature does not
+transfer, strand, or silently destroy user-owned data.
+
+13.14 WARRANTY AND LIABILITY LIMITS
+
+To the extent permitted by law, SmokeStack is provided without a guarantee of
+uninterrupted or error-free operation and is not liable for indirect,
+incidental, special, consequential, or punitive losses. Nothing in these terms
+excludes a warranty, remedy, consumer right, or liability that applicable law
+does not allow to be excluded. These terms do not impose arbitration, waive
+non-waivable rights, or invent a jurisdiction not identified by the operator.
+
+13.15 CHANGES, NOTICE, AND PRIORITY
+
+Material changes to data use, ownership, permissions, sharing, AI processing,
+or user rights require an updated Constitution, a new acceptance revision, and
+notice before the changed practice begins. If this Section conflicts with
+another SmokeStack statement, the stricter reviewed rule protecting user
+ownership, consent, privacy, truth, data integrity, safety, portability, and
+deletion governs.
+
+13.16 SUPPORT AND LEGAL CONTACT
+
+Current support, operator, and legal contact information is the information
+published in the official SmokeStack app-store listing or official SmokeStack
+support page. SmokeStack must not publish a store release until that contact and
+a public, accessible privacy/terms URL accurately identify the deployed app.

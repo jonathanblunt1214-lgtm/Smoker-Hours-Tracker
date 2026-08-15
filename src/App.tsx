@@ -32,6 +32,8 @@ import { BrowserInstallShareWidget } from './components/BrowserInstallShareWidge
 import { ReleaseUpdateBanner } from './components/ReleaseUpdateBanner';
 import { startAuthoritativePlatformSync } from './lib/platformSync';
 import { startAutomaticReleaseUpdates } from './services/releaseUpdateService';
+import { authorizedApiFetch } from './lib/authorizedApi';
+import { hasAcceptedCurrentTerms } from './lib/terms';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SmokeStackSplashScreen } from './components/SmokeStackSplashScreen';
 import { FireTVToastOverlay } from './components/FireTVToastOverlay';
@@ -273,9 +275,16 @@ export default function App() {
   const [userSession, setUserSession] = useState<UserAuthSession | null>(() => getActiveUserSession(null));
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(() => !getActiveUserSession(null));
   const [isTermsModalOpen, setIsTermsModalOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem('pitmaster_terms_accepted') === null;
+    return !hasAcceptedCurrentTerms();
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('account-deletion') === '1') {
+      setSettingsInitialTab('account');
+      setIsSettingsModalOpen(true);
+    }
+  }, []);
 
   // Auto-sync session when currentUser email changes or on initial launch
   useEffect(() => {
@@ -309,6 +318,44 @@ export default function App() {
     setIsSyncDashboardOpen(false);
     setIsLoginModalOpen(true);
     showToast('🔒 Logged out of account. Please sign in to continue.');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentUser) {
+      showToast('Sign in to delete an account.');
+      return;
+    }
+    const confirmation = window.prompt('This permanently deletes your SmokeStack account and associated cloud data. Type DELETE MY ACCOUNT to continue.');
+    if (confirmation !== 'DELETE MY ACCOUNT') {
+      showToast('Account deletion canceled.');
+      return;
+    }
+    try {
+      const response = await authorizedApiFetch('/api/account', {
+        method: 'DELETE',
+        body: JSON.stringify({ confirmation }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result?.accountDeleted !== true) {
+        throw new Error(result?.error || 'Account deletion could not be verified.');
+      }
+      const clean = resetAllDataToDefault();
+      try { localStorage.clear(); } catch { /* Browser storage may already be unavailable. */ }
+      setProfile(clean.profile);
+      setCookLogs(clean.cookLogs);
+      setFuelLogs(clean.fuelLogs);
+      try { await logout(); } catch { /* The Firebase user has already been deleted. */ }
+      clearActiveUserSession();
+      setCurrentUser(null);
+      setAccessToken(null);
+      setUserSession(null);
+      setIsSettingsModalOpen(false);
+      setIsLoginModalOpen(true);
+      setIsTermsModalOpen(true);
+      showToast('SmokeStack account and associated cloud data deleted. Local app data was cleared on this device.');
+    } catch (error: any) {
+      showToast(error?.message || 'Account deletion failed. No success was recorded.');
+    }
   };
 
   // Synchronize Raspberry Pi Low-Power Mode DOM optimizations
@@ -1184,6 +1231,7 @@ export default function App() {
             setAccessToken(token);
           }}
           onLogout={handleUserLogout}
+          onDeleteAccount={handleDeleteAccount}
           currentAppData={{
             profile,
             cookLogs,
@@ -1266,9 +1314,8 @@ export default function App() {
         isOpen={isTermsModalOpen}
         onClose={() => setIsTermsModalOpen(false)}
         onAccept={() => {
-          localStorage.setItem('pitmaster_terms_accepted', 'true');
           setIsTermsModalOpen(false);
-          showToast('Terms accepted. Optional permissions will be requested only when needed.');
+          showToast('Terms Revision 5 accepted. Optional permissions will be requested only when needed.');
         }}
       />
       </React.Suspense>

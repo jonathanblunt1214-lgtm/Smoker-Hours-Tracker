@@ -16,7 +16,7 @@ export type ProvenanceClass =
   | 'DEMO'
   | 'UNKNOWN';
 
-export const CONSTITUTION_REVISION = 4;
+export const CONSTITUTION_REVISION = 5;
 
 export const CONSTITUTION_RULES = Object.freeze({
   unknownMeansUnknown: true,
@@ -30,6 +30,7 @@ export const CONSTITUTION_RULES = Object.freeze({
   futureFeaturesInheritConstitution: true,
   migrationsPreserveUserData: true,
   amendmentsCannotSilentlyWeakenProtections: true,
+  userDataAlwaysBelongsToUser: true,
 });
 
 export function accountSyncLabel(args: {

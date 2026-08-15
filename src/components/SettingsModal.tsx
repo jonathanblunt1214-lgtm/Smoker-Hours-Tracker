@@ -4,6 +4,7 @@ import {
   Bell,
   ArrowLeft,
   Cloud,
+  Download,
   Info,
   LogOut,
   Monitor,
@@ -29,6 +30,7 @@ import {
   INITIAL_FEDERATED_LEARNING_CONFIG,
   loadFederatedLearningConfig,
   saveFederatedLearningConfig,
+  exportFullAppDataJson,
 } from '../utils/storage';
 
 interface SettingsModalProps {
@@ -58,6 +60,7 @@ interface SettingsModalProps {
   accessToken?: string | null;
   onAuthSuccess?: (user: User, token: string) => void;
   onLogout?: () => void;
+  onDeleteAccount?: () => Promise<void>;
   currentAppData?: {
     profile: SmokerProfile;
     cookLogs: CookLog[];
@@ -154,6 +157,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOnline = true,
   currentUser,
   onLogout,
+  onDeleteAccount,
   currentAppData,
   onOpenCustomSmokerModal,
   profile,
@@ -214,7 +218,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {tab === 'account' && <Card title="Account">
               <Row title="Signed-in account" description="Identity comes from Firebase Authentication." control={<div className="max-w-[220px] truncate text-sm text-zinc-300">{currentUser?.email || 'Not signed in'}</div>} />
               <Row title="Account status" description="Administrator privileges are not configured from Settings." control={<span className="rounded-lg bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300">{currentUser ? 'Authenticated' : 'Signed out'}</span>} />
+              <Row title="Export your data" description="Download the SmokeStack data stored on this device as JSON. Your data always belongs to you." control={<button type="button" onClick={exportFullAppDataJson} className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-900"><Download className="h-3.5 w-3.5" />Download JSON</button>} />
               {onLogout && currentUser && <Row title="Sign out" description="Ends this Firebase session and clears local account presentation state." control={<button onClick={onLogout} className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-900"><LogOut className="h-3.5 w-3.5" />Sign out</button>} />}
+              {onDeleteAccount && currentUser && <Row title="Delete account and cloud data" description="Permanently deletes the authenticated Firebase account, UID-scoped Firestore records, account overlays, and identifiable community submissions. Drive backups remain under your control in Google Drive." control={<button type="button" onClick={() => void onDeleteAccount()} className="flex items-center gap-2 rounded-lg border border-red-900/70 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-950/30"><Trash2 className="h-3.5 w-3.5" />Delete account</button>} />}
             </Card>}
 
             {tab === 'appearance' && <Card title="Appearance">

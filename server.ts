@@ -10,6 +10,7 @@ import { adminRolesRouter } from './server/adminRoles';
 import { verifiedKnowledgeRouter, getPublishedKnowledgeForPrompt } from './server/verifiedKnowledge';
 import { meatKnowledgeRouter } from './server/meatKnowledgeRoutes';
 import { communitySmokersRouter } from './server/communitySmokers';
+import { accountLifecycleRouter } from './server/accountLifecycle';
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ app.use('/api/admin', adminRolesRouter);
 app.use('/api/knowledge', verifiedKnowledgeRouter);
 app.use('/api/knowledge', meatKnowledgeRouter);
 app.use('/api/community-smokers', communitySmokersRouter);
+app.use('/api/account', accountLifecycleRouter);
 
 // Phase-0 trust firewall. These legacy routes used simulated/global state,
 // client-supplied account identity, or unverified seeded knowledge. The trusted
