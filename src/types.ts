@@ -402,7 +402,11 @@ export interface CharGPTRule {
   detail: string;
   source: 'user_taught' | 'auto_analyzed' | 'cook_log_insight';
   createdAt: string;
+  updatedAt?: string;
   confidenceScore?: number;
+  sampleSize?: number;
+  supportingCookIds?: string[];
+  approvalStatus?: 'proposed' | 'approved' | 'rejected';
 }
 
 export interface CharGPTMemory {
@@ -528,4 +532,3 @@ export interface CutScanResult {
   isUnknownOrRareCut: boolean;
   explanation: string;
 }
-

@@ -60,7 +60,6 @@ import { getUsdaSafetyForMeatCut, determineProteinType, determineProteinSubcateg
 import {
   loadCharGPTMemory,
   saveCharGPTMemory,
-  autoEvolveCharGPTMemory,
   addDeletedVaultRuleId,
   loadCharGPTChatHistory,
   saveCharGPTChatHistory,
@@ -73,13 +72,11 @@ import {
   addCustomFuelPreset,
 } from '../utils/storage';
 import { INITIAL_PITMASTER_COURSES, PitmasterCourse } from '../data/pitmasterCoursesDatabase';
-import { calculateUserAccount } from '../utils/userLeveling';
-
-import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { calculateMassCookSchedule, MassCookInput, MassCookResult } from '../utils/massCalculator';
 import { PushAndAlexaHub } from './PushAndAlexaHub';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME, AI_ADVISOR_NAME } from '../constants/appName';
 import { validateBBQTopicConstraint, getCharGPTDeveloperOverride, isMasterAdmin } from '../utils/adminAuth';
+import { auth } from '../lib/firebase';
 
 interface AIPitmasterModalProps {
   cookLogs: CookLog[];
@@ -319,6 +316,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   );
   const [isScopeMenuOpen, setIsScopeMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [pendingMemoryCandidate, setPendingMemoryCandidate] = useState<{ title: string; detail: string; category: CharGPTRule['category'] } | null>(null);
+  const [lastContextSummary, setLastContextSummary] = useState<string>('General guidance only until a verified account context is loaded.');
 
   // Persistent CharGPT Chat History per User
   const [messages, setMessages] = useState<StoredChatMessage[]>(() => {
@@ -332,7 +331,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       {
         id: 'msg-welcome',
         role: 'assistant',
-        text: `Hello Pitmaster${nameGreeting}! I am ${AI_PITMASTER_NAME}, your self-learning, evolving BBQ Chatbot & Smoker Scientist 🧠🔥${askNameText}\n\nI store our conversation dialogue history, remember your custom preferences, and feature a Mass & Weight Physics Calculator so you can manage cooks by exact meat weight! Ask me anything, or run a data analysis audit on your smoke logs.`,
+        text: `Hello Pitmaster${nameGreeting}! I am ${AI_PITMASTER_NAME}, SmokeStack's learning BBQ cooking assistant. 🧠🔥${askNameText}\n\nI can help plan, troubleshoot, compare, and explain cooks. Account history is used only when your signed-in SmokeStack data is verified, and new memories are saved only after you confirm them.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       },
     ];
@@ -485,12 +484,12 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   const [teachCategory, setTeachCategory] = useState<CharGPTRule['category']>('preference');
   const [teachSuccessNotice, setTeachSuccessNotice] = useState<string | null>(null);
 
-  // Auto-evolve memory when component mounts or cookLogs change
+  // Cook history may inform a response, but it must never become durable memory
+  // automatically. Memory changes require an explicit user confirmation.
   useEffect(() => {
-    const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
-    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
-    setCharGPTMemory(updated);
-    if (onMemoryUpdate) onMemoryUpdate(updated);
+    setLastContextSummary(cookLogs.length > 0
+      ? `${cookLogs.length} local cook record(s) available; the server independently verifies account scope before using them.`
+      : 'No local cook records available.');
   }, [cookLogs.length]);
 
   // Handle initial prompt if passed from external button
@@ -511,10 +510,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
   // Manual Trigger to re-analyze logs
   const handleManualEvolve = () => {
     const published = cookLogs.filter((c) => c.isPublishedToTotalHours === true);
-    const updated = autoEvolveCharGPTMemory(published, charGPTMemory);
-    setCharGPTMemory(updated);
-    if (onMemoryUpdate) onMemoryUpdate(updated);
-    setTeachSuccessNotice(`🧠 ${AI_NAME} analyzed ${published.length} published cook logs! Updated learned preferences.`);
+    setTeachSuccessNotice(`Reviewed ${published.length} published cook log(s). No memory was changed; approve individual memories before saving.`);
     setTimeout(() => setTeachSuccessNotice(null), 4000);
   };
 
@@ -942,13 +938,17 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       detail: d.trim(),
       source: 'user_taught',
       createdAt: new Date().toISOString(),
-      confidenceScore: 99,
+      updatedAt: new Date().toISOString(),
+      confidenceScore: 100,
+      sampleSize: 1,
+      approvalStatus: 'approved',
     };
 
     const updated: CharGPTMemory = {
       ...charGPTMemory,
       totalInteractions: charGPTMemory.totalInteractions + 1,
-      learnedRules: [newRule, ...charGPTMemory.learnedRules],
+      userName: t.trim() === 'Pitmaster Name' ? d.replace(/^User's name is\s+/i, '').trim() : charGPTMemory.userName,
+      learnedRules: [newRule, ...charGPTMemory.learnedRules.filter((rule) => t.trim() !== 'Pitmaster Name' || rule.title !== 'Pitmaster Name')],
       lastEvolvedAt: new Date().toISOString(),
     };
 
@@ -961,7 +961,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
       setTeachDetail('');
     }
 
-    setTeachSuccessNotice(`🧠 Saved to ${AI_NAME} Memory Vault!`);
+    setPendingMemoryCandidate(null);
+    setTeachSuccessNotice(`Saved to ${AI_NAME} Memory Vault on this device. Account synchronization is reported separately.`);
     setTimeout(() => setTeachSuccessNotice(null), 4000);
   };
 
@@ -990,34 +991,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
   // Offline Assistant Response Generator
   const generateOfflineResponse = (query: string): string => {
-    const q = query.toLowerCase();
-    let resp = `⚡ **[Offline Mode Active]** ${AI_PITMASTER_NAME} local pitmaster engine response:\n\n`;
-
-    const matchingRules = charGPTMemory.learnedRules.filter(
-      (r) => r.title.toLowerCase().includes(q) || r.detail.toLowerCase().includes(q) || q.includes(r.category.toLowerCase())
-    );
-
-    if (matchingRules.length > 0) {
-      resp += `🧠 **Learned Preferences Applied:**\n` + matchingRules.map((r) => `• **${r.title}**: ${r.detail}`).join('\n') + `\n\n`;
-    }
-
-    if (q.includes('stall') || q.includes('wrap')) {
-      resp += `🔥 **Pitmaster Stall Guidance**: At ~150-165°F internal, evaporative cooling causes the stall. Wrap in Peach Butcher Paper with tallow or a foil boat to push through while preserving bark.`;
-    } else if (q.includes('temp') || q.includes('target') || q.includes('done') || q.includes('pull')) {
-      resp += `🌡️ **Thermal Target Rule**: Brisket & Pork Shoulder target 203°F internal (probe tender like warm butter). Tri-Tip / Picanha targets 132-135°F (medium-rare). Ribs target ~200°F (bend test).`;
-    } else if (q.includes('wood') || q.includes('smoke')) {
-      resp += `🪵 **Wood Pairing Strategy**: Post Oak & Hickory for Beef Cuts; Pecan & Apple wood for Pork; Cherry wood for rich color on Poultry.`;
-    } else if (q.includes('rub') || q.includes('season')) {
-      resp += `🧂 **Rub Strategy**: 1:1 coarse kosher salt to 16-mesh black pepper base. Apply ~1 oz per 5 lbs of meat mass.`;
-    } else if (q.includes('audit') || q.includes('analysis')) {
-      resp += `📊 **Offline Cook Log Audit**: Evaluated ${cookLogs.length} saved cook logs. Average cook rating: ${
-        cookLogs.length ? (cookLogs.reduce((acc, c) => acc + (c.ratings?.overall || 5), 0) / cookLogs.length).toFixed(1) : '5.0'
-      }/5.0. Target smoking temp consistently maintained around 225°F.`;
-    } else {
-      resp += `I am operating using your local smoker profile (${profile.name || 'Smoker'}), ${cookLogs.length} saved cook logs, and learned preferences. All calculations and chat logs are saved in browser local storage. When connected back online, live Gemini search grounding will re-enable automatically!`;
-    }
-
-    return resp;
+    void query;
+    return `⚠️ **CharGPT unavailable offline**\n\nNo AI cooking advice, account analysis, monitoring, or memory update was generated. Reconnect and retry. Your typed message remains in this device's chat history.`;
   };
 
   const handleAsk = async (userQuery?: string, attachedImageBase64?: string | null) => {
@@ -1091,129 +1066,69 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
         imagePayload = { data, mimeType };
       }
 
-      const isAll = selectedCookId === 'ALL_LOGS' || cookLogs.length === 1;
-      const lastReading = activeCook?.temperatureReadings?.[activeCook.temperatureReadings.length - 1];
-
-      const userAcct = calculateUserAccount(cookLogs, [], profile, charGPTMemory);
-      const effectiveSpecs = getEffectiveSmokerSpecs(profile);
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : null;
 
       const res = await fetch('/api/chargpt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({
           prompt: effectiveQuery,
           image: imagePayload,
-          userEmail: activeEmail,
           isDevOverride: devOverride.allowed,
-          charGPTMemory,
-          smokerProfile: profile,
-          effectiveSpecs,
-          userAccount: userAcct,
+          selectedCookId: selectedCookId || 'ALL_LOGS',
           conversationHistory: newMessages.map((m) => ({ role: m.role, text: m.text })),
           massCookInput,
-          allCookLogs: isAll ? cookLogs : null,
-          cookContext: !isAll && activeCook
-            ? {
-                title: activeCook.title,
-                smokerType: activeCook.smokerType,
-                proteinType: activeCook.proteinType,
-                proteinCut: activeCook.proteinCut,
-                currentPitTemp: lastReading?.cookingTemp || 225,
-                currentMeatTemp: lastReading?.meatTemp || 160,
-                targetTemp: 203,
-                hoursLogged: activeCook.hoursLogged,
-                rub: activeCook.seasoningRubs,
-                overallRating: activeCook.ratings?.overall || 5,
-                notes: activeCook.finishedNotes,
-                nextTimeNotes: activeCook.nextTimeNotes,
-              }
-            : null,
         }),
       });
 
       const data = await res.json();
-      const rawAssistantText = data.text || (data.error ? `⚠️ ${AI_NAME} Note: ${data.error}` : `Sorry, ${AI_NAME} encountered a thermal connection issue.`);
+      if (!res.ok || !data.text) {
+        throw new Error(data.error || `${AI_NAME} is unavailable. No answer was generated.`);
+      }
+      const rawAssistantText = String(data.text).trim();
+      const contextSummary = data.context?.authenticated
+        ? `Verified account context • ${data.context.cookRecordCount || 0} cook record(s) • ${data.context.memoryRuleCount || 0} approved memory rule(s)`
+        : 'General guidance only • no account data used';
+      setLastContextSummary(contextSummary);
 
-      // Extract user name if provided in user prompt or returned via AI tag
+      // Detect only an explicit name statement and ask for confirmation. A chat
+      // turn is not permission to write durable memory.
       let extractedName: string | null = null;
       const promptNameMatch = effectiveQuery.match(/(?:my name is|i'm|i am|call me|you can call me|name is|name's)\s+([a-zA-Z0-9_ -]{1,25})/i);
       if (promptNameMatch && promptNameMatch[1]) {
         extractedName = promptNameMatch[1].trim().replace(/[.,!?;:]/g, '');
-      } else if (!charGPTMemory.userName && /^[A-Z][a-zA-Z0-9'-]{1,20}(?:\s+[A-Z][a-zA-Z0-9'-]{1,20}){0,2}$/.test(effectiveQuery.trim())) {
-        extractedName = effectiveQuery.trim();
       }
-
-      const tagMatch = rawAssistantText.match(/\[LEARNED_USER_NAME:\s*([^\]]+)\]/i);
-      if (tagMatch) {
-        extractedName = tagMatch[1].trim();
+      if (extractedName) {
+        setPendingMemoryCandidate({ title: 'Pitmaster Name', detail: `User's name is ${extractedName}`, category: 'general' });
       }
-
-      // Clean out tag from assistant text before rendering
-      const cleanedAssistantText = rawAssistantText.replace(/\[LEARNED_USER_NAME:\s*[^\]]+\]/gi, '').trim();
 
       setMessages([
         ...newMessages,
         {
           id: `msg-assistant-${Date.now()}`,
           role: 'assistant',
-          text: cleanedAssistantText,
+          text: rawAssistantText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          availability: data.availability || 'available',
+          groundingStatus: data.groundingStatus,
+          contextSummary,
         },
       ]);
-
-      // Increase interaction count & update userName if learned
-      setCharGPTMemory((prevMemory) => {
-        let updatedMemory: CharGPTMemory = {
-          ...prevMemory,
-          totalInteractions: (prevMemory.totalInteractions || 0) + 1,
-          lastEvolvedAt: new Date().toISOString(),
-        };
-
-        if (extractedName) {
-          const nameRule: CharGPTRule = {
-            id: `rule-name-${Date.now()}`,
-            category: 'general',
-            title: 'Pitmaster Name',
-            detail: `User's name is ${extractedName}`,
-            source: 'user_taught',
-            createdAt: new Date().toISOString(),
-          };
-          const updatedRules = [
-            nameRule,
-            ...updatedMemory.learnedRules.filter((r) => r.title !== 'Pitmaster Name'),
-          ];
-          updatedMemory = {
-            ...updatedMemory,
-            userName: extractedName,
-            learnedRules: updatedRules,
-          };
-        }
-
-        saveCharGPTMemory(updatedMemory);
-        if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
-        return updatedMemory;
-      });
     } catch (e: any) {
-      const offlineText = generateOfflineResponse(effectiveQuery);
+      const unavailableText = `⚠️ **${AI_NAME} unavailable**\n\n${e?.message || 'No AI answer was generated.'}\n\nNo cooking advice, account action, or memory update was generated. Your message remains in this device's chat history so you can retry.`;
       setMessages([
         ...newMessages,
         {
           id: `msg-assistant-${Date.now()}`,
           role: 'assistant',
-          text: offlineText,
+          text: unavailableText,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          availability: 'unavailable',
         },
       ]);
-      setCharGPTMemory((prevMemory) => {
-        const updatedMemory: CharGPTMemory = {
-          ...prevMemory,
-          totalInteractions: (prevMemory.totalInteractions || 0) + 1,
-          lastEvolvedAt: new Date().toISOString(),
-        };
-        saveCharGPTMemory(updatedMemory);
-        if (onMemoryUpdate) onMemoryUpdate(updatedMemory);
-        return updatedMemory;
-      });
     } finally {
       setLoading(false);
     }
@@ -1763,6 +1678,28 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
             </div>
           </div>
 
+          <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200 flex items-start gap-2">
+            <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold block">Capability status</span>
+              <span>{isOnline ? 'AI guidance available when the server verifies the request.' : 'AI guidance unavailable offline.'} {lastContextSummary}</span>
+              <span className="block text-emerald-300/80 mt-0.5">Chat is read-only: it cannot save records, control equipment, or continuously monitor a cook.</span>
+            </div>
+          </div>
+
+          {pendingMemoryCandidate && (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="font-bold block">Remember this?</span>
+                <span>{pendingMemoryCandidate.detail}</span>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button type="button" onClick={() => handleAddCustomRule(pendingMemoryCandidate.title, pendingMemoryCandidate.detail, pendingMemoryCandidate.category)} className="px-3 py-1.5 rounded-lg bg-amber-400 text-zinc-950 font-bold">Confirm & save</button>
+                <button type="button" onClick={() => setPendingMemoryCandidate(null)} className="px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 font-bold">Not now</button>
+              </div>
+            </div>
+          )}
+
           {/* Quick Prompts - 5 Suggestions Horizontal Swipe Carousel */}
           <div className="relative w-full min-w-0 bg-[#121212] border border-[#2a2a2a] rounded-xl p-2 shadow-inner">
             <div className="flex items-center space-x-2 overflow-x-auto web-carousel-scrollbar touch-pan-x py-1 px-1 min-w-0">
@@ -1820,8 +1757,9 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
 
                   {m.role === 'assistant' && (
                     <div className="flex items-center justify-between text-[10px] text-zinc-500 px-1 pt-0.5">
-                      <span>{AI_NAME} • {m.timestamp}</span>
-                      <button
+                      <span>{AI_NAME} • {m.timestamp}{m.contextSummary ? ` • ${m.contextSummary}` : ''}</span>
+                      {m.availability !== 'unavailable' && m.availability !== 'error' && m.availability !== 'grounding_rejected' && (
+                        <button
                         type="button"
                         onClick={() =>
                           handleAddCustomRule(
@@ -1835,7 +1773,8 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                       >
                         <BookmarkPlus className="w-3 h-3" />
                         <span>Save to Memory</span>
-                      </button>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3332,7 +3271,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                             ...charGPTMemory,
                             userName: trimmed || undefined,
                             learnedRules: trimmed
-                              ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString() }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
+                              ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), approvalStatus: 'approved', confidenceScore: 100, sampleSize: 1 }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
                               : charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')
                           };
                           setCharGPTMemory(updated);
@@ -3352,7 +3291,7 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                           ...charGPTMemory,
                           userName: trimmed || undefined,
                           learnedRules: trimmed
-                            ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString() }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
+                            ? [{ id: `rule-name-${Date.now()}`, category: 'general', title: 'Pitmaster Name', detail: `User's name is ${trimmed}`, source: 'user_taught', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), approvalStatus: 'approved', confidenceScore: 100, sampleSize: 1 }, ...charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')]
                             : charGPTMemory.learnedRules.filter(r => r.title !== 'Pitmaster Name')
                         };
                         setCharGPTMemory(updated);
@@ -3398,28 +3337,24 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                 <div className="flex items-center space-x-2">
                   <Brain className="w-4 h-4 text-purple-400 shrink-0" />
                   <span className="text-xs font-black text-white uppercase tracking-wider">
-                    CharGPT Automatic Machine Learning Engine
+                    CharGPT Learning Review
                   </span>
                   <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded font-bold">
-                    ⚡ Auto-Training Active (Live Cloud Server Sync)
+                    LIMITED • Confirmation Required
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-300">
-                  CharGPT automatically analyzes your cook logs, flavor ratings, and wood blends in real-time. Learned insights, rules, and memory optimizations sync directly to the cloud server for live AI model evolution across all sessions.
+                  Cook history can suggest patterns, but it does not automatically become memory or cross-user training data. Review and confirm each durable preference.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => {
-                  const updated = autoEvolveCharGPTMemory(cookLogs, charGPTMemory);
-                  setCharGPTMemory(updated);
-                  alert(`🎉 Live Cloud ML Re-Training Complete! Analyzed ${cookLogs.length} cook logs and updated ${updated.learnedRules.length} culinary preference rules.`);
-                }}
+                onClick={handleManualEvolve}
                 className="px-3.5 py-2 bg-gradient-to-r from-purple-500 to-amber-500 hover:opacity-95 text-zinc-950 font-black text-xs rounded-xl shadow transition-all cursor-pointer flex items-center space-x-1.5 shrink-0 self-start sm:self-auto"
               >
                 <Sparkles className="w-3.5 h-3.5 fill-zinc-950" />
-                <span>Force Re-Train ML Engine</span>
+                <span>Review Cook Patterns</span>
               </button>
             </div>
 
@@ -3607,13 +3542,14 @@ export const AIPitmasterModal: React.FC<AIPitmasterModalProps> = ({
                     acc.charGPTMemory = charGPTMemory;
                     localStorage.setItem('pitmaster_local_user_account', JSON.stringify(acc));
                   } catch (e) {}
-                  setTeachSuccessNotice(`✨ Memory Vault (${charGPTMemory.learnedRules.length} rules) continuously synced to Pitmaster Account & AI server!`);
+                  if (onMemoryUpdate) onMemoryUpdate(charGPTMemory);
+                  setTeachSuccessNotice(`Memory Vault saved on this device. Account synchronization is not claimed until the app-wide sync status confirms it.`);
                   setTimeout(() => setTeachSuccessNotice(null), 4000);
                 }}
                 className="px-3 py-2 bg-gradient-to-r from-purple-600 to-orange-500 hover:from-purple-500 hover:to-orange-400 text-white font-extrabold text-xs rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow-md"
               >
                 <Brain className="w-4 h-4 text-purple-200" />
-                <span>Sync Memory Vault to AI Server</span>
+                <span>Save Memory Vault Locally</span>
               </button>
             </div>
           </div>
