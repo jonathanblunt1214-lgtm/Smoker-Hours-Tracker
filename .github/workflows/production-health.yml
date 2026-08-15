@@ -14,23 +14,27 @@ concurrency:
   group: production-health
   cancel-in-progress: false
 
+env:
+  GCP_PROJECT_ID: smoker-log-app
+  GCP_REGION: us-central1
+  CLOUD_RUN_SERVICE: smoke-stack
+  DEPLOYER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
+  INCIDENT_TITLE: SmokeStack production health check failed
+
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      GCP_PROJECT_ID: smoker-log-app
-      GCP_REGION: us-central1
-      CLOUD_RUN_SERVICE: smoker-hours-tracker
-      INCIDENT_TITLE: SmokeStack production health check failed
+    environment: production
     steps:
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - name: Authenticate to Google Cloud without a stored key
+        uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
 
       - name: Resolve production URL
         id: service
@@ -58,7 +62,6 @@ jobs:
         if: steps.health.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SERVICE_URL: ${{ steps.service.outputs.url }}
         shell: bash
