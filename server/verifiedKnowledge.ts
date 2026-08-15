@@ -9,7 +9,7 @@ import { readAccountOverlay, writeAccountOverlay } from './accountKnowledgeOverl
 export { getPublishedKnowledgeForPrompt } from './verifiedKnowledgeRetrieval';
 export const verifiedKnowledgeRouter = Router();
 
-const TYPES = new Set(['smoker', 'fuel', 'meat', 'mod']);
+const TYPES = new Set(['smoker', 'fuel', 'meat', 'temperature', 'mod', 'recipe', 'retailer_price']);
 const SOURCE_TYPES = new Set(['manufacturer', 'government', 'standards_body', 'verified_publisher']);
 const STATUSES = new Set(['pending_review', 'published', 'rejected']);
 const HARVEST_MODES = new Set(['url', 'smoker', 'fuel', 'mod']);
