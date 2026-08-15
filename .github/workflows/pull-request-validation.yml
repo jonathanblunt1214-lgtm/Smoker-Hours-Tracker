@@ -1,0 +1,50 @@
+name: SmokeStack PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Install, lint, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint and type-check
+        run: npm run lint
+
+      - name: Run CharGPT contract tests when present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm pkg get scripts.test:chargpt-contract | grep -qv '^{}$'; then
+            npm run test:chargpt-contract
+          elif test -f scripts/test-chargpt-contract.mts; then
+            echo "CharGPT contract test file exists without the required package script" >&2
+            exit 1
+          else
+            echo "No CharGPT contract tests are present."
+          fi
+
+      - name: Build production release
+        run: npm run build
