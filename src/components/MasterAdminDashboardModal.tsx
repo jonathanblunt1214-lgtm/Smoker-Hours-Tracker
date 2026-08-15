@@ -120,8 +120,12 @@ const humanStatus = (status?: string | null) => {
 };
 
 const statusTone = (status?: string | null) => {
-  const good = ['healthy', 'operational', 'configured', 'ready', 'metadata_available'];
-  const warning = ['attention_required', 'needs_setup', 'not_configured', 'missing', 'approval_required', 'client_managed', 'metadata_unavailable'];
+  const good = [
+    'healthy', 'operational', 'configured', 'ready', 'metadata_available',
+    'published', 'published_only', 'ready_for_ingestion', 'contract_enforced',
+    'approval_required', 'client_managed',
+  ];
+  const warning = ['attention_required', 'needs_setup', 'not_configured', 'missing', 'metadata_unavailable'];
   if (status && good.includes(status)) return 'border-emerald-800/60 bg-emerald-500/5 text-emerald-300';
   if (status && warning.includes(status)) return 'border-amber-800/60 bg-amber-500/5 text-amber-300';
   if (status === 'degraded') return 'border-red-800/60 bg-red-500/5 text-red-300';
@@ -342,15 +346,15 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <StatusCard label="AI provider" status={health?.chargpt?.credentials} detail={health?.chargpt?.provider || 'No provider reported'} />
           <StatusCard label="Model selection" status={health?.chargpt?.model ? 'configured' : 'not_configured'} detail={health?.chargpt?.model || 'Runtime model is not explicitly identified.'} />
-          <StatusCard label="Knowledge retrieval" status={health?.chargpt?.retrieval} detail="Verified retrieval must be implemented before CharGPT can ground answers in published SmokeStack knowledge." />
-          <StatusCard label="Evaluation suite" status={health?.chargpt?.evaluation} detail="Production AI quality checks have not been reported by the server." />
-          <StatusCard label="Feedback review" status={health?.chargpt?.feedbackReview} detail="User feedback needs an auditable review path before changing behavior." />
-          <StatusCard label="Durable learning" status={health?.chargpt?.durableLearning} detail="Permanent learning remains approval-gated by design." />
+          <StatusCard label="Knowledge retrieval" status={health?.chargpt?.retrieval} detail="Only OWNER-approved, published records are eligible for CharGPT retrieval." />
+          <StatusCard label="Evaluation suite" status={health?.chargpt?.evaluation} detail="Constitutional contract tests and server-side response validation guard every release." />
+          <StatusCard label="Feedback review" status={health?.chargpt?.feedbackReview} detail="No automatic behavior change occurs until an auditable feedback-review workflow is implemented." />
+          <StatusCard label="Durable learning" status={health?.chargpt?.durableLearning} detail="OWNER approval is required by design; this is a protection, not a failure." />
         </div>
       </Panel>
       <Panel title="Current CharGPT priority" subtitle="What must be built before CharGPT is a true cooking assistant platform." icon={<Activity className="h-4 w-4" />}>
         <div className="grid gap-3 md:grid-cols-2">
-          {['Verified source retrieval for smoker, fuel, meat, mod, and cooking-safety knowledge.','Live cook context: smoker, probes, targets, elapsed time, fuel, weather, and user actions.','Evaluation harness for food safety, hallucination resistance, timing guidance, and equipment-specific advice.','Explicit user-approved memory and learning workflows; no silent durable learning.'].map((item, index) => <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4"><div className="text-xs font-semibold text-orange-400">PRIORITY {index + 1}</div><p className="mt-2 text-sm leading-6 text-zinc-300">{item}</p></div>)}
+          {['Register official harvester sources and review pending candidates before publication.','Expand live cook context with probes, targets, elapsed time, fuel, weather, and user actions.','Add an auditable feedback-review queue without automatic behavior changes.','Keep durable memory and learning explicitly OWNER-approved; never learn silently.'].map((item, index) => <div key={item} className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4"><div className="text-xs font-semibold text-orange-400">PRIORITY {index + 1}</div><p className="mt-2 text-sm leading-6 text-zinc-300">{item}</p></div>)}
         </div>
       </Panel>
     </div>;
@@ -396,10 +400,10 @@ export const MasterAdminDashboardModal: React.FC<MasterAdminDashboardModalProps>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="App version" value={health?.release?.appVersion || 'Not reported'} /><Metric label="Commit" value={health?.release?.commit ? health.release.commit.slice(0, 10) : 'Not reported'} /><Metric label="Revision" value={health?.release?.revision || 'Not reported'} /><Metric label="Metadata" value={humanStatus(health?.release?.status)} /></div>
     </Panel>;
 
-    if (activeTab === 'data') return <div className="space-y-5"><Panel title="Data operations" subtitle="Destructive global data tools remain intentionally unavailable until scoped safeguards and audit workflows exist." icon={<Settings2 className="h-4 w-4" />}><div className="rounded-xl border border-amber-900/50 bg-amber-500/5 p-4 text-sm text-zinc-300"><AlertTriangle className="mr-2 inline h-4 w-4 text-amber-400" />No unrestricted production data mutation controls are exposed here.</div>{onRefreshData && <button onClick={onRefreshData} className="mt-4 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300">Refresh current account view</button>}</Panel></div>;
+    if (activeTab === 'data') return <div className="space-y-5"><Panel title="Data operations" subtitle="Production data changes remain account-scoped, authenticated, and auditable." icon={<Settings2 className="h-4 w-4" />}><div className="rounded-xl border border-emerald-800/60 bg-emerald-500/5 p-4 text-sm text-emerald-200"><ShieldCheck className="mr-2 inline h-4 w-4" />Protected: unrestricted global production-data mutation is disabled by design.</div>{onRefreshData && <button onClick={onRefreshData} className="mt-4 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300">Refresh current account view</button>}</Panel></div>;
 
     if (activeTab === 'audit') return <Panel title="Administrator audit log" subtitle="Consequential role changes and privileged actions are recorded server-side." icon={<History className="h-4 w-4" />}>
-      {auditEvents.length === 0 ? <p className="text-sm text-zinc-500">No audit events returned.</p> : <div className="divide-y divide-zinc-800">{auditEvents.map((event) => <div key={event.id} className="py-3"><div className="flex flex-col justify-between gap-1 sm:flex-row"><span className="text-sm font-medium text-zinc-200">{humanStatus(event.action)}</span><span className="text-xs text-zinc-600">{formatDate(event.createdAt)}</span></div><div className="mt-1 text-xs text-zinc-500">Actor {event.actorRole || 'unknown'} · Target {event.targetUid || 'system'}</div></div>)}</div>}
+      {auditEvents.length === 0 ? <p className="text-sm text-zinc-500">No privileged changes have been recorded yet. This is normal until an OWNER changes access or performs another audited action.</p> : <div className="divide-y divide-zinc-800">{auditEvents.map((event) => <div key={event.id} className="py-3"><div className="flex flex-col justify-between gap-1 sm:flex-row"><span className="text-sm font-medium text-zinc-200">{humanStatus(event.action)}</span><span className="text-xs text-zinc-600">{formatDate(event.createdAt)}</span></div><div className="mt-1 text-xs text-zinc-500">Actor {event.actorRole || 'unknown'} · Target {event.targetUid || 'system'}</div></div>)}</div>}
     </Panel>;
 
     return null;
