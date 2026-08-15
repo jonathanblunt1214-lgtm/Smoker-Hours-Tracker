@@ -1,0 +1,40 @@
+name: Auto-merge Dependabot patch updates
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-patch-auto-merge:
+    name: Classify Dependabot update
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Read trusted Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Enable protected squash auto-merge for patch updates
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "${PR_URL}"
+
+      - name: Hold minor and major updates for owner review
+        if: steps.metadata.outputs.update-type != 'version-update:semver-patch'
+        run: |
+          echo "Dependency update type: ${{ steps.metadata.outputs.update-type }}"
+          echo "Minor and major dependency changes remain open for owner approval."
