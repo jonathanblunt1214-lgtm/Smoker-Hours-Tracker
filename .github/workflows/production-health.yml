@@ -78,7 +78,7 @@ This issue is maintained automatically and will close after recovery."
           if [ -n "${issue_number}" ]; then
             gh issue comment "${issue_number}" --body "${body}"
           else
-            gh issue create --title "${INCIDENT_TITLE}" --body "${body}" --label bug
+            gh issue create --title "${INCIDENT_TITLE}" --body "${body}"
           fi
 
       - name: Close recovered incident
