@@ -6,6 +6,7 @@ import multer from 'multer';
 import * as pdfParseModule from 'pdf-parse';
 import { getEffectiveSmokerSpecs } from './src/utils/smokerCalculations';
 import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';
+import { getGeminiApiKey, getGeminiModel } from './server/geminiConfig';
 
 dotenv.config();
 
@@ -1148,8 +1149,8 @@ app.post('/smoker/sync', handleSmokerSyncEngine);
 
 // Lazy init for Gemini AI client
 function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
     return null;
   }
   return new GoogleGenAI({ apiKey });
@@ -1464,7 +1465,7 @@ User Question: ${userMessage}`;
     if (ai) {
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: getGeminiModel(),
           contents: contentsParam,
           config: {
             systemInstruction,
@@ -1475,7 +1476,7 @@ User Question: ${userMessage}`;
         console.warn('Google search tool or primary AI request failed, trying standard call:', searchError?.message || searchError);
         try {
           response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+            model: getGeminiModel(),
             contents: contentsParam,
             config: {
               systemInstruction,
@@ -1607,7 +1608,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: {
           parts: [imagePart, { text: promptText }],
         },
@@ -1618,7 +1619,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e: any) {
       console.warn('Primary JSON generation failed for meat photo, retrying standard call:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: {
           parts: [imagePart, { text: promptText }],
         },
@@ -1823,7 +1824,7 @@ Output ONLY a valid JSON array containing EXACTLY ${expectedLogCount} objects. N
           parts.push({ text: promptText });
 
           const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: getGeminiModel(),
             contents: { parts },
             config: {
               responseMimeType: 'application/json',
@@ -2387,7 +2388,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: { parts },
         config: {
           tools: [{ googleSearch: {} }],
@@ -2396,7 +2397,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e) {
       console.warn('Identify unknown cut with search grounding failed, falling back:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: { parts },
       });
     }
@@ -2480,7 +2481,7 @@ Output MUST be strictly valid JSON matching this schema:
     let response: any;
     try {
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: textPrompt,
         config: {
           tools: [{ googleSearch: {} }],
@@ -2489,7 +2490,7 @@ Output MUST be strictly valid JSON matching this schema:
     } catch (e) {
       console.warn('Online verification search grounding failed, retrying standard:', e);
       response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: getGeminiModel(),
         contents: textPrompt,
       });
     }
@@ -2724,7 +2725,7 @@ IMPORTANT: Return ONLY the JSON object. Do not include markdown or extra text un
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: getGeminiModel(),
           contents: `Generate an optimized wood/pellet blend for ${targetProtein || 'general smoking'} focusing on ${optimizationGoal || 'balanced performance'}. User prompt: ${userPrompt || 'Optimize blend'}`,
           config: {
             systemInstruction,
@@ -2824,7 +2825,7 @@ app.post('/api/analyze-cook-graph', async (req, res) => {
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: getGeminiModel(),
           contents: [
             {
               inlineData: {
@@ -3057,7 +3058,7 @@ Return ONLY valid JSON.`;
     if (ai) {
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
+          model: getGeminiModel(),
           contents: `Gather pitmaster courses and masterclass data for query: "${query || 'top barbecue courses'}". Category: ${category || 'all'}.`,
           config: {
             systemInstruction,

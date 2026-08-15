@@ -2,6 +2,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { CHARGPT_CAPABILITIES, CHARGPT_CONSTITUTION, safeText, validateCharGPTAnswer } from '../server/charGPTPolicy';
+import { DEFAULT_GEMINI_MODEL, getGeminiApiKey, getGeminiModel } from '../server/geminiConfig';
+
+test('Gemini configuration uses a stable model and consistent credential aliases', () => {
+  assert.equal(DEFAULT_GEMINI_MODEL, 'gemini-2.5-flash');
+  assert.equal(getGeminiModel({}), DEFAULT_GEMINI_MODEL);
+  assert.equal(getGeminiModel({ CHARGPT_MODEL: 'gemini-legacy' }), 'gemini-legacy');
+  assert.equal(getGeminiModel({ GEMINI_MODEL: ' gemini-custom ', CHARGPT_MODEL: 'gemini-legacy' }), 'gemini-custom');
+  assert.equal(getGeminiApiKey({ GEMINI_API_KEY: ' primary ', GOOGLE_API_KEY: 'secondary' }), 'primary');
+  assert.equal(getGeminiApiKey({ GEMINI_API_KEY: ' ', GOOGLE_API_KEY: ' fallback ' }), 'fallback');
+  assert.equal(getGeminiApiKey({ GEMINI_API_KEY: 'MY_GEMINI_API_KEY' }), undefined);
+});
 
 test('capability states do not advertise unavailable actions', () => {
   assert.equal(CHARGPT_CAPABILITIES.recordActions.state, 'unavailable');
@@ -33,6 +44,8 @@ test('generated runtime uses verified identity and authoritative context', () =>
   assert.match(server, /hydrateAuthoritativeCharGPTContext/);
   assert.match(server, /req\.user\?\.role === 'owner'/);
   assert.match(server, /CHARGPT_CONSTITUTION/);
+  assert.match(server, /model: getGeminiModel\(\)/);
+  assert.doesNotMatch(server, /gemini-3\.6-flash/);
   assert.doesNotMatch(server, /isMasterAdminEmail && Boolean\(isDevOverride\)/);
   assert.doesNotMatch(server, /LEARNED_USER_NAME/);
   assert.doesNotMatch(server, /direct, full access to all details/);
