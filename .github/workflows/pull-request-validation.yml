@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: Checkout pull request
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -48,6 +48,9 @@ jobs:
 
       - name: Run database harvester contract tests
         run: npm run test:database-harvesters
+
+      - name: Run Operations dashboard contract tests
+        run: npm run test:operations-dashboard
 
       - name: Build production release
         run: npm run build
