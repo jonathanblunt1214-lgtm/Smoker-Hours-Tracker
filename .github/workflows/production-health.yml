@@ -1,0 +1,99 @@
+name: Production health monitor
+
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+concurrency:
+  group: production-health
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: smoker-log-app
+  GCP_REGION: us-central1
+  CLOUD_RUN_SERVICE: smoke-stack
+  DEPLOYER_SERVICE_ACCOUNT: smokestack-github@smoker-log-app.iam.gserviceaccount.com
+  WORKLOAD_IDENTITY_PROVIDER: projects/562567954075/locations/global/workloadIdentityPools/github/providers/smokestack
+  INCIDENT_TITLE: SmokeStack production health check failed
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Authenticate to Google Cloud without a stored key
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve production URL
+        id: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          service_url="$(gcloud run services describe "${CLOUD_RUN_SERVICE}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          test -n "${service_url}"
+          echo "url=${service_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check production health
+        id: health
+        continue-on-error: true
+        env:
+          SERVICE_URL: ${{ steps.service.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(mktemp)"
+          status="$(curl --silent --show-error --location --max-time 30 --output "${response}" --write-out '%{http_code}' "${SERVICE_URL}/api/health")"
+          test "${status}" = "200"
+          grep -Eq '"(ok|status)"[[:space:]]*:' "${response}"
+
+      - name: Open or update incident issue
+        if: steps.health.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SERVICE_URL: ${{ steps.service.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="$(gh issue list --state open --search "SmokeStack production health check failed in:title" --json number --jq '.[0].number // empty')"
+          body="The scheduled production health check failed.
+
+Service: ${SERVICE_URL}
+Workflow run: ${RUN_URL}
+Checked at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+
+This issue is maintained automatically and will close after recovery."
+          if [ -n "${issue_number}" ]; then
+            gh issue comment "${issue_number}" --body "${body}"
+          else
+            gh issue create --title "${INCIDENT_TITLE}" --body "${body}"
+          fi
+
+      - name: Close recovered incident
+        if: steps.health.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="$(gh issue list --state open --search "SmokeStack production health check failed in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "${issue_number}" ]; then
+            gh issue comment "${issue_number}" --body "Production health recovered in ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}."
+            gh issue close "${issue_number}" --reason completed
+          fi
+
+      - name: Fail after incident handling
+        if: steps.health.outcome != 'success'
+        run: exit 1
