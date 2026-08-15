@@ -21,7 +21,7 @@ env:
 
 jobs:
   backup:
-    name: Export the default Firestore database
+    name: Export and verify the default Firestore database
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 60
@@ -53,12 +53,30 @@ jobs:
             --quiet
           echo "destination=${destination}" >> "${GITHUB_OUTPUT}"
 
-      - name: Record backup result
+      - name: Verify exported backup metadata
+        id: verify
         env:
           DESTINATION: ${{ steps.export.outputs.destination }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="$(gcloud storage ls --recursive "${DESTINATION}/**" | grep -E '\.overall_export_metadata$' | head -n 1)"
+          test -n "${manifest}"
+          bytes="$(gcloud storage cat "${manifest}" | wc -c | tr -d ' ')"
+          test "${bytes}" -gt 0
+          echo "manifest=${manifest}" >> "${GITHUB_OUTPUT}"
+          echo "bytes=${bytes}" >> "${GITHUB_OUTPUT}"
+
+      - name: Record verified backup result
+        env:
+          DESTINATION: ${{ steps.export.outputs.destination }}
+          MANIFEST: ${{ steps.verify.outputs.manifest }}
+          MANIFEST_BYTES: ${{ steps.verify.outputs.bytes }}
         run: |
           echo "## Smoke Stack Firestore backup" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Project: ${GCP_PROJECT_ID}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Database: (default)" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Destination: ${DESTINATION}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Read-back manifest: ${MANIFEST}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Manifest bytes read: ${MANIFEST_BYTES}" >> "${GITHUB_STEP_SUMMARY}"
           echo "- Retention: no automatic deletion" >> "${GITHUB_STEP_SUMMARY}"
