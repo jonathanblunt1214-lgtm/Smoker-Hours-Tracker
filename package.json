@@ -22,6 +22,7 @@
     "lint": "npm run generate:trusted-runtime && tsc --noEmit",
     "test:firestore-rules": "npx --yes firebase-tools@15.27.0 emulators:exec --project=smokestack-rules-test --only firestore \"node scripts/test-firestore-rules.mjs\"",
     "test:chargpt-contract": "npm run generate:trusted-runtime && node --import tsx --test scripts/test-chargpt-contract.mts",
+    "test:agent-governance": "node --test scripts/test-agent-governance.mjs",
     "verify:owner-security": "npm run generate:trusted-runtime",
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs",
     "test:database-harvesters": "node --import tsx --test scripts/test-database-harvesters.mts",

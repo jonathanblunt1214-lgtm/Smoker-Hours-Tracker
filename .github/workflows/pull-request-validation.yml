@@ -30,6 +30,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Enforce AI branch and automation governance
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: npm run test:agent-governance
+
       - name: Lint and type-check
         run: npm run lint
 
