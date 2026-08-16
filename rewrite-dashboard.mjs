@@ -1,4 +1,8 @@
+import fs from 'node:fs';
 
+const targetFile = 'src/components/MasterAdminDashboardModal.tsx';
+
+const dynamicComponentCode = `
 import React, { useEffect, useState } from 'react';
 
 export default function MasterAdminDashboardModal({ onClose }) {
@@ -84,7 +88,7 @@ export default function MasterAdminDashboardModal({ onClose }) {
               </div>
               <div className="p-3 border border-zinc-800 rounded-lg bg-[#1a1a1a]">
                 <div className="text-xs font-bold text-white mb-2">Evaluation</div>
-                <span className={`px-2 py-1 text-[10px] font-bold rounded ${evalColor}`}>{evalStatus}</span>
+                <span className={\`px-2 py-1 text-[10px] font-bold rounded \${evalColor}\`}>{evalStatus}</span>
               </div>
               <div className="p-3 border border-zinc-800 rounded-lg bg-[#1a1a1a]">
                 <div className="text-xs font-bold text-white mb-2">Learning approach</div>
@@ -139,3 +143,7 @@ export default function MasterAdminDashboardModal({ onClose }) {
     </div>
   );
 }
+`;
+
+fs.writeFileSync(targetFile, dynamicComponentCode, 'utf8');
+console.log('[+] Wiped static dashboard. Injected fully dynamic component.');

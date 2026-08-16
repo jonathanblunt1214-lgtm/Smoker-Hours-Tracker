@@ -16,7 +16,7 @@
     "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
     "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
     "dev": "npm run generate:release && npm run generate:trusted-runtime && tsx server.secure.generated.ts",
-    "build": "npm run generate:release && npm run generate:trusted-runtime && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "npm run generate:release && npm run generate:trusted-runtime && node rewrite-dashboard.mjs && vite build && esbuild server.secure.generated.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist .generated server.secure.generated.ts src/App.trusted.tsx src/components/Navbar.trusted.tsx src/components/FuelDatabaseExplorer.trusted.tsx src/components/SettingsModal.trusted.tsx src/components/GoogleDriveSyncModal.trusted.tsx src/components/PushAndAlexaHub.trusted.tsx src/components/AIPitmasterModal.trusted.tsx src/utils/notificationAndAlexa.trusted.ts src/utils/storage.trusted.ts server.js",
     "lint": "npm run generate:trusted-runtime && tsc --noEmit",

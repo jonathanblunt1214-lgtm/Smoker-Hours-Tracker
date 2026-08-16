@@ -3,9 +3,9 @@ export const CURRENT_RELEASE = {
   "app": "Smoke Stack",
   "version": "0.02A",
   "buildNumber": 2814,
-  "buildId": "fe1add48a596",
+  "buildId": "5aaabfe09527",
   "channel": "alpha",
-  "releasedAt": "2026-08-14T18:31:17-04:00",
+  "releasedAt": "2026-08-16T00:06:40+00:00",
   "webUrl": "/",
   "minimumSupportedVersion": "0.02A"
 } as const;
