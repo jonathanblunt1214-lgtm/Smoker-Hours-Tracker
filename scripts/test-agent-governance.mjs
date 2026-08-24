@@ -24,6 +24,25 @@ function workflowSources() {
     .map((name) => [name, readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), 'utf8')]);
 }
 
+function pullRequestContext() {
+  let actor = process.env.PR_AUTHOR;
+  let base = process.env.PR_BASE_BRANCH;
+  let head = process.env.PR_HEAD_BRANCH;
+
+  if ((!actor || !base || !head) && process.env.GITHUB_EVENT_PATH) {
+    try {
+      const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+      actor ||= event.pull_request?.user?.login || event.sender?.login;
+      base ||= event.pull_request?.base?.ref;
+      head ||= event.pull_request?.head?.ref;
+    } catch {
+      // Fail closed below if required pull-request metadata cannot be resolved.
+    }
+  }
+
+  return { actor, base, head };
+}
+
 test('valid AI branch prefixes are accepted', () => {
   for (const head of ['agent/task', 'codex/task-42', 'gemini/task_name']) {
     assert.doesNotThrow(() => validatePullRequestBranch({ actor: 'owner', base: 'main', head }));
@@ -58,9 +77,5 @@ test('workflow automation cannot push commits or refs directly to main', () => {
 });
 
 if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
-  validatePullRequestBranch({
-    actor: process.env.PR_AUTHOR,
-    base: process.env.PR_BASE_BRANCH,
-    head: process.env.PR_HEAD_BRANCH,
-  });
+  validatePullRequestBranch(pullRequestContext());
 }
