@@ -26,11 +26,11 @@
   "privacy": {
     "githubIdentity": "jonathanblunt1214-lgtm",
     "allow": [
-      "src/data/**",
-      "src/utils/fuelDatabase.ts",
-      "src/utils/smokerManufacturerData.ts",
-      "src/utils/storage.ts",
-      "src/lib/firestoreData.ts"
+      { "path": "src/data/**", "reason": "Reviewed SmokeStack database records must never be automatically rewritten.", "owner": "jonathanblunt1214-lgtm", "expires": "2027-08-24" },
+      { "path": "src/utils/fuelDatabase.ts", "reason": "Reviewed database module is protected from automatic privacy cleanup.", "owner": "jonathanblunt1214-lgtm", "expires": "2027-08-24" },
+      { "path": "src/utils/smokerManufacturerData.ts", "reason": "Reviewed manufacturer dataset is protected from automatic privacy cleanup.", "owner": "jonathanblunt1214-lgtm", "expires": "2027-08-24" },
+      { "path": "src/utils/storage.ts", "reason": "Reviewed storage layer is protected from automatic privacy cleanup.", "owner": "jonathanblunt1214-lgtm", "expires": "2027-08-24" },
+      { "path": "src/lib/firestoreData.ts", "reason": "Reviewed database integration is protected from automatic privacy cleanup.", "owner": "jonathanblunt1214-lgtm", "expires": "2027-08-24" }
     ]
   },
   "security": {
@@ -41,13 +41,17 @@
     ]
   },
   "authenticity": {
+    "requireArtifacts": true,
     "claims": [
-      { "name": "Repository governance protections are enforced", "run": "npm", "args": ["run", "test:agent-governance"] }
+      { "name": "Repository governance protections are enforced", "run": "npm", "args": ["run", "test:agent-governance"], "evidence": ["AGENTS.md"] }
     ]
   },
+  "governance": { "requireExceptionMetadata": true, "failOnDisabledSecurity": true },
   "workload": {
     "workers": 1,
     "cycles": 1,
-    "timeoutMinutes": 30
+    "timeoutMinutes": 30,
+    "maxOutputBytes": 1048576,
+    "execution": { "network": "allow", "denyBackground": true }
   }
 }
