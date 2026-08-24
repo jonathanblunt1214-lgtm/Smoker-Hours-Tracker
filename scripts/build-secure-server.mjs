@@ -67,16 +67,12 @@ app.use((req, res, next) => {
   'admin router and phase0 trust firewall',
 );
 
-// CharGPT must never fabricate an offline answer or claim a memory update when
-// the model call failed. Replace the legacy fallback and catch behavior.
-const charFallback = source.indexOf('    // Fallback response for offline or unauthenticated mode');
-const charCatch = source.indexOf('  } catch (err: any) {', charFallback);
-if (charFallback < 0 || charCatch < 0) throw new Error('[secure-server] CharGPT fallback boundary not found.');
-source = source.slice(0, charFallback) + `    return res.status(503).json({\n      error: 'CharGPT is temporarily unavailable. No AI response or memory update was generated.',\n      availability: 'unavailable',\n    });\n` + source.slice(charCatch);
-
-const oldCatch = `  } catch (err: any) {\n    console.error('Error in CharGPT endpoint:', err);\n    return res.status(200).json({\n      text: \`🔎 CharGPT Recipe & Technique Guide:\n• Maintain 225°F - 250°F smoker temperature.\n• Use 16-mesh black pepper and coarse kosher salt for a clean bark.\n• Wrap at 160°F - 165°F stall to protect moisture.\n• Rest minimum 45 minutes in a warm cooler.\`,\n      groundingChunks: [],\n      searchEntryPoint: '',\n    });\n  }`;
-const newCatch = `  } catch (err: any) {\n    console.error('Error in CharGPT endpoint:', err);\n    return res.status(503).json({\n      error: 'CharGPT request failed. No fallback cooking advice was fabricated.',\n      availability: 'error',\n    });\n  }`;
-source = replaceRequired(source, oldCatch, newCatch, 'truthful CharGPT error handling');
+// CharGPT failures must already be truthful in the reviewed source. The secure
+// build verifies that contract instead of retaining an inert fabricated reply.
+if (!source.includes("error: 'CharGPT is temporarily unavailable. No AI response or memory update was generated.'")
+  || !source.includes("error: 'CharGPT request failed. No fallback cooking advice was fabricated.'")) {
+  throw new Error('[secure-server] Truthful CharGPT failure handling not found.');
+}
 
 fs.writeFileSync(outputPath, source, 'utf8');
 console.log(`[secure-server] Generated ${path.relative(root, outputPath)}`);

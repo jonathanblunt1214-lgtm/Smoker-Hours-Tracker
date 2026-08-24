@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jonathanblunt1214-lgtm/The-Crucible/main/.thecrucible.schema.json",
+  "schemaVersion": 1,
+  "project": {
+    "name": "SmokeStack",
+    "projectId": "smokestack"
+  },
+  "commands": {
+    "prepare": [
+      { "name": "Install locked dependencies", "run": "npm", "args": ["ci", "--ignore-scripts", "--no-audit", "--no-fund"] }
+    ],
+    "verify": [
+      { "name": "Agent governance", "run": "npm", "args": ["run", "test:agent-governance"] },
+      { "name": "TypeScript and trusted-runtime validation", "run": "npm", "args": ["run", "lint"] },
+      { "name": "Database harvester contracts", "run": "npm", "args": ["run", "test:database-harvesters"] },
+      { "name": "Operations dashboard contracts", "run": "npm", "args": ["run", "test:operations-dashboard"] },
+      { "name": "Production build", "run": "npm", "args": ["run", "build"] }
+    ]
+  },
+  "artifacts": ["dist/server.cjs"],
+  "clutter": {
+    "allow": [],
+    "allowDuplicateContent": false
+  },
+  "privacy": {
+    "githubIdentity": "jonathanblunt1214-lgtm",
+    "allow": [
+      "src/data/**",
+      "src/utils/fuelDatabase.ts",
+      "src/utils/smokerManufacturerData.ts",
+      "src/utils/storage.ts",
+      "src/lib/firestoreData.ts"
+    ]
+  },
+  "security": {
+    "allow": [],
+    "allowBinaries": [],
+    "dependencyAudit": [
+      { "name": "High-severity npm dependency audit", "run": "npm", "args": ["audit", "--audit-level=high", "--omit=dev"] }
+    ]
+  },
+  "workload": {
+    "workers": 1,
+    "cycles": 1,
+    "timeoutMinutes": 30
+  }
+}

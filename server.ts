@@ -1500,40 +1500,15 @@ User Question: ${userMessage}`;
       });
     }
 
-    // Fallback response for offline or unauthenticated mode
-    const queryTerm = prompt || 'Custom BBQ Cut';
-    const fallbackText = `🔎 CharGPT Recipe & Smoking Guide for "${queryTerm}":
-
-• Target Pit Temp: 225°F - 250°F Low & Slow
-• Target Internal Meat Temp: 165°F - 203°F (Probe tender)
-• Estimated Smoking Duration: 5.5 hours (Approx 1.2 lbs pellets/hr)
-• Recommended Wood Pairing: CharGPT Custom Pecan & Oak Blend
-• Rub & Seasoning Profile: Coarse Kosher Salt, 16-mesh Black Pepper, Granulated Garlic, Smoked Paprika, Brown Sugar
-• Stall & Wrap Strategy: Wrap at 160°F in peach butcher paper with tallow or butter
-• Step-by-Step CharGPT Instructions:
-1. Preheat pellet smoker to 225°F with hardwood pellets.
-2. Season ${queryTerm} thoroughly with mustard binder and rub blend.
-3. Smoke until internal temperature reaches 160°F stall.
-4. Wrap tightly in butcher paper; return to smoker until probe tender (approx 203°F).
-5. Rest in insulated cooler for 45-60 minutes before serving.
-
-🧠 *CharGPT Memory Update: Saved "${queryTerm}" preference to BBQ Vault.*`;
-
-    return res.json({
-      text: fallbackText,
-      groundingChunks: [],
-      searchEntryPoint: '',
+    return res.status(503).json({
+      error: 'CharGPT is temporarily unavailable. No AI response or memory update was generated.',
+      availability: 'unavailable',
     });
   } catch (err: any) {
     console.error('Error in CharGPT endpoint:', err);
-    return res.status(200).json({
-      text: `🔎 CharGPT Recipe & Technique Guide:
-• Maintain 225°F - 250°F smoker temperature.
-• Use 16-mesh black pepper and coarse kosher salt for a clean bark.
-• Wrap at 160°F - 165°F stall to protect moisture.
-• Rest minimum 45 minutes in a warm cooler.`,
-      groundingChunks: [],
-      searchEntryPoint: '',
+    return res.status(503).json({
+      error: 'CharGPT request failed. No fallback cooking advice was fabricated.',
+      availability: 'error',
     });
   }
 };
@@ -2629,16 +2604,9 @@ const handleAlexaSkillRequest = async (req: express.Request, res: express.Respon
     });
   } catch (err: any) {
     console.error('Error handling Alexa request:', err);
-    return res.status(200).json({
-      version: '1.0',
-      response: {
-        outputSpeech: {
-          type: 'PlainText',
-          text: 'CharGPT is connected and actively monitoring your smoker cook.',
-        },
-        shouldEndSession: true,
-      },
-      spokenText: 'CharGPT is connected and actively monitoring your smoker cook.',
+    return res.status(500).json({
+      error: 'Alexa request handling failed.',
+      availability: 'error',
     });
   }
 };
