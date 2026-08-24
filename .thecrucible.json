@@ -12,6 +12,7 @@
     "verify": [
       { "name": "Agent governance", "run": "npm", "args": ["run", "test:agent-governance"] },
       { "name": "TypeScript and trusted-runtime validation", "run": "npm", "args": ["run", "lint"] },
+      { "name": "CharGPT capability contracts", "run": "npm", "args": ["run", "test:chargpt-contract"] },
       { "name": "Database harvester contracts", "run": "npm", "args": ["run", "test:database-harvesters"] },
       { "name": "Operations dashboard contracts", "run": "npm", "args": ["run", "test:operations-dashboard"] },
       { "name": "Production build", "run": "npm", "args": ["run", "build"] }
