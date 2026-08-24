@@ -62,11 +62,13 @@ export function getDetectedScreenMetrics(): DetectedScreenMetrics {
 
 export function loadSavedScreenOptimizerConfig(): ScreenOptimizerConfig {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.confirmedWidth === 'number') {
-        return parsed;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.confirmedWidth === 'number') {
+          return parsed;
+        }
       }
     }
   } catch (e) {
@@ -87,7 +89,9 @@ export function loadSavedScreenOptimizerConfig(): ScreenOptimizerConfig {
 
 export function saveScreenOptimizerConfig(config: ScreenOptimizerConfig): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    }
   } catch (e) {
     console.error('Failed to save screen optimizer config', e);
   }
@@ -101,17 +105,14 @@ export function applyConfirmedScreenOptimization(config: ScreenOptimizerConfig):
   const scale = config.uiScale || 1.0;
   const touchMin = config.touchTargetMinPx || 44;
 
-  // 1. Set root CSS custom properties
   root.style.setProperty('--app-viewport-width', `${width}px`);
   root.style.setProperty('--app-ui-scale', `${scale}`);
   root.style.setProperty('--app-touch-target-min', `${touchMin}px`);
 
-  // 2. Set root data attributes
   root.setAttribute('data-screen-width', `${width}`);
   root.setAttribute('data-device-category', config.deviceCategory);
   root.setAttribute('data-layout-optimized', config.isConfirmed ? 'true' : 'false');
 
-  // 3. Inject dynamic CSS rules tailored to the confirmed screen width
   let styleEl = document.getElementById('dynamic-screen-optimizer-css') as HTMLStyleElement | null;
   if (!styleEl) {
     styleEl = document.createElement('style');
@@ -175,11 +176,9 @@ export function autoOptimizeScreenOnLoadAndResize(): () => void {
     applyConfirmedScreenOptimization(config);
   };
 
-  // Run immediately on page load
   runAutoOptimization();
   applyHardwareAndWorkloadOptimization();
 
-  // Attach listener to keep optimized on window resize or device rotation
   window.addEventListener('resize', runAutoOptimization);
   window.addEventListener('orientationchange', runAutoOptimization);
 
@@ -190,7 +189,7 @@ export function autoOptimizeScreenOnLoadAndResize(): () => void {
 }
 
 /* ============================================================================
-   CPU, GPU & HARDWARE WORKLOAD DISTRIBUTOR ENGINE
+   BROWSER HARDWARE CAPABILITY & PERFORMANCE POLICY ENGINE
    ============================================================================ */
 
 export interface CpuHardwareInfo {
@@ -218,6 +217,7 @@ export interface RamHardwareInfo {
   ramTier: 'low' | 'medium' | 'high';
   maxCacheAllocMb: number;
   optimizationStrategy: string;
+  isEstimated?: boolean;
 }
 
 export interface WorkloadTaskAssignment {
@@ -236,24 +236,34 @@ export interface FullHardwareProfile {
   benchmarkedAt: string;
 }
 
-const HARDWARE_PROFILE_STORAGE_KEY = 'pitmaster_hardware_profile_v1';
+// v2 intentionally invalidates older profiles that contained simulated workload claims.
+const HARDWARE_PROFILE_STORAGE_KEY = 'pitmaster_hardware_profile_v2';
 
 /**
- * Runs a 2ms FLOPS benchmark on single-thread CPU performance
+ * Runs a short main-thread math benchmark. This is a browser performance sample,
+ * not a physical CPU FLOPS measurement.
  */
 export function runCpuFlopsBenchmark(): { scoreMs: number; opsPerSecFormatted: string } {
   const iterations = 150000;
-  const start = performance.now();
+  const now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();
+  const start = now();
   let dummy = 0;
+
   for (let i = 0; i < iterations; i++) {
     dummy += Math.sin(i) * Math.cos(i) + Math.sqrt(i + 1);
   }
-  const duration = Math.max(0.1, performance.now() - start);
+
+  // Keep the calculation observable to the engine without exposing it to the UI.
+  if (!Number.isFinite(dummy)) {
+    console.warn('Hardware benchmark produced a non-finite result');
+  }
+
+  const duration = Math.max(0.1, now() - start);
   const opsPerSec = Math.round((iterations / duration) * 1000);
 
-  let opsFormatted = `${(opsPerSec / 1000000).toFixed(2)}M ops/sec`;
+  let opsFormatted = `${(opsPerSec / 1000000).toFixed(2)}M sample ops/sec`;
   if (opsPerSec < 1000000) {
-    opsFormatted = `${Math.round(opsPerSec / 1000)}k ops/sec`;
+    opsFormatted = `${Math.round(opsPerSec / 1000)}k sample ops/sec`;
   }
 
   return {
@@ -263,25 +273,28 @@ export function runCpuFlopsBenchmark(): { scoreMs: number; opsPerSecFormatted: s
 }
 
 /**
- * Detects CPU hardware capabilities & architecture
+ * Detects browser-exposed CPU capability. Browsers do not reliably expose the
+ * physical CPU model or architecture, so architecture is reported conservatively.
  */
 export function detectCpuHardware(): CpuHardwareInfo {
   const logicalCores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
 
-  let architecture = 'x86_64 / Standard CPU';
+  let architecture = 'CPU architecture not exposed by browser';
   if (/Macintosh|Mac OS X|iPhone|iPad/i.test(ua)) {
-    architecture = 'Apple Silicon (ARM64)';
-  } else if (/Android|Mobile|ARM/i.test(ua)) {
-    architecture = 'Mobile ARM64 Processor';
-  } else if (/Win64|x64|x86_64/i.test(ua)) {
-    architecture = 'x86_64 Desktop CPU';
+    architecture = 'Apple platform (CPU architecture hidden by browser)';
+  } else if (/Android|Mobile/i.test(ua)) {
+    architecture = 'Mobile platform (CPU architecture hidden by browser)';
+  } else if (/Windows/i.test(ua)) {
+    architecture = 'Windows platform (CPU architecture hidden by browser)';
+  } else if (/Linux/i.test(ua)) {
+    architecture = 'Linux platform (CPU architecture hidden by browser)';
   }
 
   const bench = runCpuFlopsBenchmark();
   let cpuTier: 'low' | 'medium' | 'high' = 'medium';
 
-  if (logicalCores >= 8 || bench.scoreMs < 5.0) {
+  if (logicalCores >= 8 && bench.scoreMs < 12.0) {
     cpuTier = 'high';
   } else if (logicalCores <= 4 && bench.scoreMs > 12.0) {
     cpuTier = 'low';
@@ -289,11 +302,11 @@ export function detectCpuHardware(): CpuHardwareInfo {
 
   let optimizationStrategy = '';
   if (cpuTier === 'high') {
-    optimizationStrategy = 'Multi-threaded Web Worker pools active for real-time smoker thermodynamics, polynomial ETA fitting, & fast log compression.';
+    optimizationStrategy = 'Keeps normal UI motion and permits opt-in compositing hints. No background worker pool is created by this optimizer.';
   } else if (cpuTier === 'medium') {
-    optimizationStrategy = 'Balanced background physics calculation ticks (1s polling) with async worker scheduling.';
+    optimizationStrategy = 'Uses balanced rendering hints and avoids persistent will-change allocations.';
   } else {
-    optimizationStrategy = 'Throttled background physics loops (3s polling) to conserve CPU main-thread rendering budget.';
+    optimizationStrategy = 'Selects power-saver rendering rules and disables elements explicitly marked as heavy animations.';
   }
 
   return {
@@ -307,14 +320,16 @@ export function detectCpuHardware(): CpuHardwareInfo {
 }
 
 /**
- * Detects WebGL/GPU hardware capabilities
+ * Detects browser-exposed WebGL/GPU capability. A WebGL context can identify
+ * known software renderers; otherwise hardware acceleration is treated as likely,
+ * not guaranteed.
  */
 export function detectGpuHardware(): GpuHardwareInfo {
   let hasHardwareGpu = false;
-  let gpuName = 'Standard WebGL Canvas Driver';
-  let gpuVendor = 'Generic WebGL Vendor';
-  let gpuTier: 'dedicated' | 'integrated' | 'software' | 'unsupported' = 'integrated';
-  let maxTextureSize = 4096;
+  let gpuName = 'WebGL unavailable';
+  let gpuVendor = 'Unknown';
+  let gpuTier: 'dedicated' | 'integrated' | 'software' | 'unsupported' = 'unsupported';
+  let maxTextureSize = 0;
   const webgpuSupported = typeof navigator !== 'undefined' && 'gpu' in navigator;
 
   try {
@@ -323,31 +338,30 @@ export function detectGpuHardware(): GpuHardwareInfo {
       const gl = (canvas.getContext('webgl2') || canvas.getContext('webgl')) as WebGLRenderingContext | null;
 
       if (gl) {
-        maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
+        maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
         const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        const renderer = debugInfo
+          ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || gl.getParameter(gl.RENDERER) || ''
+          : gl.getParameter(gl.RENDERER) || '';
+        const vendor = debugInfo
+          ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || gl.getParameter(gl.VENDOR) || ''
+          : gl.getParameter(gl.VENDOR) || '';
 
-        if (debugInfo) {
-          const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
-          const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
+        if (renderer) gpuName = String(renderer);
+        if (vendor) gpuVendor = String(vendor);
 
-          if (renderer) gpuName = renderer;
-          if (vendor) gpuVendor = vendor;
+        const isSoftware = /swiftshader|software|llvmpipe|basic render/i.test(String(renderer));
+        const isDedicated = /NVIDIA|GeForce|RTX|GTX|Radeon RX|Radeon Pro/i.test(String(renderer));
 
-          const isSoftware = /swiftshader|software|llvmpipe|basic render/i.test(renderer);
-          const isDedicated = /NVIDIA|GeForce|RTX|GTX|Radeon|AMD|Apple M/i.test(renderer);
-
-          if (isSoftware) {
-            gpuTier = 'software';
-            hasHardwareGpu = false;
-          } else if (isDedicated) {
-            gpuTier = 'dedicated';
-            hasHardwareGpu = true;
-          } else {
-            gpuTier = 'integrated';
-            hasHardwareGpu = true;
-          }
+        if (isSoftware) {
+          gpuTier = 'software';
+          hasHardwareGpu = false;
         } else {
+          gpuTier = isDedicated ? 'dedicated' : 'integrated';
           hasHardwareGpu = true;
+          if (!debugInfo && /webgl/i.test(gpuName)) {
+            gpuName = 'WebGL renderer (details hidden by browser)';
+          }
         }
       }
     }
@@ -356,10 +370,12 @@ export function detectGpuHardware(): GpuHardwareInfo {
   }
 
   let optimizationStrategy = '';
-  if (hasHardwareGpu && (gpuTier === 'dedicated' || gpuTier === 'integrated')) {
-    optimizationStrategy = 'Hardware GPU acceleration ENABLED for CSS 3D transforms, WebGL smoke/flame particle visualizers, & zero-lag canvas charts.';
+  if (hasHardwareGpu) {
+    optimizationStrategy = 'Enables conservative CSS compositing hints only on elements that opt in with the hardware-accelerated class.';
+  } else if (gpuTier === 'software') {
+    optimizationStrategy = 'Uses software-safe rendering rules and removes expensive backdrop filters from opted-in heavy elements.';
   } else {
-    optimizationStrategy = 'Software fallback rendering ENABLED; disabled heavy CSS backdrop filters and shader animations to avoid frame drops.';
+    optimizationStrategy = 'WebGL is unavailable; GPU-specific rendering hints remain disabled.';
   }
 
   return {
@@ -375,28 +391,37 @@ export function detectGpuHardware(): GpuHardwareInfo {
 }
 
 /**
- * Detects RAM memory capacity
+ * Reads the coarse deviceMemory browser hint when available. When unavailable,
+ * a conservative 4 GB planning baseline is used and marked as estimated.
  */
 export function detectRamHardware(): RamHardwareInfo {
-  const capacityGb = typeof navigator !== 'undefined' ? (navigator as any).deviceMemory || 4 : 4;
+  const exposedMemory =
+    typeof navigator !== 'undefined' && typeof (navigator as Navigator & { deviceMemory?: number }).deviceMemory === 'number'
+      ? (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+      : undefined;
+  const capacityGb = exposedMemory || 4;
+  const isEstimated = exposedMemory === undefined;
+
   let ramTier: 'low' | 'medium' | 'high' = 'medium';
   let maxCacheAllocMb = 50;
 
-  if (capacityGb >= 8) {
+  if (!isEstimated && capacityGb >= 8) {
     ramTier = 'high';
-    maxCacheAllocMb = 150;
-  } else if (capacityGb <= 2) {
+    maxCacheAllocMb = 100;
+  } else if (!isEstimated && capacityGb <= 2) {
     ramTier = 'low';
     maxCacheAllocMb = 20;
   }
 
   let optimizationStrategy = '';
-  if (ramTier === 'high') {
-    optimizationStrategy = 'Expanded 150MB active in-memory cache for high-frequency telemetry streams and AI conversation context.';
+  if (isEstimated) {
+    optimizationStrategy = 'Browser did not expose deviceMemory; uses a conservative 4 GB planning baseline and a 50 MB cache-budget hint.';
+  } else if (ramTier === 'high') {
+    optimizationStrategy = 'Exposes a 100 MB cache-budget hint to components that explicitly consume the optimizer profile.';
   } else if (ramTier === 'medium') {
-    optimizationStrategy = 'Standard 50MB in-memory telemetry buffer with automated LRU log recycling.';
+    optimizationStrategy = 'Exposes a 50 MB cache-budget hint to components that explicitly consume the optimizer profile.';
   } else {
-    optimizationStrategy = 'Compact 20MB telemetry buffer with aggressive memory garbage collection.';
+    optimizationStrategy = 'Exposes a 20 MB cache-budget hint and selects the power-saver rendering policy.';
   }
 
   return {
@@ -404,55 +429,59 @@ export function detectRamHardware(): RamHardwareInfo {
     ramTier,
     maxCacheAllocMb,
     optimizationStrategy,
+    isEstimated,
   };
 }
 
 /**
- * Computes workload distribution across CPU, GPU, and RAM
+ * Computes a truthful browser performance policy. This function does not move
+ * arbitrary application work between CPU, GPU, and RAM; JavaScript workloads
+ * must explicitly consume this profile to change their own scheduling behavior.
  */
 export function computeWorkloadDistribution(
   cpu: CpuHardwareInfo,
   gpu: GpuHardwareInfo,
   ram: RamHardwareInfo
 ): WorkloadTaskAssignment {
-  const cpuTasks: string[] = [
-    'Smoker Thermal Physics & Thermodynamics Simulation',
-    'Predictive ETA Polynomial Regression Curve Fitting',
-    'Cook Log JSON/XML Export-Import Encryption',
-  ];
-
-  if (cpu.cpuTier === 'high') {
-    cpuTasks.push('Multi-Threaded Background Web Worker Pools');
-  }
-
-  const gpuTasks: string[] = [];
-  if (gpu.hasHardwareGpu) {
-    gpuTasks.push('Hardware-Accelerated CSS 3D Matrix Transforms');
-    gpuTasks.push('WebGL Particle Smoke & Flame Visualizers');
-    gpuTasks.push('Recharts GPU Hardware Composite Layering');
-    if (gpu.gpuTier === 'dedicated') {
-      gpuTasks.push('High-DPI 60 FPS Anti-Aliased Canvas Rendering');
-    }
-  } else {
-    gpuTasks.push('Software 2D Canvas Fallback (Shader Filters Bypassed)');
-  }
-
-  const ramTasks: string[] = [
-    `High-Frequency Telemetry In-Memory Buffer (${ram.maxCacheAllocMb}MB Limit)`,
-    'CharGPT AI Context Conversation Store',
-    'Live Chart Dataset Memory Caching',
-  ];
-
   let recommendedMode: 'high_performance' | 'balanced' | 'power_saver' = 'balanced';
-  if (cpu.cpuTier === 'high' && gpu.hasHardwareGpu && ram.ramTier === 'high') {
+
+  if (cpu.cpuTier === 'high' && gpu.hasHardwareGpu && ram.ramTier !== 'low') {
     recommendedMode = 'high_performance';
   } else if (cpu.cpuTier === 'low' || !gpu.hasHardwareGpu || ram.ramTier === 'low') {
     recommendedMode = 'power_saver';
   }
 
-  const summary = `Workloads balanced: ${cpu.logicalCores}-core CPU handles thermodynamics & ETA physics, ${
-    gpu.hasHardwareGpu ? 'GPU (' + gpu.gpuName + ') handles 3D/Canvas visuals' : 'CPU Software rasterizer handles 2D visuals'
-  }, and RAM (${ram.capacityGb}GB) caches telemetry logs.`;
+  const cpuTasks: string[] = [
+    `Browser CPU capability sampled from ${cpu.logicalCores} logical cores and a short main-thread benchmark`,
+    `Rendering policy selected: ${recommendedMode.replace('_', ' ')}`,
+  ];
+  if (recommendedMode === 'power_saver') {
+    cpuTasks.push('Heavy animations are disabled for elements explicitly marked with .heavy-animation');
+  } else {
+    cpuTasks.push('Normal UI motion remains available; user reduced-motion preferences are still respected');
+  }
+
+  const gpuTasks: string[] = gpu.hasHardwareGpu
+    ? [
+        'WebGL capability detected; opted-in .hardware-accelerated elements receive conservative compositing hints',
+        recommendedMode === 'high_performance'
+          ? 'High-performance mode may apply will-change to opted-in accelerated elements'
+          : 'Balanced mode avoids persistent will-change allocations',
+      ]
+    : [
+        gpu.gpuTier === 'software'
+          ? 'Known software WebGL renderer detected; GPU-specific acceleration claims are disabled'
+          : 'WebGL unavailable; GPU-specific acceleration claims are disabled',
+        'Heavy backdrop filters are removed from opted-in accelerated elements in power-saver mode',
+      ];
+
+  const ramTasks: string[] = [
+    `${ram.isEstimated ? 'Estimated' : 'Browser-reported'} memory baseline: ${ram.capacityGb} GB`,
+    `Cache-budget hint exposed to consumers: ${ram.maxCacheAllocMb} MB`,
+    'The optimizer does not reserve RAM or claim to cache telemetry/CharGPT data unless those systems explicitly use this profile',
+  ];
+
+  const summary = `Browser capability policy: ${recommendedMode.replace('_', ' ')}. SmokeStack applies rendering and CSS hints only; it does not claim to reroute thermodynamics, encryption, CharGPT, telemetry, or other JavaScript workloads without explicit integration.`;
 
   return {
     cpuTasks,
@@ -464,19 +493,21 @@ export function computeWorkloadDistribution(
 }
 
 /**
- * Gets full hardware profile and workload distribution plan
+ * Gets the cached browser hardware profile, or creates one when none exists.
  */
 export function getFullHardwareProfile(): FullHardwareProfile {
   try {
-    const raw = localStorage.getItem(HARDWARE_PROFILE_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.cpu && parsed.gpu && parsed.ram) {
-        return parsed;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(HARDWARE_PROFILE_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.cpu && parsed.gpu && parsed.ram && parsed.workload) {
+          return parsed;
+        }
       }
     }
   } catch (e) {
-    /* ignore */
+    console.warn('Failed to load hardware optimizer profile', e);
   }
 
   const cpu = detectCpuHardware();
@@ -498,33 +529,35 @@ export function getFullHardwareProfile(): FullHardwareProfile {
 
 export function saveHardwareProfile(profile: FullHardwareProfile): void {
   try {
-    localStorage.setItem(HARDWARE_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(HARDWARE_PROFILE_STORAGE_KEY, JSON.stringify(profile));
+    }
   } catch (e) {
-    /* ignore */
+    console.warn('Failed to save hardware optimizer profile', e);
   }
 }
 
 /**
- * Applies global CSS flags and hardware performance attributes based on hardware profile
+ * Applies browser-visible performance attributes and CSS policies based on the
+ * measured profile. It deliberately does not claim to schedule unrelated app work.
  */
 export function applyHardwareAndWorkloadOptimization(): FullHardwareProfile {
   const profile = getFullHardwareProfile();
   if (typeof document === 'undefined') return profile;
 
   const root = document.documentElement;
+  const mode = profile.workload.recommendedMode;
 
-  // Set data attributes
   root.setAttribute('data-cpu-cores', `${profile.cpu.logicalCores}`);
   root.setAttribute('data-cpu-tier', profile.cpu.cpuTier);
   root.setAttribute('data-gpu-accelerated', profile.gpu.hasHardwareGpu ? 'true' : 'false');
   root.setAttribute('data-gpu-tier', profile.gpu.gpuTier);
   root.setAttribute('data-ram-tier', profile.ram.ramTier);
+  root.setAttribute('data-performance-mode', mode);
 
-  // Set CSS variables
   root.style.setProperty('--app-cpu-cores', `${profile.cpu.logicalCores}`);
   root.style.setProperty('--app-max-cache-mb', `${profile.ram.maxCacheAllocMb}MB`);
 
-  // Inject or update dynamic hardware styles
   let styleEl = document.getElementById('dynamic-hardware-optimizer-css') as HTMLStyleElement | null;
   if (!styleEl) {
     styleEl = document.createElement('style');
@@ -533,26 +566,37 @@ export function applyHardwareAndWorkloadOptimization(): FullHardwareProfile {
   }
 
   styleEl.textContent = `
-    /* Hardware Workload Optimization CSS */
-    [data-gpu-accelerated="true"] .hardware-accelerated,
-    [data-gpu-accelerated="true"] .recharts-wrapper {
+    /* Browser hardware capability policy. No simulated workload routing. */
+    [data-gpu-accelerated="true"][data-performance-mode="high_performance"] .hardware-accelerated {
       will-change: transform;
       transform: translate3d(0, 0, 0);
       backface-visibility: hidden;
     }
 
-    [data-gpu-accelerated="false"] .hardware-accelerated {
+    [data-gpu-accelerated="true"][data-performance-mode="balanced"] .hardware-accelerated {
       will-change: auto;
-      transform: none;
+      backface-visibility: hidden;
+    }
+
+    [data-performance-mode="power_saver"] .hardware-accelerated {
+      will-change: auto !important;
+      transform: none !important;
       backdrop-filter: none !important;
     }
 
+    [data-performance-mode="power_saver"] .heavy-animation,
     [data-cpu-tier="low"] .heavy-animation {
       animation: none !important;
       transition: none !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .heavy-animation {
+        animation: none !important;
+        transition: none !important;
+      }
     }
   `;
 
   return profile;
 }
-
