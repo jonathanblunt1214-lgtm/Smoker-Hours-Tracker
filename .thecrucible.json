@@ -39,6 +39,11 @@
       { "name": "High-severity npm dependency audit", "run": "npm", "args": ["audit", "--audit-level=high", "--omit=dev"] }
     ]
   },
+  "authenticity": {
+    "claims": [
+      { "name": "Repository governance protections are enforced", "run": "npm", "args": ["run", "test:agent-governance"] }
+    ]
+  },
   "workload": {
     "workers": 1,
     "cycles": 1,
