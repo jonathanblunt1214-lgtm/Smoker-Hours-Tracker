@@ -33,12 +33,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f android/gradlew ]; then
+          if [ -f android/settings.gradle ]; then
             echo "present=true" >> "${GITHUB_OUTPUT}"
           else
             echo "present=false" >> "${GITHUB_OUTPUT}"
             echo "## Android build skipped" >> "${GITHUB_STEP_SUMMARY}"
-            echo "The native Android source is not present on this branch. Reconcile and merge the existing Android branch to activate APK builds." >> "${GITHUB_STEP_SUMMARY}"
+            echo "The native Android source is not present on this branch." >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -55,6 +55,15 @@ jobs:
         if: steps.native.outputs.present == 'true'
         run: npm run lint && npm run build
 
+      - name: Install native Android toolchain
+        if: steps.native.outputs.present == 'true'
+        run: |
+          npm install --no-save --package-lock=false --no-audit --no-fund \
+            @capacitor/core@8.5.0 \
+            @capacitor/android@8.5.0 \
+            @capacitor/cli@8.5.0 \
+            @capacitor-firebase/authentication@8.4.0
+
       - name: Sync Capacitor Android project
         if: steps.native.outputs.present == 'true'
         run: npx cap sync android
@@ -66,12 +75,28 @@ jobs:
           java-version: '21'
           cache: gradle
 
+      - name: Provision verified Gradle 8.14.3
+        if: steps.native.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_VERSION=8.14.3
+          GRADLE_ZIP="${RUNNER_TEMP}/gradle-${GRADLE_VERSION}-bin.zip"
+          GRADLE_SHA="${GRADLE_ZIP}.sha256"
+          curl --fail --location --silent --show-error \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+            --output "${GRADLE_ZIP}"
+          curl --fail --location --silent --show-error \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip.sha256" \
+            --output "${GRADLE_SHA}"
+          printf '%s  %s\n' "$(cat "${GRADLE_SHA}")" "${GRADLE_ZIP}" | sha256sum --check --strict
+          unzip -q "${GRADLE_ZIP}" -d "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/gradle-${GRADLE_VERSION}/bin" >> "${GITHUB_PATH}"
+
       - name: Test and build debug APK
         if: steps.native.outputs.present == 'true'
         working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --stacktrace
+        run: gradle testDebugUnitTest assembleDebug --stacktrace
 
       - name: Upload debug APK
         if: steps.native.outputs.present == 'true'
