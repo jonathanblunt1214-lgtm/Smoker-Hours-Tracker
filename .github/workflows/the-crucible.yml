@@ -24,3 +24,5 @@ jobs:
       weekly_maintenance: ${{ github.event.schedule == '47 4 * * 0' }}
       dependency_review: true
       malware_scan: false
+    secrets:
+      security_read_token: ${{ secrets.SECURITY_READ_TOKEN }}
