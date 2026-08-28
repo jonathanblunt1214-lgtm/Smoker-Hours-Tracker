@@ -55,6 +55,15 @@ jobs:
         if: steps.native.outputs.present == 'true'
         run: npm run lint && npm run build
 
+      - name: Install native Android toolchain
+        if: steps.native.outputs.present == 'true'
+        run: |
+          npm install --no-save --package-lock=false --no-audit --no-fund \
+            @capacitor/core@8.5.0 \
+            @capacitor/android@8.5.0 \
+            @capacitor/cli@8.5.0 \
+            @capacitor-firebase/authentication@8.4.0
+
       - name: Sync Capacitor Android project
         if: steps.native.outputs.present == 'true'
         run: npx cap sync android
