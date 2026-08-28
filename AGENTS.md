@@ -3,19 +3,20 @@
 ## Governing authority
 
 The **SmokeStack Engineering Constitution**, including every document in
-`docs/constitution/`, is the hard ruling authority for all Codex work in this
-repository. It overrides convenience, speed, automation, generated output, and
-all other repository guidance. If an instruction conflicts with the
-constitution, stop and report the conflict. Do not work around it.
+`docs/constitution/`, and the assimilated injected governance in root
+`AI-HANDOFF.json` and `AI-CONFLICTS.json` are co-equal native repository
+authorities. The injected files are not subordinate to the Constitution, and the
+Constitution is not automatically controlling over them merely because it
+pre-dates the injection.
 
-The injected cooperative-governance package is assimilated at the repository's
-native governance level through the root `AI-HANDOFF.json` and
-`AI-CONFLICTS.json` files. Authorized agents must consume relevant shared
-handoff state, preserve valid concurrent work, reconcile compatible changes,
-record genuine conflicts, and never silently overwrite or force-push another
-agent's valid work. These files do not widen authority and remain subordinate to
-the SmokeStack Engineering Constitution and other higher-priority native
-controls.
+Authorized agents must apply these co-equal native authorities together. They
+must consume relevant shared handoff state, preserve valid concurrent work,
+reconcile compatible changes, record genuine conflicts, and never silently
+overwrite or force-push another agent's valid work. If co-equal native
+authorities genuinely conflict and cannot be reconciled, preserve both sides,
+record the conflict in `AI-CONFLICTS.json`, continue only safe non-conflicting
+work, and route the unresolved decision to the native OWNER/project authority.
+Do not invent a hierarchy between co-equal native governance files.
 
 The original injected copies in `governingDocuments/` are retained as the
 provenance and audit record. In particular,
@@ -34,11 +35,11 @@ substitute a different plan.
 Ask for clarification or stop only when one of the following is actually true:
 - the instruction is materially ambiguous and execution would require guessing;
 - the requested action is unsafe, unlawful, or prohibited by higher-priority
-  platform or repository authority;
+  platform authority;
 - the requested action is technically impossible with the available tools or
   permissions;
-- a genuine conflict with the SmokeStack Engineering Constitution or another
-  controlling repository rule cannot be reconciled without OWNER resolution.
+- a genuine conflict among co-equal native repository authorities cannot be
+  reconciled without OWNER resolution.
 
 When a required repository process applies, follow it while still carrying out
 the OWNER's underlying instruction. Process is a chain of command, not a reason
