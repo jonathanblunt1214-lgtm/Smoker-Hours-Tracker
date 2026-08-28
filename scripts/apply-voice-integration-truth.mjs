@@ -9,7 +9,7 @@ const aiOut = 'src/components/AIPitmasterModal.trusted.tsx';
 const appPath = 'src/App.trusted.tsx';
 const serverPath = 'server.secure.generated.ts';
 
-let notification = fs.readFileSync(notificationSource, 'utf8');
+let notification = fs.readFileSync(notificationSource, 'utf8').replace(/\r\n/g, '\n');
 notification = notification.replace("  enabled: true,\n  deviceName: 'Living Room Nest Hub',\n  broadcastVoiceEnabled: true,", "  enabled: false,\n  deviceName: 'Not connected',\n  broadcastVoiceEnabled: false,");
 notification = notification.replace("  enabled: true,\n  deviceName: 'Living Room Fire TV Stick 4K',", "  enabled: false,\n  deviceName: 'Not connected',");
 notification = notification.replace("  linkCode: 'ALEXA-SMOKESTACK-8942',", "  linkCode: '',");
@@ -18,7 +18,7 @@ notification = notification.replace(/Google Assistant Broadcast to \$\{deviceNam
 notification = notification.replace(/Fire TV \(\$\{deviceName\}\):/g, 'Fire TV preview (${deviceName}):');
 fs.writeFileSync(notificationOut, notification, 'utf8');
 
-let hub = fs.readFileSync(hubSource, 'utf8');
+let hub = fs.readFileSync(hubSource, 'utf8').replace(/\r\n/g, '\n');
 hub = hub.replace("from '../utils/notificationAndAlexa';", "from '../utils/notificationAndAlexa.trusted';");
 hub = hub.replace("'Your Brisket Flat is currently at 198°F, 5 degrees away from your 203°F finish goal!'", 'null');
 hub = hub.replace("'Brisket Flat: 198°F / Target: 203°F | Pit Temp: 225°F'", 'null');
@@ -47,17 +47,17 @@ if (hub.includes("fetch('/api/alexa/skill'")) throw new Error('[voice-truth] Ale
 if (hub.includes("fetch('/api/alexa/sync-telemetry'")) throw new Error('[voice-truth] Alexa preview still syncs telemetry to server');
 fs.writeFileSync(hubOut, hub, 'utf8');
 
-let ai = fs.readFileSync(aiSource, 'utf8');
+let ai = fs.readFileSync(aiSource, 'utf8').replace(/\r\n/g, '\n');
 ai = ai.replace("import { PushAndAlexaHub } from './PushAndAlexaHub';", "import { PushAndAlexaHub } from './PushAndAlexaHub.trusted';");
 fs.writeFileSync(aiOut, ai, 'utf8');
 
-let app = fs.readFileSync(appPath, 'utf8');
+let app = fs.readFileSync(appPath, 'utf8').replace(/\r\n/g, '\n');
 app = app.replace("from './components/AIPitmasterModal'", "from './components/AIPitmasterModal.trusted'");
 if (!app.includes("from './components/AIPitmasterModal.trusted'")) throw new Error('[voice-truth] trusted CharGPT UI import missing');
 fs.writeFileSync(appPath, app, 'utf8');
 
 // Server contract: configuration is not verification, and legacy Alexa simulation endpoints are disabled.
-let server = fs.readFileSync(serverPath, 'utf8');
+let server = fs.readFileSync(serverPath, 'utf8').replace(/\r\n/g, '\n');
 const marker = '// CharGPT API Route Handler';
 if (!server.includes(marker)) throw new Error('[voice-truth] server route marker missing');
 const contract = `\napp.get('/api/integrations/status', (_req, res) => {\n  const alexaConfigured = Boolean(process.env.ALEXA_SKILL_ID && process.env.ALEXA_OAUTH_CLIENT_ID && process.env.ALEXA_OAUTH_CLIENT_SECRET);\n  const googleHomeConfigured = Boolean(process.env.GOOGLE_HOME_OAUTH_CLIENT_ID && process.env.GOOGLE_HOME_PROJECT_ID);\n  const fireTvConfigured = Boolean(process.env.FIRE_TV_INTEGRATION_ID);\n  return res.json({\n    alexa: { state: alexaConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    googleHome: { state: googleHomeConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    fireTv: { state: fireTvConfigured ? 'configured_unverified' : 'unconfigured', verified: false },\n    googleDrive: { state: 'authorization_required', verified: false, verification: 'OAuth plus successful write/read-back required' }\n  });\n});\napp.use(['/api/alexa/skill', '/api/alexa/sync-telemetry'], (_req, res) => res.status(503).json({\n  success: false, integration: 'alexa', state: 'unconfigured', previewOnly: true,\n  error: 'Real Alexa account linking is not configured. Legacy server simulation is disabled.'\n}));\n`;

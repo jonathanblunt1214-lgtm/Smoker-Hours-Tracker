@@ -55,23 +55,7 @@ function addMinutesToTimeStr(baseTime: string, offsetMins: number): string {
 }
 
 function generateInitialReadingsWithCurrentTime(): TemperatureReading[] {
-  const now = new Date();
-  const startTimeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const offsets = [0, 60, 120, 180, 240, 300]; // Hourly 1-hr intervals
-  const defaultMeatTemps = [40, 110, 152, 165, 192, 203];
-  const defaultCookTemps = [225, 225, 228, 250, 252, 250];
-  const defaultTargetTemps = [225, 225, 225, 250, 250, 250];
-
-  return offsets.map((offset, idx) => ({
-    id: `r-init-${idx + 1}-${Date.now()}`,
-    time: offset === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, offset),
-    timestampMinutes: offset,
-    targetTemp: defaultTargetTemps[idx],
-    cookingTemp: defaultCookTemps[idx],
-    meatTemp: defaultMeatTemps[idx],
-    ambientTemp: undefined, // Blank until weather system data is pulled
-    actionsTaken: idx === 0 ? 'Start' : (idx === offsets.length - 1 ? 'Finish' : ''),
-  }));
+  return [];
 }
 
 interface CookLogFormProps {
@@ -202,62 +186,26 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Helper to generate hourly schedule readings matching cook duration
+  // Planned rows are blank until the cook records an observed temperature.
   const generateHourlyReadings = (
     totalHrsInput: number,
-    currentAmbient: number,
-    pType: string,
-    pCut: string
+    currentAmbient?: number
   ): TemperatureReading[] => {
-    const totalHrs = Math.max(1, Math.min(24, Math.round(Number(totalHrsInput) || 8)));
-    let finishMeatTemp = 203;
-    const pTypeLower = (pType || '').toLowerCase();
-    const pCutLower = (pCut || '').toLowerCase();
-
-    if (pTypeLower.includes('poultry') || pCutLower.includes('chicken') || pCutLower.includes('turkey') || pCutLower.includes('wings')) {
-      finishMeatTemp = 165;
-    } else if (pTypeLower.includes('fish') || pTypeLower.includes('seafood') || pCutLower.includes('salmon')) {
-      finishMeatTemp = 145;
-    } else if (pTypeLower.includes('beef') && (pCutLower.includes('steak') || pCutLower.includes('tri-tip') || pCutLower.includes('prime rib'))) {
-      finishMeatTemp = 135;
-    } else if (pTypeLower.includes('pork') && (pCutLower.includes('tenderloin') || pCutLower.includes('chop'))) {
-      finishMeatTemp = 145;
-    }
-
-    const startMeatTemp = 40;
-    const pitTarget = 225;
+    const parsedHours = Number(totalHrsInput);
+    const totalHrs = Number.isFinite(parsedHours) ? Math.max(1, Math.min(24, Math.round(parsedHours))) : 1;
     const newHourlyReadings: TemperatureReading[] = [];
+    const startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
     for (let hr = 0; hr <= totalHrs; hr++) {
-      let meatTemp = startMeatTemp;
-      if (hr === 0) {
-        meatTemp = startMeatTemp;
-      } else {
-        const progressRatio = hr / totalHrs;
-        if (progressRatio <= 0.4) {
-          meatTemp = Math.round(startMeatTemp + (150 - startMeatTemp) * (hr / (totalHrs * 0.4)));
-        } else if (progressRatio <= 0.65) {
-          const stallProgress = (progressRatio - 0.4) / 0.25;
-          meatTemp = Math.round(150 + 15 * stallProgress);
-        } else {
-          const finalProgress = (progressRatio - 0.65) / 0.35;
-          meatTemp = Math.round(165 + (finishMeatTemp - 165) * finalProgress);
-        }
-      }
-
-      const ambientOffset = Math.round(Math.sin((hr / totalHrs) * Math.PI) * 3);
-      const hourlyAmbient = currentAmbient + ambientOffset;
-      const startTimeStr = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
       newHourlyReadings.push({
         id: `r-hr-${hr}-${Date.now()}`,
         time: hr === 0 ? startTimeStr : addMinutesToTimeStr(startTimeStr, hr * 60),
         timestampMinutes: hr * 60,
-        targetTemp: pitTarget,
-        cookingTemp: pitTarget + (hr % 2 === 1 ? 2 : 0),
-        meatTemp,
-        ambientTemp: hourlyAmbient,
-        actionsTaken: hr === 0 ? 'Start' : (hr === totalHrs ? 'Finish' : ''),
+        targetTemp: 0,
+        cookingTemp: 0,
+        meatTemp: 0,
+        ambientTemp: currentAmbient,
+        actionsTaken: '',
       });
     }
 
@@ -270,11 +218,10 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
     setTimerSeconds(Math.round(safeVal * 3600));
 
     if (autoSyncEntries) {
-      const currentAmbient = weatherData?.tempF || 72;
-      const newReadings = generateHourlyReadings(safeVal, currentAmbient, proteinType, proteinCut);
+      const newReadings = generateHourlyReadings(safeVal, weatherData?.tempF);
       setReadings(newReadings);
       const numHrs = Math.max(1, Math.round(safeVal));
-      setHourlyPullNotice(`Automatically adjusted log table to ${numHrs + 1} hourly entries (0:00 to ${numHrs}:00) for ${safeVal} hrs duration.`);
+      setHourlyPullNotice(`Added ${numHrs + 1} blank hourly rows. Enter only observed temperatures.`);
       setTimeout(() => setHourlyPullNotice(null), 4000);
     }
   };
@@ -541,7 +488,7 @@ export const CookLogForm: React.FC<CookLogFormProps> = ({
       setFinishedNotes(initialRecipe.description);
       setNextTimeNotes(initialRecipe.proTip);
 
-      const generatedReadings = generateHourlyReadings(initialRecipe.estHours, 72, initialRecipe.proteinType, initialRecipe.proteinCut);
+      const generatedReadings = generateHourlyReadings(initialRecipe.estHours);
       setReadings(generatedReadings);
     }
   }, [initialRecipe]);
@@ -972,11 +919,10 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
   // Auto-Generate Hourly Schedule Starting at 0:00 for every hour up to hoursLogged
   const handleGenerateHourlyReadings = () => {
     const totalHrs = Math.max(1, Math.min(24, Math.round(Number(hoursLogged) || 8)));
-    const currentAmbient = weatherData?.tempF || 72;
-    const newHourlyReadings = generateHourlyReadings(totalHrs, currentAmbient, proteinType, proteinCut);
+    const newHourlyReadings = generateHourlyReadings(totalHrs, weatherData?.tempF);
 
     setReadings(newHourlyReadings);
-    setHourlyPullNotice(`Automatically generated ${totalHrs + 1} hourly log entries (0:00 to ${totalHrs}:00) for cook duration.`);
+    setHourlyPullNotice(`Added ${totalHrs + 1} blank hourly rows. No temperatures were inferred.`);
     setTimeout(() => setHourlyPullNotice(null), 5000);
   };
 

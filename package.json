@@ -26,7 +26,8 @@
     "verify:owner-security": "npm run generate:trusted-runtime",
     "bootstrap:owner": "node scripts/bootstrap-owner.mjs",
     "test:database-harvesters": "node --import tsx --test scripts/test-database-harvesters.mts",
-    "test:operations-dashboard": "node --import tsx --test scripts/test-operations-dashboard.mts"
+    "test:operations-dashboard": "node --import tsx --test scripts/test-operations-dashboard.mts",
+    "test:product-hardening": "node --import tsx --test tests/account-deletion-policy.test.ts tests/thermal-curve.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
