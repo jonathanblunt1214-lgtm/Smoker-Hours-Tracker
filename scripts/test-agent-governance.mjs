@@ -3,14 +3,34 @@ import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 export const AI_BRANCH_PATTERN = /^(agent|codex|gemini)\/[a-z0-9][a-z0-9._/-]*$/;
+export const DEVELOPMENT_BRANCH = 'SmokeStack-development';
+export const PRODUCTION_BRANCH = 'main';
 
 export function validatePullRequestBranch({ actor, base, head }) {
-  assert.equal(base, 'main', 'AI pull requests must target main');
-  assert.notEqual(head, 'main', 'automation must never make a pull request from main');
+  assert.ok(base && head, 'pull request base and head branches are required');
+
+  if (base === PRODUCTION_BRANCH) {
+    assert.equal(
+      head,
+      DEVELOPMENT_BRANCH,
+      'main accepts promotion pull requests only from SmokeStack-development',
+    );
+    return;
+  }
+
+  assert.equal(
+    base,
+    DEVELOPMENT_BRANCH,
+    'normal pull requests must target SmokeStack-development',
+  );
+  assert.notEqual(head, PRODUCTION_BRANCH, 'automation must never make a pull request from main');
+  assert.notEqual(head, DEVELOPMENT_BRANCH, 'task pull requests must come from a task branch');
+
   if (actor === 'dependabot[bot]') {
     assert.match(head, /^dependabot\//, 'Dependabot must use its reserved branch prefix');
     return;
   }
+
   assert.match(
     head,
     AI_BRANCH_PATTERN,
@@ -43,35 +63,45 @@ function pullRequestContext() {
   return { actor, base, head };
 }
 
-test('valid AI branch prefixes are accepted', () => {
+test('task branches are accepted only into development', () => {
   for (const head of ['agent/task', 'codex/task-42', 'gemini/task_name']) {
-    assert.doesNotThrow(() => validatePullRequestBranch({ actor: 'owner', base: 'main', head }));
+    assert.doesNotThrow(() => validatePullRequestBranch({ actor: 'owner', base: DEVELOPMENT_BRANCH, head }));
   }
   assert.doesNotThrow(() => validatePullRequestBranch({
-    actor: 'dependabot[bot]', base: 'main', head: 'dependabot/npm_and_yarn/typescript-5.8.3',
+    actor: 'dependabot[bot]', base: DEVELOPMENT_BRANCH, head: 'dependabot/npm_and_yarn/typescript-5.8.3',
   }));
 });
 
-test('main and invalid AI branch prefixes are rejected', () => {
-  for (const head of ['main', 'ai/task', 'chatgpt/task', 'feature/task', 'gemini']) {
-    assert.throws(() => validatePullRequestBranch({ actor: 'owner', base: 'main', head }));
+test('main accepts promotion only from development', () => {
+  assert.doesNotThrow(() => validatePullRequestBranch({
+    actor: 'owner', base: PRODUCTION_BRANCH, head: DEVELOPMENT_BRANCH,
+  }));
+  for (const head of ['agent/task', 'codex/task', 'gemini/task', 'dependabot/npm/pkg']) {
+    assert.throws(() => validatePullRequestBranch({ actor: 'owner', base: PRODUCTION_BRANCH, head }));
+  }
+});
+
+test('invalid task routing is rejected', () => {
+  for (const head of [PRODUCTION_BRANCH, DEVELOPMENT_BRANCH, 'ai/task', 'chatgpt/task', 'feature/task', 'gemini']) {
+    assert.throws(() => validatePullRequestBranch({ actor: 'owner', base: DEVELOPMENT_BRANCH, head }));
   }
   assert.throws(() => validatePullRequestBranch({ actor: 'owner', base: 'release', head: 'codex/task' }));
   assert.throws(() => validatePullRequestBranch({
-    actor: 'owner', base: 'main', head: 'dependabot/npm_and_yarn/typescript-5.8.3',
+    actor: 'owner', base: DEVELOPMENT_BRANCH, head: 'dependabot/npm_and_yarn/typescript-5.8.3',
   }));
 });
 
-test('workflow automation cannot push commits or refs directly to main', () => {
+test('workflow automation cannot push commits or refs directly to protected branches', () => {
   const forbidden = [
     /git\s+push[^\n]*\bmain\b/i,
-    /gh\s+api[^\n]*(?:git\/refs|refs\/heads\/main)/i,
+    /git\s+push[^\n]*\bSmokeStack-development\b/i,
+    /gh\s+api[^\n]*(?:git\/refs|refs\/heads\/(?:main|SmokeStack-development))/i,
     /github\.rest\.git\.(?:createRef|updateRef)/,
   ];
 
   for (const [name, source] of workflowSources()) {
     for (const pattern of forbidden) {
-      assert.doesNotMatch(source, pattern, `${name} contains direct-main write automation`);
+      assert.doesNotMatch(source, pattern, `${name} contains direct protected-branch write automation`);
     }
   }
 });

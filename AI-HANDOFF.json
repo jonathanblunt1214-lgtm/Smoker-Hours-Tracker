@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "nativeState": {
+    "assimilated": true,
+    "source": "governingDocuments/AI-HANDOFF.json",
+    "role": "active-shared-handoff-state"
+  },
+  "assimilation": {
+    "type": "injection-exclusive",
+    "oneTime": true,
+    "project": {
+      "name": "Smoke Stack",
+      "repository": "jonathanblunt1214-lgtm/Smoker-Hours-Tracker",
+      "repositoryUrl": "https://github.com/jonathanblunt1214-lgtm/Smoker-Hours-Tracker.git",
+      "expectingInjectionConfirmedByOwner": true
+    },
+    "authority": {
+      "mayWidenAuthority": false,
+      "mayDirectlyWriteMain": false,
+      "nativeGovernanceRemainsControlling": true,
+      "assimilationLevel": "native",
+      "injectedGovernanceIsTemporary": false
+    },
+    "lifetime": {
+      "maximumHours": 24,
+      "startedAt": "2026-08-28 10:05:00 EDT",
+      "expiresAt": "2026-08-29 10:05:00 EDT",
+      "timeZone": "America/New_York",
+      "selfExpires": true,
+      "severWriteAuthorityOnCompletionOrExpiry": true,
+      "freshAuthorizationRequiredAfterExpiry": true
+    },
+    "multiAgentGovernance": {
+      "allAuthorizedAgentsWorkTogether": true,
+      "sharedHandoffState": true,
+      "preserveConcurrentValidWork": true,
+      "reconcileCompatibleChanges": true,
+      "recordGenuineConflicts": true,
+      "silentOverwriteForbidden": true,
+      "forcePushForConflictResolutionForbidden": true,
+      "unresolvedConflictUsesNativeDecisionAuthority": true
+    }
+  }
+}
