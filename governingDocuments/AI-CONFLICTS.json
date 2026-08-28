@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "assimilationPolicy": {
+    "allAuthorizedAgentsWorkTogether": true,
+    "nativeGovernanceControls": true,
+    "preserveConcurrentWork": true,
+    "doNotWidenAuthority": true,
+    "doNotDirectlyModifyMain": true
+  },
+  "conflicts": [],
+  "resolutionRules": {
+    "recordOnlyGenuineConflicts": true,
+    "preserveBothSidesUntilResolved": true,
+    "reconcileCompatibleChanges": true,
+    "continueSafeNonConflictingWorkWhenPermitted": true,
+    "noForcePush": true,
+    "noSilentOverwrite": true,
+    "noAuthorityExpansion": true,
+    "unresolvedConflictDecision": "native-owner-or-project-authority"
+  }
+}
