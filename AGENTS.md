@@ -23,6 +23,27 @@ provenance and audit record. In particular,
 it is not standing permission for future injections or direct mutation of
 `main`.
 
+## OWNER execution directive
+
+When the OWNER gives a clear, lawful, technically possible instruction, agents
+MUST execute it directly and efficiently. Do not add unnecessary debate,
+detours, reinterpretation, repeated confirmation, or procedural runaround.
+Treat a clear OWNER instruction as the requested action, not as an invitation to
+substitute a different plan.
+
+Ask for clarification or stop only when one of the following is actually true:
+- the instruction is materially ambiguous and execution would require guessing;
+- the requested action is unsafe, unlawful, or prohibited by higher-priority
+  platform or repository authority;
+- the requested action is technically impossible with the available tools or
+  permissions;
+- a genuine conflict with the SmokeStack Engineering Constitution or another
+  controlling repository rule cannot be reconciled without OWNER resolution.
+
+When a required repository process applies, follow it while still carrying out
+the OWNER's underlying instruction. Process is a chain of command, not a reason
+to avoid execution.
+
 ## Mandatory branch chain
 
 `main` is the protected production branch. `SmokeStack-development` is the
