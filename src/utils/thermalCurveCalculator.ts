@@ -1,58 +1,5 @@
 import { TemperatureReading, ThermalCurveAnalytics, ThermalCurveDataPoint } from '../types';
 
-export function generateSyntheticThermalReadings(
-  hoursLogged: number = 6,
-  targetPit: number = 225,
-  targetMeat: number = 203
-): TemperatureReading[] {
-  const hours = hoursLogged || 6;
-  const numSteps = Math.max(6, Math.min(20, Math.round(hours * 2)));
-  const readings: TemperatureReading[] = [];
-
-  for (let i = 0; i <= numSteps; i++) {
-    const fraction = i / numSteps;
-    const elapsedMinutes = Math.round(fraction * hours * 60);
-    const hrs = Math.floor(elapsedMinutes / 60);
-    const mins = elapsedMinutes % 60;
-    const timeStr = `${hrs}:${mins < 10 ? '0' : ''}${mins}`;
-
-    const pitFluc = Math.sin(i * 1.8) * 4;
-    const cookingTemp = Math.round(targetPit + pitFluc);
-
-    let meatTemp = 38;
-    if (fraction < 0.35) {
-      meatTemp = Math.round(38 + (fraction / 0.35) * (155 - 38));
-    } else if (fraction < 0.65) {
-      const stallProg = (fraction - 0.35) / 0.3;
-      meatTemp = Math.round(155 + stallProg * 12);
-    } else {
-      const finishProg = (fraction - 0.65) / 0.35;
-      meatTemp = Math.round(167 + finishProg * (targetMeat - 167));
-    }
-
-    let action = '';
-    if (i === 0) action = 'Cold start & clean smoke ignition';
-    else if (fraction >= 0.35 && fraction <= 0.4) action = 'Entered thermal stall plateau';
-    else if (fraction >= 0.65 && fraction <= 0.7) action = 'Wrapped in foil / butcher paper';
-    else if (i === numSteps) action = 'Reached target internal temp & rested';
-
-    readings.push({
-      id: `synthetic-${i}`,
-      time: timeStr,
-      timestampMinutes: elapsedMinutes,
-      cookingTemp,
-      meatTemp,
-      meatTemp2: Math.max(32, meatTemp - 4),
-      meatTemp3: Math.max(32, meatTemp + 3),
-      meatTemp4: Math.max(32, meatTemp - 2),
-      targetTemp: targetPit,
-      ambientTemp: 72,
-      actionsTaken: action,
-    });
-  }
-  return readings;
-}
-
 /**
  * Calculates comprehensive Thermal Curve Analytics for a cook log based on its temperature readings.
  */
@@ -60,9 +7,28 @@ export function calculateThermalCurveAnalytics(
   readings: TemperatureReading[],
   hoursLogged: number
 ): ThermalCurveAnalytics {
-  const effectiveReadings = (!readings || readings.length === 0)
-    ? generateSyntheticThermalReadings(hoursLogged)
-    : readings;
+  const effectiveReadings = (readings || []).filter((reading) =>
+    [reading.meatTemp, reading.cookingTemp, reading.targetTemp].some(
+      (value) => Number.isFinite(value) && Number(value) > 0
+    )
+  );
+
+  if (effectiveReadings.length === 0) {
+    return {
+      startingMeatTempF: 0,
+      peakMeatTempF: 0,
+      avgPitTempF: 0,
+      maxPitTempF: 0,
+      minPitTempF: 0,
+      totalCookDurationMinutes: Math.max(0, Math.round((Number(hoursLogged) || 0) * 60)),
+      tempRiseRateFPerHr: 0,
+      stallDetected: false,
+      thermalStabilityVarianceF: 0,
+      thermalStabilityRating: 'Insufficient observed temperature data',
+      curveDataPoints: [],
+      generatedAt: new Date().toISOString(),
+    };
+  }
 
   // Map readings to chronological curve data points
   const curveDataPoints: ThermalCurveDataPoint[] = effectiveReadings.map((r, idx) => {
@@ -73,10 +39,10 @@ export function calculateThermalCurveAnalytics(
     return {
       time: r.time || `${idx}:00`,
       timestampMinutes: tsMins,
-      meatTemp: r.meatTemp || 40,
-      pitTemp: r.cookingTemp || r.targetTemp || 225,
-      targetTemp: r.targetTemp || 225,
-      ambientTemp: r.ambientTemp || 72,
+      meatTemp: Number.isFinite(r.meatTemp) ? r.meatTemp : 0,
+      pitTemp: Number.isFinite(r.cookingTemp) ? r.cookingTemp : 0,
+      targetTemp: Number.isFinite(r.targetTemp) ? r.targetTemp : 0,
+      ambientTemp: Number.isFinite(r.ambientTemp) ? r.ambientTemp : undefined,
       action: r.actionsTaken,
     };
   });
@@ -84,21 +50,21 @@ export function calculateThermalCurveAnalytics(
   // Sort chronologically by timestamp
   curveDataPoints.sort((a, b) => a.timestampMinutes - b.timestampMinutes);
 
-  const meatTemps = curveDataPoints.map((p) => p.meatTemp);
-  const pitTemps = curveDataPoints.map((p) => p.pitTemp);
+  const meatTemps = curveDataPoints.map((p) => p.meatTemp).filter((value) => value > 0);
+  const pitTemps = curveDataPoints.map((p) => p.pitTemp).filter((value) => value > 0);
 
-  const startingMeatTempF = meatTemps[0] || 40;
-  const peakMeatTempF = Math.max(...meatTemps);
+  const startingMeatTempF = meatTemps[0] || 0;
+  const peakMeatTempF = meatTemps.length ? Math.max(...meatTemps) : 0;
 
   const avgPitTempF = Math.round(
     pitTemps.reduce((acc, curr) => acc + curr, 0) / (pitTemps.length || 1)
   );
-  const maxPitTempF = Math.max(...pitTemps);
-  const minPitTempF = Math.min(...pitTemps);
+  const maxPitTempF = pitTemps.length ? Math.max(...pitTemps) : 0;
+  const minPitTempF = pitTemps.length ? Math.min(...pitTemps) : 0;
 
   // Duration in minutes
   const lastPointMins = curveDataPoints[curveDataPoints.length - 1]?.timestampMinutes || 0;
-  const totalCookDurationMinutes = Math.max(Math.round(hoursLogged * 60), lastPointMins, 30);
+  const totalCookDurationMinutes = Math.max(Math.round((Number(hoursLogged) || 0) * 60), lastPointMins, 0);
   const durationHours = totalCookDurationMinutes / 60;
 
   // Temperature rise rate (°F / hour)
@@ -120,21 +86,24 @@ export function calculateThermalCurveAnalytics(
 
     const firstStallMins = stallPoints[0].timestampMinutes;
     const lastStallMins = stallPoints[stallPoints.length - 1].timestampMinutes;
-    stallDurationMinutes = Math.max(60, lastStallMins - firstStallMins);
+    stallDurationMinutes = Math.max(0, lastStallMins - firstStallMins);
   }
 
   // Thermal variance (Standard Deviation of pit temp relative to target)
-  const variances = curveDataPoints.map((p) => Math.pow(p.pitTemp - p.targetTemp, 2));
+  const comparablePitPoints = curveDataPoints.filter((point) => point.pitTemp > 0 && point.targetTemp > 0);
+  const variances = comparablePitPoints.map((p) => Math.pow(p.pitTemp - p.targetTemp, 2));
   const avgVariance = variances.reduce((a, b) => a + b, 0) / (variances.length || 1);
   const stdDev = Math.sqrt(avgVariance);
   const thermalStabilityVarianceF = Number(stdDev.toFixed(1));
 
-  let stabilityPercent = Math.max(80, Math.min(99.9, 100 - thermalStabilityVarianceF * 2.2));
+  const stabilityPercent = Math.max(0, Math.min(100, 100 - thermalStabilityVarianceF * 2.2));
   let stabilityLabel = 'Exceptional';
   if (thermalStabilityVarianceF > 10) stabilityLabel = 'Moderate Fluctuation';
   else if (thermalStabilityVarianceF > 5) stabilityLabel = 'Good Control';
 
-  const thermalStabilityRating = `${stabilityPercent.toFixed(1)}% ${stabilityLabel} (±${thermalStabilityVarianceF}°F variance)`;
+  const thermalStabilityRating = comparablePitPoints.length
+    ? `${stabilityPercent.toFixed(1)}% ${stabilityLabel} (±${thermalStabilityVarianceF}°F variance)`
+    : 'Insufficient observed pit and target temperature data';
 
   return {
     startingMeatTempF,

@@ -25,6 +25,7 @@ import { SmokerProfile, CookLog } from '../types';
 import { getEffectiveSmokerSpecs } from '../utils/smokerCalculations';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from '../constants/appName';
 import { RecipeSuggestion, RECIPE_SUGGESTIONS } from '../data/recipeSuggestions';
+import { authorizedApiFetch } from '../lib/authorizedApi';
 
 interface CookPlannerProps {
   smokerProfile: SmokerProfile;
@@ -353,11 +354,11 @@ export const CookPlanner: React.FC<CookPlannerProps> = ({
     const cutName = selectedPreset?.cut || 'Custom Cut';
     setIsAuditingPlan(true);
     try {
-      const res = await fetch('/api/chargpt', {
+      const res = await authorizedApiFetch('/api/chargpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `You are ${AI_NAME}, the self-learning BBQ AI Cook Planner. Review my planned smoking schedule:
+          prompt: `You are ${AI_NAME}, the BBQ AI Cook Planner. Review my planned smoking schedule. Every time, temperature, duration, and fuel quantity below is a plan or estimate—not an observed cook reading:
 - Meat: ${presetName} (${numWeight} lbs ${cutName})
 - Target Serving Time: ${formatDateTime(serveDateObj)}
 - Backwards Calculated Start Cook Time: ${formatDateTime(startCookDateObj)}

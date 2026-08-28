@@ -3,7 +3,7 @@ import fs from 'node:fs';
 const sourcePath = 'src/components/GoogleDriveSyncModal.tsx';
 const outPath = 'src/components/GoogleDriveSyncModal.trusted.tsx';
 const appPath = 'src/App.trusted.tsx';
-let modal = fs.readFileSync(sourcePath, 'utf8');
+let modal = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
 
 const importAnchor = "import { TermsOfServiceModal } from './TermsOfServiceModal';";
 if (!modal.includes("../lib/driveBackupVerifier")) {
@@ -26,7 +26,7 @@ modal = modal.replace(
 if (!modal.includes('verifyDriveBackup(token)')) throw new Error('[drive-verify] verification call missing');
 fs.writeFileSync(outPath, modal, 'utf8');
 
-let app = fs.readFileSync(appPath, 'utf8');
+let app = fs.readFileSync(appPath, 'utf8').replace(/\r\n/g, '\n');
 app = app.replace("from './components/GoogleDriveSyncModal'", "from './components/GoogleDriveSyncModal.trusted'");
 if (!app.includes("from './components/GoogleDriveSyncModal.trusted'")) throw new Error('[drive-verify] trusted modal import missing');
 fs.writeFileSync(appPath, app, 'utf8');

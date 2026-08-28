@@ -5,7 +5,7 @@ const root = process.cwd();
 const sourcePath = path.join(root, 'server.ts');
 const outputPath = path.join(root, 'server.secure.generated.ts');
 
-let source = fs.readFileSync(sourcePath, 'utf8');
+let source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
 
 function replaceRequired(input, needle, replacement, label) {
   if (!input.includes(needle)) throw new Error(`[secure-server] Required source pattern not found: ${label}`);
@@ -15,7 +15,7 @@ function replaceRequired(input, needle, replacement, label) {
 source = replaceRequired(
   source,
   "import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';",
-  "import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';\nimport { adminRolesRouter } from './server/adminRoles';",
+  "import { requireAuth, AuthenticatedRequest } from './server/authMiddleware';\nimport { adminRolesRouter } from './server/adminRoles';\nimport { accountLifecycleRouter } from './server/accountLifecycle';\nimport { communitySmokersRouter } from './server/communitySmokers';",
   'secure auth imports',
 );
 
@@ -26,6 +26,8 @@ source = replaceRequired(
 
 // Production authorization routes: Firebase token + server-side role claims.
 app.use('/api/admin', adminRolesRouter);
+app.use('/api/account', accountLifecycleRouter);
+app.use('/api/community-smokers', communitySmokersRouter);
 
 // Phase-0 trust firewall. These legacy routes used simulated/global state,
 // client-supplied account identity, or unverified seeded knowledge. The trusted
