@@ -1,5 +1,10 @@
 {
   "schemaVersion": 1,
+  "nativeState": {
+    "assimilated": true,
+    "source": "governingDocuments/AI-HANDOFF.json",
+    "role": "active-shared-handoff-state"
+  },
   "assimilation": {
     "type": "injection-exclusive",
     "oneTime": true,
