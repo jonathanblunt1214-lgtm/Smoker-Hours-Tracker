@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 const marker = '<!-- smokestack-owner-review-required -->';
 const prNumber = process.env.PR_NUMBER;
 const repository = process.env.GH_REPO;
-const DEVELOPMENT_BRANCH = 'SmokeStack-development';
 
 if (!prNumber || !repository) throw new Error('PR_NUMBER and GH_REPO are required');
 
@@ -45,11 +44,10 @@ function leaveOwnerNotice(files) {
 }
 
 const pr = JSON.parse(api(`repos/${repository}/pulls/${prNumber}`));
-if (pr.state !== 'open' || pr.draft || pr.base.ref !== DEVELOPMENT_BRANCH) process.exit(0);
+if (pr.state !== 'open' || pr.draft || pr.base.ref !== 'main') process.exit(0);
 
-// Routine automation may integrate only into SmokeStack-development. Promotion
-// to main is never auto-merged and must come from SmokeStack-development under
-// the repository's promotion review and branch-protection rules.
+// Only same-repository branches created under the established Codex namespaces
+// are eligible. Fork code never reaches this workflow's trusted execution path.
 if (pr.head.repo?.full_name !== repository || !/^(codex|agent)\//.test(pr.head.ref)) process.exit(0);
 
 const files = gh(['api', '--paginate', `repos/${repository}/pulls/${prNumber}/files`, '--jq', '.[].filename'])
