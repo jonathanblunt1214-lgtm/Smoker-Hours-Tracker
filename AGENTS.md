@@ -3,20 +3,20 @@
 ## Governing authority
 
 The **SmokeStack Engineering Constitution**, including every document in
-`docs/constitution/`, and the assimilated injected governance in root
-`AI-HANDOFF.json` and `AI-CONFLICTS.json` are co-equal native repository
-authorities. The injected files are not subordinate to the Constitution, and the
-Constitution is not automatically controlling over them merely because it
-pre-dates the injection.
+`docs/constitution/`, together with the assimilated root `AI-HANDOFF.json` and
+`AI-CONFLICTS.json`, form one unified native SmokeStack governing body. They are
+not separate competing authorities and must not be treated as a hierarchy of
+independent rule sets. Read and apply them together as one integrated body of
+repository governance.
 
-Authorized agents must apply these co-equal native authorities together. They
-must consume relevant shared handoff state, preserve valid concurrent work,
-reconcile compatible changes, record genuine conflicts, and never silently
-overwrite or force-push another agent's valid work. If co-equal native
-authorities genuinely conflict and cannot be reconciled, preserve both sides,
-record the conflict in `AI-CONFLICTS.json`, continue only safe non-conflicting
-work, and route the unresolved decision to the native OWNER/project authority.
-Do not invent a hierarchy between co-equal native governance files.
+Authorized agents must consume relevant shared handoff state, preserve valid
+concurrent work, reconcile compatible changes, record genuine internal
+governance conflicts, and never silently overwrite or force-push another
+agent's valid work. `AI-CONFLICTS.json` is the governing body's internal conflict
+ledger. If provisions within the unified governing body cannot be reconciled,
+preserve the competing requirements, record the conflict in `AI-CONFLICTS.json`,
+continue only safe non-conflicting work, and route the unresolved decision to
+the native OWNER/project authority.
 
 The original injected copies in `governingDocuments/` are retained as the
 provenance and audit record. In particular,
@@ -38,8 +38,8 @@ Ask for clarification or stop only when one of the following is actually true:
   platform authority;
 - the requested action is technically impossible with the available tools or
   permissions;
-- a genuine conflict among co-equal native repository authorities cannot be
-  reconciled without OWNER resolution.
+- an unresolved conflict inside the unified SmokeStack governing body requires
+  OWNER resolution.
 
 When a required repository process applies, follow it while still carrying out
 the OWNER's underlying instruction. Process is a chain of command, not a reason
