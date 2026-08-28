@@ -1,0 +1,64 @@
+name: Temporary injection repair - whitespace
+
+on:
+  push:
+    branches:
+      - agent/crucible-precheck-repair-20260828
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.ref == 'refs/heads/agent/crucible-precheck-repair-20260828'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: agent/crucible-precheck-repair-20260828
+          fetch-depth: 0
+      - name: Strip only trailing whitespace reported by Crucible
+        shell: python
+        run: |
+          from pathlib import Path
+          targets = [
+              Path('src/components/CookLogForm.tsx'),
+              Path('src/components/CookPlanner.tsx'),
+          ]
+          changed = []
+          for path in targets:
+              raw = path.read_text(encoding='utf-8')
+              lines = raw.splitlines(keepends=True)
+              fixed = ''.join(line.rstrip(' \t\r\n') + ('\r\n' if line.endswith('\r\n') else '\n' if line.endswith('\n') else '') for line in lines)
+              if fixed != raw:
+                  path.write_text(fixed, encoding='utf-8', newline='')
+                  changed.append(str(path))
+          if not changed:
+              raise SystemExit('No reported trailing whitespace remained to repair.')
+          print('Repaired:', ', '.join(changed))
+      - name: Verify bounded diff and remove temporary repair transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          mapfile -t changed < <(git status --porcelain --untracked-files=all | sed -E 's/^.. //')
+          for path in "${changed[@]}"; do
+            case "$path" in
+              src/components/CookLogForm.tsx|src/components/CookPlanner.tsx|.github/workflows/injection-repair-whitespace.yml) ;;
+              *) echo "Unexpected changed path: $path" >&2; exit 1 ;;
+            esac
+          done
+          rm .github/workflows/injection-repair-whitespace.yml
+          git diff --check
+      - name: Commit bounded repair to task branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/CookLogForm.tsx src/components/CookPlanner.tsx .github/workflows/injection-repair-whitespace.yml
+          git diff --cached --check
+          git commit -m 'fix: clear Crucible trailing whitespace findings'
+          git push origin HEAD:agent/crucible-precheck-repair-20260828
