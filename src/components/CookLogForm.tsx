@@ -1114,7 +1114,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
   return (
     <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 sm:p-8 shadow-2xl w-full max-w-5xl mx-auto mb-12">
-      
+
       {/* Header */}
       <div className="flex items-center justify-between pb-6 border-b border-[#2a2a2a]">
         <div className="flex items-center space-x-3">
@@ -1174,15 +1174,15 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
       )}
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-6">
-        
+
         {/* Form Tab Navigation */}
         <div className="flex overflow-x-auto no-scrollbar space-x-1.5 sm:space-x-2 pb-2 -mx-1 px-1 touch-pan-x">
           <button
             type="button"
             onClick={() => setFormTab('basics')}
             className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
-              formTab === 'basics' 
-                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+              formTab === 'basics'
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50'
                 : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
             }`}
           >
@@ -1193,8 +1193,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             type="button"
             onClick={() => setFormTab('environment')}
             className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
-              formTab === 'environment' 
-                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+              formTab === 'environment'
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50'
                 : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
             }`}
           >
@@ -1204,8 +1204,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             type="button"
             onClick={() => setFormTab('temps')}
             className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
-              formTab === 'temps' 
-                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+              formTab === 'temps'
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50'
                 : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
             }`}
           >
@@ -1215,8 +1215,8 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
             type="button"
             onClick={() => setFormTab('notes')}
             className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center space-x-1.5 shrink-0 ${
-              formTab === 'notes' 
-                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50' 
+              formTab === 'notes'
+                ? 'bg-orange-500 text-zinc-950 shadow-md ring-2 ring-orange-400/50'
                 : 'bg-[#242424] text-zinc-400 hover:text-white border border-[#2a2a2a]'
             }`}
           >
@@ -1403,7 +1403,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
         {/* ROW 1: BASIC COOK INFO */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          
+
           <div className="md:col-span-2">
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1">
               Cook Title / What is Cook? *
@@ -1476,7 +1476,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
 
         {/* ROW 2: PROTEIN TYPE & CUT */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
+
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-300 mb-1">
               Protein Category
@@ -1719,7 +1719,7 @@ Output ONLY 1-2 concise sentences directly usable as Next Time Notes (no convers
                     </span>
                   )}
                 </label>
-                
+
                 <button
                   type="button"
                   onClick={() => {

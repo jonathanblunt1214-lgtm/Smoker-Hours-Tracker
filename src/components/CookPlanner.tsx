@@ -192,7 +192,7 @@ export const CookPlanner: React.FC<CookPlannerProps> = ({
 
   const [startDateTime, setStartDateTime] = useState<string>(getDefaultStartTime);
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
-  
+
   // Hybrid Cut Selector State
   const [customCutName, setCustomCutName] = useState<string>('');
   const [customProteinType, setCustomProteinType] = useState<string>('Beef');
@@ -558,7 +558,7 @@ END:VCALENDAR`;
         {/* Left Column: Cook Parameters */}
         <div className="lg:col-span-5 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col justify-between">
           <div>
-            <div 
+            <div
               onClick={() => setIsCutParametersOpen((prev) => !prev)}
               className={`flex items-center justify-between cursor-pointer group select-none transition-colors ${
                 isCutParametersOpen ? 'pb-3 border-b border-[#2a2a2a]' : 'pb-0'
@@ -914,7 +914,7 @@ END:VCALENDAR`;
 
         {/* Right Column: Interactive Backwards Timeline */}
         <div className="lg:col-span-7 bg-[#181818] border border-[#2a2a2a] rounded-2xl p-4 sm:p-5 space-y-4 shadow-lg">
-          <div 
+          <div
             onClick={() => setIsCalculatedScheduleOpen((prev) => !prev)}
             className={`flex items-center justify-between cursor-pointer group select-none transition-colors ${
               isCalculatedScheduleOpen ? 'pb-2 border-b border-[#2a2a2a]' : 'pb-0'
@@ -968,7 +968,7 @@ END:VCALENDAR`;
                 <>
                   {/* Timeline Step Cards */}
                   <div className="relative space-y-3 before:absolute before:left-5 before:top-3 before:bottom-3 before:w-0.5 before:bg-[#2a2a2a] pl-2">
-                    
+
                     {/* Step 1: Prep & Dry Brine */}
                     <div className="relative pl-8 bg-[#121212] border border-[#2a2a2a] rounded-xl p-3.5 space-y-1">
                       <div className="absolute left-3.5 top-4 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-zinc-700 border-2 border-zinc-900 z-10"></div>
