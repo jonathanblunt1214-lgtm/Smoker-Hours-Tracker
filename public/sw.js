@@ -1,9 +1,14 @@
 // Smoke Stack Pitmaster - Progressive Web App & Cross-Format Service Worker
-const CACHE_NAME = 'smokestack-shell-v3';
+const CACHE_NAME = 'smokestack-shell-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+  '/apple-touch-icon.png',
+  '/favicon.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -33,12 +38,18 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Navigation strategy: Network first with cache fallback
+  // Navigation strategy: Network first with cache fallback.
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match('/index.html');
-      })
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match('/index.html'))
     );
     return;
   }
@@ -50,32 +61,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-while-revalidate for immutable, content-hashed static assets.
+  // Stale-while-revalidate for static assets. If the device is offline and the
+  // asset is already cached, return the cached copy without failing the app.
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        fetch(event.request).then((networkResponse) => {
+      const networkUpdate = fetch(event.request)
+        .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse.clone()));
           }
-        }).catch(() => {/* Silent offline fallback */});
+          return networkResponse;
+        });
+
+      if (cachedResponse) {
+        networkUpdate.catch(() => {/* Silent offline refresh failure */});
         return cachedResponse;
       }
-      return fetch(event.request);
+
+      return networkUpdate;
     })
   );
 });
 
-// Background Push Notification Event Handling for Mobile PWAs and Browsers
+// Background Push Notification Event Handling for Mobile PWAs and Browsers.
 self.addEventListener('push', (event) => {
   let data = {
     title: '🔥 Smoke Stack Alert',
     body: 'Time to check internal meat temperature & pit status!',
+    url: '/',
   };
 
   if (event.data) {
     try {
-      data = event.data.json();
+      data = { ...data, ...event.data.json() };
     } catch (e) {
       data.body = event.data.text();
     }
@@ -88,9 +106,10 @@ self.addEventListener('push', (event) => {
     vibrate: [200, 100, 200, 100, 400],
     data: data.url || '/',
     actions: [
-      { action: 'open_app', title: 'Open Smoke Log' },
-      { action: 'snooze', title: 'Snooze 10m' }
+      { action: 'open_app', title: 'Open Smoke Stack' }
     ],
+    tag: data.tag || 'smokestack-cook-alert',
+    renotify: true,
     requireInteraction: true,
   };
 
@@ -99,21 +118,34 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// Handle Notification Clicks
+// Open the requested cook/app destination from a mobile notification. Existing
+// PWA windows are navigated before focus so a notification deep link is not lost.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  if (event.action === 'open_app' || !event.action) {
-    event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-        for (const client of clientList) {
-          if (client.url && 'focus' in client) {
-            return client.focus();
-          }
-        }
-        if (clients.openWindow) {
-          return clients.openWindow(event.notification.data || '/');
-        }
-      })
-    );
+
+  const targetUrl = new URL(event.notification.data || '/', self.location.origin);
+  if (targetUrl.origin !== self.location.origin) {
+    targetUrl.href = self.location.origin + '/';
   }
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
+      for (const client of clientList) {
+        if ('navigate' in client && 'focus' in client) {
+          try {
+            await client.navigate(targetUrl.href);
+          } catch {
+            // Some installed-web-app containers may reject navigate; focus the
+            // existing Smoke Stack window rather than dropping the alert.
+          }
+          return client.focus();
+        }
+      }
+
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl.href);
+      }
+      return undefined;
+    })
+  );
 });
