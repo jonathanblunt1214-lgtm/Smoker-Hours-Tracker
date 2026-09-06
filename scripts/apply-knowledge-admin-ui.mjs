@@ -4,7 +4,7 @@ const sourcePath = 'src/components/MasterAdminDashboardModal.tsx';
 const modalOutPath = 'src/components/MasterAdminDashboardModal.trusted.tsx';
 const appTrustedPath = 'src/App.trusted.tsx';
 
-let modal = fs.readFileSync(sourcePath, 'utf8');
+let modal = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
 
 const typeImport = "import { CookLog, FuelLog, SmokerProfile } from '../types';";
 const staticImport = "import { KnowledgeAdminPanel } from './KnowledgeAdminPanel';\n";
@@ -37,7 +37,7 @@ if (!modal.includes('<MeatSourceHarvesterPanel request={authorizedFetch}')) thro
 
 fs.writeFileSync(modalOutPath, modal, 'utf8');
 
-let app = fs.readFileSync(appTrustedPath, 'utf8');
+let app = fs.readFileSync(appTrustedPath, 'utf8').replace(/\r\n/g, '\n');
 const sourceImportPattern = /from ['"]\.\/components\/MasterAdminDashboardModal['"]/;
 if (sourceImportPattern.test(app)) app = app.replace(sourceImportPattern, "from './components/MasterAdminDashboardModal.trusted'");
 if (!app.includes("from './components/MasterAdminDashboardModal.trusted'")) throw new Error('[knowledge-admin-ui] App.trusted Operations import was not redirected');

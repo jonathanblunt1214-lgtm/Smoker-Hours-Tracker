@@ -2,7 +2,7 @@ name: Phase 0 Trust Foundation Gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, SmokeStack-development]
   workflow_dispatch:
 
 permissions:

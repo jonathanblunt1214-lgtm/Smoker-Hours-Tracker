@@ -2,7 +2,7 @@ name: SmokeStack PR Validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, SmokeStack-development]
 
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Enforce AI branch and automation governance
+      - name: Enforce mandatory branch chain
         env:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_BASE_BRANCH: ${{ github.event.pull_request.base.ref }}

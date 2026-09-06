@@ -19,7 +19,7 @@ function replaceRange(input, startMarker, endMarker, replacement, label) {
   return input.slice(0, start) + replacement + '\n\n' + input.slice(end);
 }
 
-let nav = fs.readFileSync(navSourcePath, 'utf8');
+let nav = fs.readFileSync(navSourcePath, 'utf8').replace(/\r\n/g, '\n');
 nav = nav.replace("import { isMasterAdmin } from '../utils/adminAuth';\n", '');
 nav = requiredReplace(
   nav,
@@ -29,7 +29,7 @@ nav = requiredReplace(
 );
 fs.writeFileSync(navOutPath, nav, 'utf8');
 
-let app = fs.readFileSync(appSourcePath, 'utf8');
+let app = fs.readFileSync(appSourcePath, 'utf8').replace(/\r\n/g, '\n');
 app = app.replace("import { MASTER_ADMIN_EMAIL } from './utils/adminAuth';\n", '');
 app = app.replace('  isMasterAdminVerifiedDevice,\n', '');
 app = app.replace("import { initMasterLiveUpdateRunner } from './services/masterLiveUpdateService';\n", '');

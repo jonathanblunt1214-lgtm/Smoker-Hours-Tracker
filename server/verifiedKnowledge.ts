@@ -23,7 +23,11 @@ function serializeRecord(doc: any) {
 }
 function verifiedStructuredSpecs(specs: any) {
   if (!specs || typeof specs !== 'object') return {};
-  return Object.fromEntries(Object.entries(specs).map(([field, metric]: any) => [field, metric?.status === 'candidate' ? { ...metric, status: 'verified', verifiedAt: new Date().toISOString() } : metric]));
+  return Object.fromEntries(Object.entries(specs).map(([field, metric]: any) => {
+    if (metric?.status === 'candidate') return [field, { ...metric, status: 'verified', verifiedAt: new Date().toISOString() }];
+    if (metric?.status === 'observed_candidate') return [field, { ...metric, status: 'observed', reviewedAt: new Date().toISOString() }];
+    return [field, metric];
+  }));
 }
 
 verifiedKnowledgeRouter.get('/', requireAuth, async (req: AuthenticatedRequest, res) => {
@@ -79,7 +83,7 @@ verifiedKnowledgeRouter.post('/harvest', requireAuth, requireAdmin, async (req: 
     if (duplicate) return res.status(409).json({ error: 'This source/title already exists in the knowledge queue or published catalog.', id: duplicate.id });
     const ref = await adminDb.collection('verifiedKnowledge').add({
       type: candidate.type, title: candidate.title, claims: candidate.claims, structuredSpecs: candidate.structuredSpecs,
-      source: { url: candidate.sourceUrl, type: candidate.sourceType, publisher: candidate.publisher, retrievedAt: new Date().toISOString(), harvested: true, harvestQuery: { mode, value } },
+      source: { url: candidate.sourceUrl, type: candidate.sourceType, publisher: candidate.publisher, retrievedAt: new Date().toISOString(), contentSha256: candidate.sourceContentHash, harvested: true, harvestQuery: { mode, value } },
       status: 'pending_review', submittedBy: req.user!.uid, submittedAt: FieldValue.serverTimestamp(), reviewedBy: null, reviewedAt: null, reviewNote: null,
     });
     res.status(201).json({ ok: true, id: ref.id, status: 'pending_review', candidate });
@@ -102,8 +106,17 @@ verifiedKnowledgeRouter.post('/:id/review', requireAuth, requireAdmin, async (re
   if (!snap.exists) return res.status(404).json({ error: 'Knowledge candidate not found.' });
   const record: any = snap.data();
   if (record?.status !== 'pending_review') return res.status(409).json({ error: `Only pending_review records can be reviewed. Current status: ${record?.status || 'unknown'}.` });
-  if (!record?.source?.url || !record?.source?.type || (!Array.isArray(record?.claims) && !record?.structuredSpecs)) return res.status(409).json({ error: 'Candidate is missing required provenance and cannot be published.' });
+  const isCommunityObservation = record?.source?.type === 'user_observation' && Boolean(record?.submittedBy);
+  if ((!record?.source?.url && !isCommunityObservation) || !record?.source?.type || (!Array.isArray(record?.claims) && !record?.structuredSpecs)) return res.status(409).json({ error: 'Candidate is missing required provenance and cannot be published.' });
   const status = decision === 'publish' ? 'published' : 'rejected';
-  await ref.set({ status, structuredSpecs: decision === 'publish' ? verifiedStructuredSpecs(record.structuredSpecs) : record.structuredSpecs || {}, reviewedBy: req.user!.uid, reviewedAt: FieldValue.serverTimestamp(), reviewNote: clean(req.body?.note) || null }, { merge: true });
+  await ref.set({
+    status,
+    structuredSpecs: decision === 'publish' ? verifiedStructuredSpecs(record.structuredSpecs) : record.structuredSpecs || {},
+    provenanceClass: decision === 'publish' && isCommunityObservation ? 'USER_OBSERVED' : record.provenanceClass,
+    verificationScope: decision === 'publish' && isCommunityObservation ? 'reviewed_community_observation' : record.verificationScope,
+    reviewedBy: req.user!.uid,
+    reviewedAt: FieldValue.serverTimestamp(),
+    reviewNote: clean(req.body?.note) || null,
+  }, { merge: true });
   res.json({ ok: true, id: req.params.id, status });
 });

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const appPath = 'src/App.trusted.tsx';
-let app = fs.readFileSync(appPath, 'utf8');
+let app = fs.readFileSync(appPath, 'utf8').replace(/\r\n/g, '\n');
 const overviewImport = "import { SmokerOverviewBanner } from './components/SmokerOverviewBanner';";
 if (!app.includes("./components/BrowserInstallShareWidget")) {
   app = app.replace(overviewImport, `${overviewImport}\nimport { BrowserInstallShareWidget } from './components/BrowserInstallShareWidget';\nimport { startAuthoritativePlatformSync } from './lib/platformSync';`);
@@ -40,7 +40,7 @@ if (!app.includes('<BrowserInstallShareWidget')) {
 
 const fuelSource = 'src/components/FuelDatabaseExplorer.tsx';
 const fuelOut = 'src/components/FuelDatabaseExplorer.trusted.tsx';
-let fuel = fs.readFileSync(fuelSource, 'utf8');
+let fuel = fs.readFileSync(fuelSource, 'utf8').replace(/\r\n/g, '\n');
 if (!fuel.includes("../utils/costUnits")) fuel = fuel.replace("import React, { useState, useMemo } from 'react';", "import React, { useState, useMemo } from 'react';\nimport { calculateCostPerLb } from '../utils/costUnits';");
 fuel = fuel.replace("const costPerLb = restockBagLbs > 0 ? Number((restockPrice / restockBagLbs).toFixed(2)) : 0.75;", "const calculatedCostPerLb = calculateCostPerLb(restockPrice, restockBagLbs);\n    if (calculatedCostPerLb === null) return;\n    const costPerLb = Number(calculatedCostPerLb.toFixed(2));");
 if (fuel.includes(': 0.75;')) throw new Error('[cost-units] fabricated cost fallback remains');

@@ -2,7 +2,7 @@ name: Android build
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, SmokeStack-development]
     paths:
       - 'android/**'
       - 'capacitor.config.*'
@@ -10,7 +10,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/android-build.yml'
   push:
-    branches: [main]
+    branches: [main, SmokeStack-development]
     paths:
       - 'android/**'
       - 'capacitor.config.*'

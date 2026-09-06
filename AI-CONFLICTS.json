@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "nativeState": {
+    "assimilated": true,
+    "source": "governingDocuments/AI-CONFLICTS.json",
+    "role": "active-conflict-ledger"
+  },
+  "assimilationPolicy": {
+    "allAuthorizedAgentsWorkTogether": true,
+    "nativeGovernanceControls": true,
+    "preserveConcurrentWork": true,
+    "doNotWidenAuthority": true,
+    "doNotDirectlyModifyMain": true
+  },
+  "conflicts": [],
+  "resolutionRules": {
+    "recordOnlyGenuineConflicts": true,
+    "preserveBothSidesUntilResolved": true,
+    "reconcileCompatibleChanges": true,
+    "continueSafeNonConflictingWorkWhenPermitted": true,
+    "noForcePush": true,
+    "noSilentOverwrite": true,
+    "noAuthorityExpansion": true,
+    "unresolvedConflictDecision": "native-owner-or-project-authority"
+  }
+}

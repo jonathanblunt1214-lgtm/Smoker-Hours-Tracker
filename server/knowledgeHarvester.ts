@@ -1,4 +1,5 @@
 import { adminDb } from './firebaseAdmin';
+import { createHash } from 'node:crypto';
 import { StructuredSpecMap } from './manufacturerSpecSchema';
 
 export type HarvestInput = { mode: 'url' | 'smoker' | 'fuel' | 'mod'; value: string; typeHint?: 'smoker' | 'fuel' | 'mod' };
@@ -10,6 +11,7 @@ type HarvestCandidate = {
   sourceType: 'manufacturer' | 'verified_publisher';
   claims: string[];
   structuredSpecs: StructuredSpecMap;
+  sourceContentHash: string;
 };
 
 const MANUFACTURER_DOMAINS = ['pitboss-grills.com','traeger.com','campchef.com','recteq.com','weber.com','masterbuilt.com','greenmountaingrills.com','zgrills.com','charbroil.com','oklahomajoes.com','yodersmokers.com','workhorsepits.com','millscale.co','lonestargrillz.com','horizonbbqsmokers.com','kamadojoe.com','bearmountainbbq.com','bbqlumberjack.com','bbcharcoal.com','jealousdevil.com','kingsford.com','royal-oak.com','cookinpellets.com'];
@@ -79,5 +81,6 @@ export async function harvestKnowledge(input:HarvestInput):Promise<HarvestCandid
   const {html,finalUrl}=await fetchHtml(sourceUrl); if(!allowedHost(hostname(finalUrl))) throw new Error('Source redirected outside the approved manufacturer allowlist.');
   const pageText=textOnly(html); const type=input.typeHint || inferType(pageText,input.mode); const title=titleFromHtml(html)||value; const claims=extractClaims(pageText,type); const structuredSpecs=extractStructuredSpecs(pageText,type,finalUrl,title);
   if(claims.length===0 && Object.keys(structuredSpecs).length===0) throw new Error('No candidate claims or structured metrics could be extracted from this source. Nothing was saved.');
-  return { type,title,publisher:hostname(finalUrl),sourceUrl:finalUrl,sourceType:'manufacturer',claims,structuredSpecs };
+  const sourceContentHash = createHash('sha256').update(pageText).digest('hex');
+  return { type,title,publisher:hostname(finalUrl),sourceUrl:finalUrl,sourceType:'manufacturer',claims,structuredSpecs,sourceContentHash };
 }
