@@ -12,7 +12,7 @@
   "scripts": {
     "generate:release": "node scripts/generate-release-metadata.mjs",
     "generate:secure-server": "node scripts/build-secure-server.mjs && node scripts/apply-chargpt-production-policy.mjs && node scripts/apply-verified-knowledge.mjs && node scripts/apply-chargpt-companion-policy.mjs && node scripts/apply-verified-equipment-boundary.mjs && node scripts/apply-chargpt-capability-contract.mjs",
-    "generate:trusted-client": "node scripts/build-trusted-client.mjs && node scripts/apply-knowledge-admin-ui.mjs && node scripts/apply-platform-integrations.mjs && node scripts/apply-mobile-settings-layout.mjs && node scripts/apply-drive-backup-verification.mjs && node scripts/apply-voice-integration-truth.mjs",
+    "generate:trusted-client": "node scripts/build-trusted-client.mjs && node scripts/apply-theme-preference-fix.mjs && node scripts/apply-knowledge-admin-ui.mjs && node scripts/apply-platform-integrations.mjs && node scripts/apply-mobile-settings-layout.mjs && node scripts/apply-drive-backup-verification.mjs && node scripts/apply-voice-integration-truth.mjs",
     "generate:trusted-storage": "node scripts/build-trusted-storage.mjs",
     "generate:trusted-runtime": "npm run generate:secure-server && npm run generate:trusted-storage && npm run generate:trusted-client",
     "dev": "npm run generate:release && npm run generate:trusted-runtime && tsx server.secure.generated.ts",
