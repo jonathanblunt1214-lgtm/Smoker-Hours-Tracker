@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminAuth, adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAdmin, requireAuth, requireOwner } from './authMiddleware';
-import { getGeminiApiKey, getGeminiModel } from './geminiConfig';
+import { getCharGPTHealth, getCharGPTModel } from './charGPTProvider';
 
 export const adminRolesRouter = Router();
 
@@ -40,11 +40,10 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
     firestoreError = error?.message || 'Firestore health check failed.';
   }
 
-  const vertexConfigured = (process.env.GOOGLE_GENAI_USE_VERTEXAI === 'true' || Boolean(process.env.K_SERVICE))
-    && Boolean(process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT);
-  const aiConfigured = vertexConfigured || Boolean(getGeminiApiKey());
-  const aiProvider = process.env.CHARGPT_PROVIDER || (vertexConfigured ? 'Vertex' : aiConfigured ? 'Gemini' : null);
-  const aiModel = aiConfigured ? getGeminiModel() : null;
+  const aiHealth = getCharGPTHealth();
+  const aiConfigured = aiHealth.configured;
+  const aiProvider = aiHealth.provider;
+  const aiModel = aiConfigured ? getCharGPTModel() : null;
   const commit = process.env.GIT_COMMIT_SHA || process.env.COMMIT_SHA || process.env.SOURCE_VERSION || null;
   const revision = process.env.K_REVISION || null;
 
@@ -115,7 +114,8 @@ adminRolesRouter.get('/health', requireAuth, requireAdmin, async (_req, res) => 
       backup: { status: 'client_managed', detail: 'Google Drive remains an optional user backup/export integration.' },
     },
     chargpt: {
-      status: aiConfigured ? 'ready' : 'needs_setup',
+      status: aiConfigured ? 'configured' : 'needs_setup',
+      connectivity: aiHealth.connectivity,
       provider: aiProvider,
       model: aiModel,
       credentials: aiConfigured ? 'configured' : 'missing',

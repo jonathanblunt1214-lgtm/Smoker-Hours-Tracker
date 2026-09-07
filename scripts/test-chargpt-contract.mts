@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import { CHARGPT_CAPABILITIES, CHARGPT_CONSTITUTION, safeText, validateCharGPTAnswer } from '../server/charGPTPolicy';
 import { DEFAULT_GEMINI_MODEL, getGeminiApiKey, getGeminiModel } from '../server/geminiConfig';
+import './test-chargpt-provider.mts';
 
 test('Gemini configuration uses a stable model and consistent credential aliases', () => {
   assert.equal(DEFAULT_GEMINI_MODEL, 'gemini-2.5-flash');

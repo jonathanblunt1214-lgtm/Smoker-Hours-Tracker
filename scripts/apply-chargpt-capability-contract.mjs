@@ -102,5 +102,30 @@ for (const required of ['CHARGPT_CONSTITUTION', 'hydrateAuthoritativeCharGPTCont
   if (!source.includes(required)) throw new Error(`[chargpt-contract] Verification failed: ${required}`);
 }
 
+requiredReplace(
+  "import { CHARGPT_CONSTITUTION } from './server/charGPTPolicy';",
+  "import { CHARGPT_CONSTITUTION } from './server/charGPTPolicy';\nimport { getCharGPTClient, getCharGPTModel, getCharGPTHealth } from './server/charGPTProvider';",
+  'provider adapter import',
+);
+const chatStart = source.indexOf('const handleCharGPTRequest =');
+const chatEnd = source.indexOf("app.post('/api/chargpt',", chatStart);
+if (chatStart < 0 || chatEnd < chatStart) throw new Error('Missing CharGPT provider boundary');
+let chat = source.slice(chatStart, chatEnd);
+if (!chat.includes('const ai = getGeminiClient();')) throw new Error('Missing CharGPT client');
+chat = chat.replace('const ai = getGeminiClient();', `const ai = getCharGPTClient(getGeminiClient);
+    if (getCharGPTHealth().provider === 'nvidia' && req.body?.image) {
+      return res.status(400).json({ error: 'NVIDIA CharGPT currently supports text only. Remove the image attachment and retry.', availability: 'unsupported_input' });
+    }`);
+chat = chat.replaceAll('model: getGeminiModel()', 'model: getCharGPTModel()');
+chat = chat.replace('tools: [{ googleSearch: {} }],', "...(getCharGPTHealth().provider === 'nvidia' ? {} : { tools: [{ googleSearch: {} }] }),");
+chat = chat.replace("console.warn('Google search tool or primary AI request failed, trying standard call:', searchError?.message || searchError);", "if (getCharGPTHealth().provider === 'nvidia') throw searchError;\n        console.warn('Primary CharGPT request failed; retrying without search.');");
+chat = chat.replace("console.error('Error in CharGPT endpoint:', err);", "console.error('CharGPT request failed.');");
+source = source.slice(0, chatStart) + chat + source.slice(chatEnd);
+requiredReplace(
+  "res.json({ status: 'ok', time: new Date().toISOString() });",
+  "res.json({ status: 'ok', time: new Date().toISOString(), chargpt: getCharGPTHealth() });",
+  'secret-free configuration health',
+);
+
 fs.writeFileSync(targetPath, source, 'utf8');
 console.log('[chargpt-contract] Enforced account-scoped context, capability truth, constitutional prompts, and response validation.');
