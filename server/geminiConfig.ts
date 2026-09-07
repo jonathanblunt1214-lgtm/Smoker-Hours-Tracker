@@ -11,6 +11,6 @@ export function getGeminiApiKey(env: NodeJS.ProcessEnv = process.env): string | 
 
 export function getGeminiModel(env: NodeJS.ProcessEnv = process.env): string {
   return configuredValue(env.GEMINI_MODEL)
-    || configuredValue(env.CHARGPT_MODEL)
+    || (env.CHARGPT_PROVIDER?.trim().toLowerCase() !== 'nvidia' ? configuredValue(env.CHARGPT_MODEL) : undefined)
     || DEFAULT_GEMINI_MODEL;
 }

@@ -47,6 +47,9 @@ jobs:
       - name: Build release
         run: npm run build
 
+      - name: Verify CharGPT provider contracts
+        run: npm run test:chargpt-contract
+
       - id: release_metadata
         name: Read immutable release metadata
         run: node -e 'require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `app_version=${require("./package.json").version}\n`)'
@@ -92,7 +95,9 @@ jobs:
             FIREBASE_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
             APP_VERSION=${{ steps.release_metadata.outputs.app_version }}
             GIT_COMMIT_SHA=${{ github.sha }}
-            CHARGPT_MODEL=gemini-2.5-flash
+            CHARGPT_PROVIDER=nvidia
+            CHARGPT_MODEL=meta/llama-3.1-70b-instruct
+            CHARGPT_BASE_URL=https://integrate.api.nvidia.com/v1
           flags: >-
             --allow-unauthenticated
             --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
@@ -101,11 +106,15 @@ jobs:
             --cpu=1
             --min-instances=0
             --max-instances=5
+            --update-secrets=NVIDIA_API_KEY=NVIDIA_API_KEY:latest
 
       - name: Verify deployed service health
         env:
           SERVICE_URL: ${{ steps.deploy.outputs.url }}
-        run: curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${SERVICE_URL}/api/health"
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 5 "${SERVICE_URL}/api/health" > /tmp/smokestack-health.json
+          node --input-type=module -e 'import fs from "node:fs"; const h = JSON.parse(fs.readFileSync("/tmp/smokestack-health.json", "utf8")); if (h.status !== "ok" || h.chargpt?.provider !== "nvidia" || h.chargpt?.configured !== true) process.exit(1); console.log("Service healthy; NVIDIA configuration present. Live inference is not checked by this probe.");'
 
       - name: Record deployment result
         env:
