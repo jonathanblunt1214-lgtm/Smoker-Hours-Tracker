@@ -62,6 +62,7 @@ jobs:
         if: steps.health.outcome != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SERVICE_URL: ${{ steps.service.outputs.url }}
         shell: bash
@@ -85,6 +86,7 @@ jobs:
         if: steps.health.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail

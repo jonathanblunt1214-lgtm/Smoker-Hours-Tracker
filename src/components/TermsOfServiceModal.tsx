@@ -31,6 +31,8 @@ interface TermsOfServiceModalProps {
   onAccept?: () => void;
   accepted?: boolean;
   onOpenSettingsGranular?: () => void;
+  /** Provider actually receiving account context, as reported by the server. */
+  aiProvider?: string;
 }
 
 export const TermsOfServiceModal: React.FC<TermsOfServiceModalProps> = ({
@@ -38,6 +40,7 @@ export const TermsOfServiceModal: React.FC<TermsOfServiceModalProps> = ({
   onClose,
   onAccept,
   accepted = false,
+  aiProvider,
   onOpenSettingsGranular,
 }) => {
   if (!isOpen) return null;
@@ -158,7 +161,14 @@ export const TermsOfServiceModal: React.FC<TermsOfServiceModalProps> = ({
                   <span>6. Network & Grounded Search API</span>
                 </div>
                 <p className="text-[11px] text-zinc-400 leading-normal">
-                  Required for live Gemini search grounding, online USDA/NAMP meat cut catalog verification, and AI Federated contributions.
+                  {/* PLACEHOLDER COPY - OWNER APPROVAL REQUIRED before release.
+                      The provider name is read from the server so this can never
+                      again name a provider that is not the one receiving data. */}
+                  Online catalog verification and AI Federated contributions.{' '}
+                  {aiProvider
+                    ? `Your cook logs, saved CharGPT memory, smoker profile and account name are sent to ${aiProvider} to answer your questions.`
+                    : 'Your cook logs, saved CharGPT memory, smoker profile and account name are sent to the configured AI provider to answer your questions.'}{' '}
+                  Live web search grounding applies only when the active provider supports it.
                 </p>
               </div>
             </div>

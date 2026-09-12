@@ -3,6 +3,9 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    # main only accepts promotions from SmokeStack-development
+    # (scripts/test-agent-governance.mjs), so updates must open there.
+    target-branch: SmokeStack-development
     schedule:
       interval: weekly
       day: monday

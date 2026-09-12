@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { getCharGPTClient, getCharGPTHealth, getCharGPTModel, NVIDIA_BASE_URL } from '../server/charGPTProvider';
+import { getCharGPTClient, getCharGPTDisclosure, getCharGPTHealth, getCharGPTModel, hasCurrentCharGPTConsent, CHARGPT_DISCLOSURE_VERSION, NVIDIA_BASE_URL } from '../server/charGPTProvider';
 import { getGeminiModel } from '../server/geminiConfig';
 
 const env = { CHARGPT_PROVIDER: 'nvidia', CHARGPT_MODEL: 'test-model', NVIDIA_API_KEY: 'test-only-credential' };
@@ -67,4 +67,47 @@ test('generated chat routes use provider adapter while preserving policy, auth a
   assert.match(source, /optionalAuth, hydrateAuthoritativeCharGPTContext, handleCharGPTRequest/);
   assert.match(source, /chargpt: getCharGPTHealth\(\)/);
   assert.match(source, /new GoogleGenAI\(\{ vertexai: true, project, location \}\)/);
+});
+
+test('account context requires a consent naming the current disclosure and provider', () => {
+  const disclosure = getCharGPTDisclosure(env);
+  assert.equal(disclosure.version, CHARGPT_DISCLOSURE_VERSION);
+  assert.equal(disclosure.provider, 'nvidia');
+
+  // Nothing recorded, junk, a stale version, or consent to a different
+  // provider must all fail closed.
+  for (const stale of [
+    undefined, null, {}, 'yes', 42,
+    { version: 'older-disclosure', provider: 'nvidia' },
+    { version: CHARGPT_DISCLOSURE_VERSION, provider: 'Gemini' },
+    { provider: 'nvidia' },
+    { version: CHARGPT_DISCLOSURE_VERSION },
+  ]) {
+    assert.equal(hasCurrentCharGPTConsent(stale, env), false);
+  }
+
+  assert.equal(hasCurrentCharGPTConsent({ version: CHARGPT_DISCLOSURE_VERSION, provider: 'nvidia' }, env), true);
+
+  // Consent recorded for NVIDIA must not authorise a Gemini deployment.
+  assert.equal(hasCurrentCharGPTConsent({ version: CHARGPT_DISCLOSURE_VERSION, provider: 'nvidia' }, {}), false);
+});
+
+test('the context middleware withholds account data until consent is recorded', () => {
+  const source = fs.readFileSync('server/charGPTContext.ts', 'utf8');
+  assert.match(source, /hasCurrentCharGPTConsent/);
+  assert.match(source, /source: 'consent_required'/);
+
+  // The account-data assignments must sit inside the consent branch, not before it.
+  const guard = source.indexOf('hasCurrentCharGPTConsent');
+  for (const injected of ['body.allCookLogs', 'body.charGPTMemory', 'body.smokerProfile', 'body.userAccount']) {
+    assert.ok(source.indexOf(injected) > guard, `${injected} is assigned before the consent gate`);
+  }
+});
+
+test('consent can only be recorded against the disclosure actually shown', () => {
+  const source = fs.readFileSync('server/accountLifecycle.ts', 'utf8');
+  assert.match(source, /ai-consent/);
+  assert.match(source, /requireAuth/);
+  assert.match(source, /req\.body\?\.version !== disclosure\.version \|\| req\.body\?\.provider !== disclosure\.provider/);
+  assert.match(source, /aiProcessingConsent/);
 });
