@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { adminAuth, adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAuth } from './authMiddleware';
 import { isIdentifiableCommunitySubmission } from './accountDeletionPolicy';
+import rateLimit from 'express-rate-limit';
 import { getCharGPTDisclosure } from './charGPTProvider';
 
 export const accountLifecycleRouter = Router();
@@ -32,11 +33,22 @@ async function deleteIdentifiableCommunitySubmissions(uid: string): Promise<numb
   }
 }
 
-accountLifecycleRouter.get('/ai-disclosure', (_req, res) => {
+// Both consent routes are reachable by any signed-in caller and the recording
+// route performs a Firestore write per call, so they are bounded rather than
+// left open to repeated submission.
+const consentRateLimit = rateLimit({
+  windowMs: 60_000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many consent requests. Wait a moment and try again.' },
+});
+
+accountLifecycleRouter.get('/ai-disclosure', consentRateLimit, (_req, res) => {
   res.json({ disclosure: getCharGPTDisclosure() });
 });
 
-accountLifecycleRouter.post('/ai-consent', requireAuth, async (req: AuthenticatedRequest, res) => {
+accountLifecycleRouter.post('/ai-consent', consentRateLimit, requireAuth, async (req: AuthenticatedRequest, res) => {
   const disclosure = getCharGPTDisclosure();
   // The client must echo the disclosure it actually displayed. A mismatch means
   // the user read something other than what is now in force, so it is refused
