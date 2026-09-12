@@ -111,3 +111,31 @@ test('consent can only be recorded against the disclosure actually shown', () =>
   assert.match(source, /req\.body\?\.version !== disclosure\.version \|\| req\.body\?\.provider !== disclosure\.provider/);
   assert.match(source, /aiProcessingConsent/);
 });
+
+test('a stale consent re-opens the disclosure instead of silently disabling personalisation', () => {
+  const app = fs.readFileSync('src/App.tsx', 'utf8');
+
+  // The first-run localStorage flag cannot express "accepted an older
+  // disclosure", so the app must ask the server and re-open on a stale answer.
+  assert.match(app, /\/api\/account\/ai-consent/);
+  assert.match(app, /state\?\.current === false/);
+  assert.match(app, /setIsTermsModalOpen\(true\)/);
+
+  // The provider actually receiving data must reach the disclosure.
+  assert.match(app, /aiProvider=\{aiDisclosure\?\.provider\}/);
+
+  const server = fs.readFileSync('server/accountLifecycle.ts', 'utf8');
+  assert.match(server, /accountLifecycleRouter\.get\('\/ai-consent'/);
+  assert.match(server, /hasCurrentCharGPTConsent/);
+});
+
+test('the disclosure names the real provider and is not placeholder text', () => {
+  const modal = fs.readFileSync('src/components/TermsOfServiceModal.tsx', 'utf8');
+  assert.doesNotMatch(modal, /PLACEHOLDER/i, 'placeholder disclosure copy must not ship');
+  assert.doesNotMatch(modal, /live Gemini search grounding/, 'must not hardcode a provider name');
+  assert.match(modal, /\{aiProvider \|\| 'the configured AI provider'\}/);
+  // It must say what is actually sent, not merely that "data" is sent.
+  for (const disclosed of ['cook logs', 'memory', 'smoker profile', 'account name']) {
+    assert.ok(modal.includes(disclosed), `disclosure does not mention ${disclosed}`);
+  }
+});

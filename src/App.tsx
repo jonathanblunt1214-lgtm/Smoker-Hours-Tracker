@@ -22,7 +22,7 @@ import { checkAndUpdateRetailerPricesOnline } from './utils/retailerPriceSync';
 import { RecipeSuggestion } from './data/recipeSuggestions';
 import { INITIAL_SMOKER_PROFILE } from './data/mockData';
 import { APP_NAME, AI_NAME, AI_PITMASTER_NAME } from './constants/appName';
-import { initAuth, saveToGoogleDrive, getAccessToken, logout } from './lib/driveSync';
+import { auth, initAuth, saveToGoogleDrive, getAccessToken, logout } from './lib/driveSync';
 import { loadUserBundleFromFirestore, saveUserBundleToFirestore, SyncStateStatus } from './lib/firestoreData';
 import { MASTER_ADMIN_EMAIL } from './utils/adminAuth';
 import { Navbar, AppTab, SettingsDestination } from './components/Navbar';
@@ -274,10 +274,33 @@ export default function App() {
   // User Auth & Remember Me Session State
   const [userSession, setUserSession] = useState<UserAuthSession | null>(() => getActiveUserSession(null));
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(() => !getActiveUserSession(null));
+  const [aiDisclosure, setAiDisclosure] = useState<{ version: string; provider: string } | null>(null);
   const [isTermsModalOpen, setIsTermsModalOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('pitmaster_terms_accepted') === null;
   });
+
+  // A first-run localStorage flag cannot tell us whether the disclosure the user
+  // accepted still covers what the server now sends, and the modal only opened
+  // when that flag was absent. Ask the server on sign-in and re-open the
+  // disclosure when the recorded consent is stale, otherwise anyone who
+  // accepted an earlier version could never restore personalised answers.
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (!user) return;
+      try {
+        const response = await authorizedApiFetch('/api/account/ai-consent');
+        if (!response.ok) return;
+        const state = await response.json();
+        if (state?.disclosure) setAiDisclosure(state.disclosure);
+        if (state?.current === false) setIsTermsModalOpen(true);
+      } catch {
+        // Offline or unreachable: leave the current state alone rather than
+        // nagging. The server still withholds account data until consent lands.
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Auto-sync session when currentUser email changes or on initial launch
   useEffect(() => {
@@ -1340,6 +1363,7 @@ export default function App() {
       {/* Permissions & Terms of Service Modal upon initial opening */}
       <TermsOfServiceModal
         isOpen={isTermsModalOpen}
+        aiProvider={aiDisclosure?.provider}
         onClose={() => setIsTermsModalOpen(false)}
         onAccept={async () => {
           localStorage.setItem('pitmaster_terms_accepted', 'true');
