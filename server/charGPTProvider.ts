@@ -3,6 +3,24 @@ import { getGeminiApiKey, getGeminiModel } from './geminiConfig';
 export const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1';
 export const NVIDIA_MODEL = 'meta/llama-3.1-70b-instruct';
 
+// Bump whenever the disclosed processing changes: a different provider or
+// endpoint, or a change to what account data is sent. A consent recorded
+// against an older version no longer authorises sending account context.
+export const CHARGPT_DISCLOSURE_VERSION = '2026-09-nvidia-1';
+
+export function getCharGPTDisclosure(env: NodeJS.ProcessEnv = process.env) {
+  return { version: CHARGPT_DISCLOSURE_VERSION, provider: getCharGPTHealth(env).provider };
+}
+
+// Consent is only current when it names both the disclosure the user actually
+// read and the provider now in use, so switching providers re-gates the data.
+export function hasCurrentCharGPTConsent(consent: unknown, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!consent || typeof consent !== 'object') return false;
+  const recorded = consent as { version?: unknown; provider?: unknown };
+  const disclosure = getCharGPTDisclosure(env);
+  return recorded.version === disclosure.version && recorded.provider === disclosure.provider;
+}
+
 export function getCharGPTModel(env: NodeJS.ProcessEnv = process.env): string {
   return env.CHARGPT_PROVIDER?.trim().toLowerCase() === 'nvidia'
     ? env.CHARGPT_MODEL?.trim() || NVIDIA_MODEL : getGeminiModel(env);

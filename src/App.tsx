@@ -49,6 +49,7 @@ import { MasterAdminDashboardModal } from './components/MasterAdminDashboardModa
 import { AppDownloadStoreModal } from './components/AppDownloadStoreModal';
 import { UserLoginGateModal } from './components/UserLoginGateModal';
 import { TermsOfServiceModal } from './components/TermsOfServiceModal';
+import { authorizedApiFetch } from './lib/authorizedApi';
 import { SmokeStackSplashScreen } from './components/SmokeStackSplashScreen';
 import { FireTVToastOverlay } from './components/FireTVToastOverlay';
 import { GoogleHomeToastOverlay } from './components/GoogleHomeToastOverlay';
@@ -926,7 +927,7 @@ export default function App() {
     } ${
       isColorblind ? 'colorblind-contrast' : ''
     }`}>
-      
+
       {/* Toast Banner */}
       {notification && (
         <div className="fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] right-3 z-50 bg-[#1a1a1a] text-orange-400 px-4 py-3 rounded-xl font-medium text-xs shadow-2xl flex items-center space-x-2 border border-[#2a2a2a] md:bottom-5 md:right-5">
@@ -1340,10 +1341,24 @@ export default function App() {
       <TermsOfServiceModal
         isOpen={isTermsModalOpen}
         onClose={() => setIsTermsModalOpen(false)}
-        onAccept={() => {
+        onAccept={async () => {
           localStorage.setItem('pitmaster_terms_accepted', 'true');
           setIsTermsModalOpen(false);
-          showToast('✅ Terms & App Permissions accepted!');
+          // localStorage is per-device and invisible to the server, so it cannot
+          // authorise anything. Record the acceptance against the disclosure that
+          // was actually shown; until that lands, the server sends no account
+          // context to the AI provider and CharGPT answers general guidance only.
+          try {
+            const shown = await (await fetch('/api/account/ai-disclosure')).json();
+            const recorded = await authorizedApiFetch('/api/account/ai-consent', {
+              method: 'POST',
+              body: JSON.stringify(shown?.disclosure || {}),
+            });
+            if (!recorded.ok) throw new Error('not recorded');
+            showToast('✅ Terms & App Permissions accepted!');
+          } catch {
+            showToast('✅ Terms accepted on this device. Personalised CharGPT stays off until your acceptance reaches the server.');
+          }
         }}
       />
 

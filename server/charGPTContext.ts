@@ -2,6 +2,7 @@ import { NextFunction, Response } from 'express';
 import { AuthenticatedRequest } from './authMiddleware';
 import { adminDb } from './firebaseAdmin';
 import { CHARGPT_CAPABILITIES, safeText, validateCharGPTAnswer } from './charGPTPolicy';
+import { getCharGPTDisclosure, hasCurrentCharGPTConsent } from './charGPTProvider';
 
 const MAX_HISTORY_RECORDS = 100;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,160}$/;
@@ -51,24 +52,40 @@ export async function hydrateAuthoritativeCharGPTContext(req: AuthenticatedReque
       const userRef = adminDb.collection('users').doc(req.user.uid);
       const userSnap = await userRef.get();
       const account = userSnap.exists ? userSnap.data() || {} : {};
-      const selectedCookId = safeText(body.selectedCookId, 160);
-      let rawCooks: any[] = [];
-      let scope = 'latest_authoritative_records';
-      if (selectedCookId && selectedCookId !== 'ALL_LOGS' && SAFE_ID.test(selectedCookId)) {
-        const selected = await userRef.collection('cookLogs').doc(selectedCookId).get();
-        if (selected.exists) rawCooks = [{ id: selected.id, ...selected.data() }];
-        scope = 'selected_authoritative_cook';
+      // Account context is only sent once the user has accepted the disclosure
+      // naming the provider that will actually receive it. Without a current
+      // consent the request still works, but degrades to general guidance.
+      if (!hasCurrentCharGPTConsent((account as any)?.aiProcessingConsent)) {
+        context = {
+          authenticated: true,
+          source: 'consent_required',
+          consentRequired: true,
+          disclosure: getCharGPTDisclosure(),
+          cookRecordCount: 0,
+          historyLimit: 0,
+          memoryRuleCount: 0,
+          exclusions: ['account_data', 'saved_memory', 'community_pool', 'equipment_control'],
+        };
       } else {
-        const snapshot = await userRef.collection('cookLogs').limit(MAX_HISTORY_RECORDS).get();
-        rawCooks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const selectedCookId = safeText(body.selectedCookId, 160);
+        let rawCooks: any[] = [];
+        let scope = 'latest_authoritative_records';
+        if (selectedCookId && selectedCookId !== 'ALL_LOGS' && SAFE_ID.test(selectedCookId)) {
+          const selected = await userRef.collection('cookLogs').doc(selectedCookId).get();
+          if (selected.exists) rawCooks = [{ id: selected.id, ...selected.data() }];
+          scope = 'selected_authoritative_cook';
+        } else {
+          const snapshot = await userRef.collection('cookLogs').limit(MAX_HISTORY_RECORDS).get();
+          rawCooks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        }
+        const cooks = rawCooks.map(sanitizeCook).filter(Boolean);
+        body.allCookLogs = cooks;
+        body.cookContext = cooks.length === 1 ? cooks[0] : undefined;
+        body.charGPTMemory = approvedMemory(account.charGPTMemory);
+        body.smokerProfile = account.profile && typeof account.profile === 'object' ? { ...account.profile, userEntered: true, provenance: { type: 'user_data', status: 'verified_account_scope' } } : undefined;
+        body.userAccount = account.userAccount && typeof account.userAccount === 'object' ? { name: safeText(account.userAccount.name, 80), title: safeText(account.userAccount.title, 80) } : undefined;
+        context = { authenticated: true, source: 'firestore_authoritative_account', scope, cookRecordCount: cooks.length, historyLimit: scope === 'latest_authoritative_records' ? MAX_HISTORY_RECORDS : 1, memoryRuleCount: body.charGPTMemory?.learnedRules?.length || 0, loadedAt: new Date().toISOString(), exclusions: ['unapproved_memory', 'client_supplied_account_facts', 'community_pool', 'equipment_control'] };
       }
-      const cooks = rawCooks.map(sanitizeCook).filter(Boolean);
-      body.allCookLogs = cooks;
-      body.cookContext = cooks.length === 1 ? cooks[0] : undefined;
-      body.charGPTMemory = approvedMemory(account.charGPTMemory);
-      body.smokerProfile = account.profile && typeof account.profile === 'object' ? { ...account.profile, userEntered: true, provenance: { type: 'user_data', status: 'verified_account_scope' } } : undefined;
-      body.userAccount = account.userAccount && typeof account.userAccount === 'object' ? { name: safeText(account.userAccount.name, 80), title: safeText(account.userAccount.title, 80) } : undefined;
-      context = { authenticated: true, source: 'firestore_authoritative_account', scope, cookRecordCount: cooks.length, historyLimit: scope === 'latest_authoritative_records' ? MAX_HISTORY_RECORDS : 1, memoryRuleCount: body.charGPTMemory?.learnedRules?.length || 0, loadedAt: new Date().toISOString(), exclusions: ['unapproved_memory', 'client_supplied_account_facts', 'community_pool', 'equipment_control'] };
     } catch (error) {
       console.error('[CharGPT] Authoritative context load failed', error);
       return res.status(503).json({ error: 'CharGPT could not verify your SmokeStack account context. No account-based answer was generated.', availability: 'context_unavailable', capabilities: CHARGPT_CAPABILITIES });
