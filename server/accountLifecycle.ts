@@ -3,7 +3,7 @@ import { adminAuth, adminDb } from './firebaseAdmin';
 import { AuthenticatedRequest, requireAuth } from './authMiddleware';
 import { isIdentifiableCommunitySubmission } from './accountDeletionPolicy';
 import rateLimit from 'express-rate-limit';
-import { getCharGPTDisclosure } from './charGPTProvider';
+import { getCharGPTDisclosure, hasCurrentCharGPTConsent } from './charGPTProvider';
 
 export const accountLifecycleRouter = Router();
 
@@ -46,6 +46,26 @@ const consentRateLimit = rateLimit({
 
 accountLifecycleRouter.get('/ai-disclosure', consentRateLimit, (_req, res) => {
   res.json({ disclosure: getCharGPTDisclosure() });
+});
+
+// Lets the client discover that a previously accepted disclosure no longer
+// covers the processing in force. Without this the app cannot know to re-ask,
+// and a user who accepted an older disclosure could never restore personalised
+// answers.
+accountLifecycleRouter.get('/ai-consent', consentRateLimit, requireAuth, async (req: AuthenticatedRequest, res) => {
+  const disclosure = getCharGPTDisclosure();
+  try {
+    const snap = await adminDb.collection('users').doc(req.user!.uid).get();
+    const recorded = snap.exists ? (snap.data() || {}).aiProcessingConsent : undefined;
+    return res.json({
+      current: hasCurrentCharGPTConsent(recorded),
+      disclosure,
+      recordedVersion: (recorded as any)?.version ?? null,
+      recordedProvider: (recorded as any)?.provider ?? null,
+    });
+  } catch {
+    return res.status(503).json({ error: 'Consent state could not be read.', disclosure });
+  }
 });
 
 accountLifecycleRouter.post('/ai-consent', consentRateLimit, requireAuth, async (req: AuthenticatedRequest, res) => {

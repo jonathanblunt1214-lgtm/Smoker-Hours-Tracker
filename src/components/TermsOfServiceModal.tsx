@@ -161,14 +161,24 @@ export const TermsOfServiceModal: React.FC<TermsOfServiceModalProps> = ({
                   <span>6. Network & Grounded Search API</span>
                 </div>
                 <p className="text-[11px] text-zinc-400 leading-normal">
-                  {/* PLACEHOLDER COPY - OWNER APPROVAL REQUIRED before release.
-                      The provider name is read from the server so this can never
-                      again name a provider that is not the one receiving data. */}
-                  Online catalog verification and AI Federated contributions.{' '}
-                  {aiProvider
-                    ? `Your cook logs, saved CharGPT memory, smoker profile and account name are sent to ${aiProvider} to answer your questions.`
-                    : 'Your cook logs, saved CharGPT memory, smoker profile and account name are sent to the configured AI provider to answer your questions.'}{' '}
-                  Live web search grounding applies only when the active provider supports it.
+                  {/* The provider name is read from the server, so this can never
+                      name a provider other than the one actually receiving data. */}
+                  When you ask {AI_PITMASTER_NAME} something while signed in, {APP_NAME} sends your
+                  saved cook logs, your approved {AI_NAME} memory, your smoker profile and your
+                  account name to{' '}
+                  <strong className="text-white">{aiProvider || 'the configured AI provider'}</strong>{' '}
+                  so the answer can use your own data. That provider processes the request on its own
+                  systems, under its own terms — {APP_NAME} does not control how long it keeps the
+                  request. Nothing is sent until you accept this, and if you decline you still get
+                  general guidance, just not answers based on your logs.
+                </p>
+                <p className="text-[11px] text-zinc-400 leading-normal">
+                  If the provider {APP_NAME} uses ever changes, you will be asked again before
+                  anything is sent to the new one. Live web search grounding is only available when
+                  the active provider supports it; when it does not, answers are labelled as not
+                  web-verified and you should confirm cooking temperatures against an authoritative
+                  food-safety source. This section also covers online USDA/NAMP catalog verification
+                  and AI Federated contributions.
                 </p>
               </div>
             </div>
