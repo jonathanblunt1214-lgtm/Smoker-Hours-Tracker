@@ -96,6 +96,10 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
   const [webSearchResult, setWebSearchResult] = useState<string | null>(null);
   const [webSearchTerm, setWebSearchTerm] = useState<string>('');
   const [webSearchGrounding, setWebSearchGrounding] = useState<any[]>([]);
+  // Provenance of the current result. 'grounded' means live web sources backed it;
+  // 'ungrounded' means the model answered without retrieval; 'unavailable' means
+  // the lookup failed and nothing was retrieved.
+  const [webSearchProvenance, setWebSearchProvenance] = useState<'grounded' | 'ungrounded' | 'unavailable' | null>(null);
 
   // Function to search web for custom typed cuts
   const handleSearchWebRecipes = async (queryToSearch?: string) => {
@@ -106,6 +110,7 @@ export const RecipeSuggestions: React.FC<RecipeSuggestionsProps> = ({
     setWebSearchTerm(query);
     setWebSearchResult(null);
     setWebSearchGrounding([]);
+    setWebSearchProvenance(null);
 
     let rawText = '';
     let grounding: any[] = [];
@@ -142,16 +147,18 @@ Return a complete, step-by-step smoking guide including:
     }
 
     if (!rawText) {
-      rawText = `🔎 Online Web Recipe Research for "${query}":
-
-• Target Pit Temperature: 225°F - 250°F
-• Target Finished Internal Temp: 165°F - 203°F (depending on lean vs fatty cut)
-• Recommended Wood Pairings: Oak, Pecan, Hickory, or Apple Wood
-• Recommended Rub Profile: Coarse Salt, 16-mesh Black Pepper, Garlic Powder, Smoked Paprika, & Brown Sugar
-• Stall & Wrap Strategy: Wrap at 160°F - 165°F in peach butcher paper with beef tallow or butter; finish until probe tender.
-• Rest Window: Minimum 45-90 minutes in an insulated cooler before slicing across the grain.`;
+      // Never fabricate research. A failed lookup is reported as a failure; it is
+      // not dressed up as retrieved guidance and it is not cached as a recipe.
+      setWebSearchProvenance('unavailable');
+      setWebSearchResult(
+        `No recipe lookup completed for "${query}".\n\nThe assistant could not be reached, so nothing was retrieved and nothing was saved. Check your connection and try again.`
+      );
+      setWebSearchGrounding([]);
+      setIsSearchingWeb(false);
+      return;
     }
 
+    setWebSearchProvenance(grounding.length > 0 ? 'grounded' : 'ungrounded');
     setWebSearchResult(rawText);
     setWebSearchGrounding(grounding);
 
@@ -554,7 +561,15 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
               <div className="flex items-center justify-between pb-3 border-b border-[#2a2a2a]">
                 <div className="flex items-center space-x-2 text-orange-400 font-bold text-xs sm:text-sm">
                   <Bot className="w-5 h-5 text-orange-400" />
-                  <span>{AI_PITMASTER_NAME} Online Web Recipe Search Results for "{webSearchTerm}"</span>
+                  <span>
+                    {AI_PITMASTER_NAME}{' '}
+                    {webSearchProvenance === 'grounded'
+                      ? 'Web-Grounded Recipe Results'
+                      : webSearchProvenance === 'unavailable'
+                        ? 'Recipe Lookup Unavailable'
+                        : 'Recipe Guidance (Not Web-Verified)'}{' '}
+                    for "{webSearchTerm}"
+                  </span>
                 </div>
                 <button
                   type="button"
@@ -571,9 +586,9 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
               {isSearchingWeb ? (
                 <div className="py-8 flex flex-col items-center justify-center space-y-3 text-zinc-400 text-xs">
                   <Loader2 className="w-7 h-7 animate-spin text-orange-400" />
-                  <span className="font-medium text-zinc-300">Searching live online competition recipes for "{webSearchTerm}" via Google Search...</span>
+                  <span className="font-medium text-zinc-300">Looking up smoking guidance for "{webSearchTerm}"...</span>
                   <p className="text-[11px] text-zinc-500 max-w-md text-center">
-                    Fetching target smoking temperatures, wood pellet pairings, rub formulas, and stall/wrap advice.
+                    Requesting target smoking temperatures, wood pellet pairings, rub formulas, and stall/wrap advice. Sources are listed below only when the answer is actually web-grounded.
                   </p>
                 </div>
               ) : (
@@ -581,6 +596,18 @@ Provide concise, expert advice for cooking "${recipe.title}" tailored specifical
                   <div className="bg-[#1a1a1a] p-4 rounded-xl border border-[#2a2a2a] text-xs text-zinc-200 whitespace-pre-line leading-relaxed font-sans">
                     {webSearchResult}
                   </div>
+
+                  {webSearchProvenance === 'ungrounded' && (
+                    <div className="text-[11px] text-amber-200 bg-amber-500/10 p-3 rounded-lg border border-amber-500/40 space-y-1">
+                      <span className="font-bold text-amber-300 block">⚠️ Not web-verified</span>
+                      <p>
+                        No live web sources backed this answer, so it was not drawn from published recipes.
+                        Treat every temperature and time here as a starting point rather than verified guidance,
+                        and confirm safe finished internal temperatures against an authoritative food-safety
+                        source — especially for poultry and wild game.
+                      </p>
+                    </div>
+                  )}
 
                   {webSearchGrounding && webSearchGrounding.length > 0 && (
                     <div className="text-[11px] text-zinc-400 bg-[#161616] p-3 rounded-lg border border-[#2a2a2a] space-y-1">
