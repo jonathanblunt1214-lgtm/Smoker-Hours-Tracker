@@ -52,7 +52,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "5.0.1",
+    "@firebase/rules-unit-testing": "5.0.2",
     "@types/express": "^4.17.21",
     "@types/node": "^26.2.0",
     "@types/pdf-parse": "^1.1.5",
