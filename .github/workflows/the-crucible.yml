@@ -16,9 +16,9 @@ permissions:
 jobs:
   crucible:
     name: The Crucible
-    uses: 6076446993/The-Crucible/.github/workflows/the-crucible.yml@234cc93f476c6d800254a5450192caa48949317e
+    uses: 6076446993/The-Crucible/.github/workflows/the-crucible.yml@2bf9e86b76f8555465f59560112d0ceba9b47ea2
     with:
-      core_ref: 234cc93f476c6d800254a5450192caa48949317e
+      core_ref: 2bf9e86b76f8555465f59560112d0ceba9b47ea2
       config_path: .thecrucible.json
       run_workload: ${{ github.event_name != 'schedule' || github.event.schedule == '47 4 * * 0' }}
       weekly_maintenance: ${{ github.event.schedule == '47 4 * * 0' }}
